@@ -13,18 +13,18 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]
 
-    # Database
-    DATABASE_URL: str
+    # Database (optional in dev — uses in-memory store)
+    DATABASE_URL: str = "sqlite:///./laura_dev.db"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
 
     # Auth
-    JWT_SECRET: str
+    JWT_SECRET: str = "dev-secret-change-in-production"
     JWT_EXPIRY_HOURS: int = 8
 
-    # Claude API
-    ANTHROPIC_API_KEY: str
+    # Claude API (get from manager — optional during dev)
+    ANTHROPIC_API_KEY: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
     CLAUDE_MAX_TOKENS: int = 500
     ANONYMISE_BEFORE_LLM: bool = True  # EL security requirement
