@@ -1,0 +1,125 @@
+{
+  "name": "LAURA — LOA Submission Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "laura-loa-submit",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "LOA Submitted (webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "position": [100, 300],
+      "notes": "Triggered when a LOA is submitted from the frontend. Backend calls this webhook."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ppt_slide_required }}",
+              "rightValue": true,
+              "operator": {"type": "boolean", "operation": "equals"}
+            }
+          ]
+        }
+      },
+      "id": "check-ppt-required",
+      "name": "PPT required?",
+      "type": "n8n-nodes-base.if",
+      "position": [320, 300],
+      "notes": "LOAs over €50k require a PPT slide. Routes accordingly."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LAURA_BACKEND_URL }}/loa/{{ $json.loa_id }}/validate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "Bearer {{ $env.N8N_API_KEY }}"}
+          ]
+        }
+      },
+      "id": "validate-schema",
+      "name": "Validate schema (backend)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [540, 200],
+      "notes": "Calls backend to run all validation rules: mandatory fields, math check, KPI check, photo rule."
+    },
+    {
+      "parameters": {
+        "channel": "teams",
+        "message": "=📋 New LOA submitted by {{ $json.requestor_email }}\n\nActivity: {{ $json.activity_type }}\nCountry: {{ $json.country }}\nBudget: €{{ $json.fy_2026_total }}\n\nReview: {{ $env.LAURA_APP_URL }}/loa/{{ $json.loa_id }}"
+      },
+      "id": "notify-brand-teams",
+      "name": "Notify global brand teams",
+      "type": "n8n-nodes-base.microsoftTeams",
+      "position": [760, 200],
+      "notes": "Sends Teams message to relevant brand team channel. 5-day review window starts now."
+    },
+    {
+      "parameters": {
+        "amount": 5,
+        "unit": "days"
+      },
+      "id": "wait-5-days",
+      "name": "Wait 5 days (brand window)",
+      "type": "n8n-nodes-base.wait",
+      "position": [980, 200],
+      "notes": "EL requirement: global brands have exactly 5 working days to comment."
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.LAURA_BACKEND_URL }}/loa/{{ $json.loa_id }}/status",
+        "body": {"status": "cmo_review"}
+      },
+      "id": "move-to-cmo",
+      "name": "Move to CMO review",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1200, 200],
+      "notes": "Brand window closed. LOA moves to CMO/CFO review stage."
+    },
+    {
+      "parameters": {
+        "message": "=⏰ Brand review window closed for LOA {{ $json.loa_draft_id }}\n\nReady for your review: {{ $env.LAURA_APP_URL }}/loa/{{ $json.loa_id }}"
+      },
+      "id": "notify-cmo",
+      "name": "Notify CMO (Vanessa)",
+      "type": "n8n-nodes-base.microsoftTeams",
+      "position": [1420, 200],
+      "notes": "Notifies Vanessa/VP that the LOA is ready for sign-off."
+    }
+  ],
+  "connections": {
+    "LOA Submitted (webhook)": {
+      "main": [[{"node": "PPT required?", "type": "main", "index": 0}]]
+    },
+    "PPT required?": {
+      "main": [
+        [{"node": "Validate schema (backend)", "type": "main", "index": 0}],
+        [{"node": "Validate schema (backend)", "type": "main", "index": 0}]
+      ]
+    },
+    "Validate schema (backend)": {
+      "main": [[{"node": "Notify global brand teams", "type": "main", "index": 0}]]
+    },
+    "Notify global brand teams": {
+      "main": [[{"node": "Wait 5 days (brand window)", "type": "main", "index": 0}]]
+    },
+    "Wait 5 days (brand window)": {
+      "main": [[{"node": "Move to CMO review", "type": "main", "index": 0}]]
+    },
+    "Move to CMO review": {
+      "main": [[{"node": "Notify CMO (Vanessa)", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "notes": "LAURA LOA submission → brand review (5 days) → CMO review. Import this JSON directly into n8n."
+}
