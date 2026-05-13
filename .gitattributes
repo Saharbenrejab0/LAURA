@@ -1,0 +1,19 @@
+# Normalize line endings across Windows/Mac/Linux
+* text=auto eol=lf
+
+# Force these to always be LF
+*.py text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.env.example text eol=lf
+
+# Binary — never touch line endings
+*.xlsx binary
+*.pptx binary
+*.png binary
+*.jpg binary
+*.zip binary
