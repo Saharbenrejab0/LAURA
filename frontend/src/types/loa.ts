@@ -121,8 +121,7 @@ export interface AISuggestion {
   description: string
   kpi: string
   tools: string
-  call_id: string
-  success: boolean
+  log_id?: string
 }
 
 // ---- Dropdown reference data ----

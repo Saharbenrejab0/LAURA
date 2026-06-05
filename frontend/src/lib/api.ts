@@ -13,8 +13,10 @@ const api = axios.create({
 
 // Attach JWT token to every request if present
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('laura_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('laura_token')
+    if (token) config.headers.Authorization = `Bearer ${token}`
+  }
   return config
 })
 
@@ -22,7 +24,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    if (err.response?.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('laura_token')
       window.location.href = '/login'
     }
@@ -31,15 +33,33 @@ api.interceptors.response.use(
 )
 
 // ---- Auth ----
+// ---- Auth ----
 export const login = async (email: string, password: string) => {
   const { data } = await api.post('/auth/login', { email, password })
-  localStorage.setItem('laura_token', data.token)
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('laura_token', data.token)
+    localStorage.setItem('laura_user', JSON.stringify(data.user))
+    // Store in cookie for middleware auth guard
+    document.cookie = `laura_token=${data.token}; path=/; max-age=86400`
+  }
   return data
 }
 
 export const logout = () => {
-  localStorage.removeItem('laura_token')
-  window.location.href = '/login'
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('laura_token')
+    localStorage.removeItem('laura_user')
+    document.cookie = 'laura_token=; path=/; max-age=0'
+    window.location.href = '/login'
+  }
+}
+
+export const getStoredUser = (): {
+  id: string; email: string; full_name: string; role: string; cluster: string | null
+} | null => {
+  if (typeof window === 'undefined') return null
+  const raw = localStorage.getItem('laura_user')
+  return raw ? JSON.parse(raw) : null
 }
 
 // ---- LOAs ----
@@ -78,7 +98,8 @@ export const approveLOA = async (id: string, comment?: string): Promise<LOA> => 
 }
 
 export const rejectLOA = async (id: string, reason: string): Promise<LOA> => {
-  const { data } = await api.post(`/loa/${id}/reject`, { reason })
+  // reason goes as query param to match FastAPI signature
+  const { data } = await api.post(`/loa/${id}/reject`, null, { params: { reason } })
   return data
 }
 
@@ -91,11 +112,43 @@ export const getAISuggestion = async (params: {
   fy_total: number
   num_doors: number
 }): Promise<AISuggestion> => {
-  const { data } = await api.post('/loa/suggest', params)
+  // correct endpoint: /loa/ai/suggest
+  const { data } = await api.post('/loa/ai/suggest', {
+    ...params,
+    requestor_email: 'system',
+  })
   return data
 }
 
-// ---- File download ----
+export const validateDescription = async (
+  description: string,
+  activity_type: string,
+): Promise<{
+  is_valid: boolean
+  feedback: string
+  suggested_correction?: string
+  log_id?: string
+}> => {
+  const { data } = await api.post('/loa/ai/validate-description', {
+    description,
+    activity_type,
+  })
+  return data
+}
+
+// ---- File downloads ----
+export const downloadPPT = async (id: string) => {
+  // correct endpoint: /loa/{id}/pptx (not /ppt)
+  const response = await api.get(`/loa/${id}/pptx`, { responseType: 'blob' })
+  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', `LOA_${id}.pptx`)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
 export const downloadExcel = async (id: string) => {
   const response = await api.get(`/loa/${id}/excel`, { responseType: 'blob' })
   const url = window.URL.createObjectURL(new Blob([response.data]))
@@ -107,13 +160,17 @@ export const downloadExcel = async (id: string) => {
   link.remove()
 }
 
-export const downloadPPT = async (id: string) => {
-  const response = await api.get(`/loa/${id}/ppt`, { responseType: 'blob' })
-  const url = window.URL.createObjectURL(new Blob([response.data]))
-  const link = document.createElement('a')
-  link.href = url
-  link.setAttribute('download', `LOA_${id}.pptx`)
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
+// ---- Photos ----
+export const uploadPhoto = async (loaId: string, file: File) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await api.post(`/loa/${loaId}/photos`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
+export const deletePhoto = async (loaId: string, index: number) => {
+  const { data } = await api.delete(`/loa/${loaId}/photos/${index}`)
+  return data
 }

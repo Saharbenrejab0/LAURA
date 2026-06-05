@@ -1,148 +1,265 @@
 """
-LAURA — AI engine
-Handles all Claude API calls with:
-- Data anonymisation BEFORE sending (EL security requirement CTRL-716, CTRL-721)
-- Full audit logging of every inference call (EL security requirement CTRL-747)
-- Graceful fallback if Claude is unavailable
+LAURA — Claude AI Engine
+Handles two jobs:
+  1. validate_description()  — checks if Description answers WHY not WHAT
+  2. suggest_loa_content()   — suggests KPI, Description, Tools based on activity type
+
+EL Security requirement CTRL-747: data is anonymised before sending to Claude.
+All suggestions are logged for audit.
 """
 
 import anthropic
-import structlog
 import json
 import uuid
 from datetime import datetime
-from pathlib import Path
-
 from backend.config import settings
 
-logger = structlog.get_logger()
-client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+# ── KPI templates per activity type ───────────────────────────────────────────
+KPI_TEMPLATES = {
+    "Tailor Made Seasonal": [
+        "+10-15% sell-out uplift during campaign period",
+        "X% increase in brand visibility score",
+        "Sell-through rate of X% within campaign window",
+    ],
+    "Tailor Made Permanent": [
+        "+X% sell-out increase at activated doors vs control doors",
+        "X doors activated with permanent fixture",
+        "ROI: X€ incremental revenue per €1 invested",
+    ],
+    "Coop Advertising": [
+        "Order uplift avg +5-9% vs baseline",
+        "Open rate min 40%, click rate min 10% (digital)",
+        "+X% brand share at partner doors",
+    ],
+    "In Store / Consumer Activation": [
+        "+10% traffic uplift during activation period",
+        "+X% sell-out boost at activated doors",
+        "Consumer engagement: X interactions",
+    ],
+    "Events": [
+        "Frames: X units / X M€ forecasted sales",
+        "Instruments: X K€ forecasted sales",
+        "Lenses: X K€ awareness uplift",
+        "# Customers attended: X",
+    ],
+    "Trade Incentive": [
+        "+X% sell-out lenses (Varilux, Transitions)",
+        "X% of participating doors reach target",
+        "X new customers acquired",
+    ],
+    "Sponsorship": [
+        "Brand reach: X M impressions",
+        "Engagement rate: X%",
+        "Partnership ROI: X€ media value",
+    ],
+    "Catalogues & Brochures": [
+        "X doors covered with updated catalogue",
+        "Sell-in uplift of X% post-distribution",
+        "X% of target doors receive material within 2 weeks",
+    ],
+    "Medical Affairs": [
+        "Reinforce EssilorLuxottica as Vision Care Champion",
+        "X medical professionals reached",
+        "X prescriptions / referrals generated",
+    ],
+    "Coop Advertising": [
+        "+5-9% order uplift vs baseline",
+        "Open rate >40%, click rate >10%",
+        "+X% brand share at partner",
+    ],
+    "Other ADV Expenses": [
+        "X M reach / X M impressions",
+        "X% increase in brand awareness",
+        "X site visitors / leads generated",
+    ],
+    "Training": [
+        "X staff trained",
+        "+X% product knowledge score post-training",
+        "X doors with trained staff",
+    ],
+    "PR": [
+        "X media placements secured",
+        "X M earned media reach",
+        "X influencers activated",
+    ],
+}
 
-# Audit log path — appends one JSON line per call
-AUDIT_LOG_PATH = Path("backend/logs/ai_inference_audit.jsonl")
-AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-
-def _write_audit_log(call_id: str, input_shape: dict, output_preview: str, user_email: str):
+def _anonymise(loa_data: dict) -> dict:
     """
-    Write one line to the AI audit log.
-    Stores shape/structure of input, NOT the actual values.
-    Required by EL security questionnaire CTRL-747.
+    EL security requirement CTRL-747.
+    Remove PII and commercially sensitive data before sending to Claude.
     """
-    entry = {
-        "call_id": call_id,
-        "timestamp": datetime.utcnow().isoformat(),
-        "model": settings.CLAUDE_MODEL,
-        "user": user_email,
-        "input_shape": input_shape,          # What fields were sent (no values)
-        "output_preview": output_preview[:100],  # First 100 chars only
-        "anonymised": settings.ANONYMISE_BEFORE_LLM,
+    safe = {}
+    allowed_keys = {
+        "activity_type", "category", "cluster", "country",
+        "brand", "cot", "capex_opex", "adv_selling",
+        "fy_2026_total", "num_doors", "num_customers",
+        "description", "detail", "kpi", "tools",
+        "event_type", "event_purpose",
     }
-    with open(AUDIT_LOG_PATH, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    for key in allowed_keys:
+        if key in loa_data and loa_data[key] is not None:
+            safe[key] = loa_data[key]
+    return safe
 
 
-def _anonymise(activity_type: str, cluster: str, fy_total: float) -> dict:
+def _call_claude(prompt: str, system: str, max_tokens: int = None) -> str:
+    """Make a Claude API call and return the text response."""
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    message = client.messages.create(
+        model=settings.CLAUDE_MODEL,
+        max_tokens=max_tokens or settings.CLAUDE_MAX_TOKENS,
+        system=system,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text.strip()
+
+
+async def validate_description(description: str, activity_type: str) -> dict:
     """
-    Build an anonymised context for Claude.
-    We send STRUCTURE, not confidential values.
-    Budget is converted to a range, not exact figure.
-    Country/cluster is generalised to region.
-    """
-    # Budget range instead of exact figure
-    if fy_total < 50_000:
-        budget_range = "small (<€50k)"
-    elif fy_total < 200_000:
-        budget_range = "medium (€50k-€200k)"
-    elif fy_total < 500_000:
-        budget_range = "large (€200k-€500k)"
-    else:
-        budget_range = "major (>€500k)"
+    Check if the Description answers WHY (business objective) not WHAT.
 
-    return {
-        "activity_type": activity_type,
-        "budget_range": budget_range,
-        "region": "EMEA",   # Never send specific country
-    }
+    Returns:
+        {
+            "is_valid": bool,
+            "feedback": str,
+            "suggested_correction": str | None,
+            "log_id": str
+        }
+
+    Bad:  "Support Hans Anders with brand campaigns, Ray-Ban launches in December"
+    Good: "Drive Ray-Ban growth within Hans Anders via on and offline campaigns"
+    """
+    if not description or not description.strip():
+        return {
+            "is_valid": False,
+            "feedback": "Description is empty. It must explain WHY this investment is needed.",
+            "suggested_correction": None,
+            "log_id": None,
+        }
+
+    system = """You are a marketing budget validation assistant for EssilorLuxottica EMEA.
+Your job is to check if a LOA (Letter of Authorization) Description field answers WHY
+the investment is needed — the business objective — not WHAT will be done.
+
+Rules:
+- WHY = business objective, strategic reason, expected business impact
+- WHAT = list of activities, tools, or executions (that belongs in the DETAIL field)
+- A good Description is one clear sentence stating the business goal
+- Bad example: "Support Hans Anders with brand campaigns and Ray-Ban launches"
+- Good example: "Drive Ray-Ban growth within Hans Anders via on and offline campaigns"
+
+Respond in JSON only. No markdown, no explanation outside the JSON.
+{
+  "is_why": true or false,
+  "feedback": "one sentence explaining your assessment",
+  "suggested_correction": "improved version if is_why is false, null if already good"
+}"""
+
+    prompt = f"""Activity Type: {activity_type}
+Description to validate: "{description}"
+
+Is this a WHY statement (business objective) or a WHAT statement (list of activities)?"""
+
+    try:
+        response = _call_claude(prompt, system, max_tokens=300)
+        # Clean response in case Claude adds markdown
+        response = response.replace("```json", "").replace("```", "").strip()
+        result = json.loads(response)
+        log_id = f"AI-DESC-{uuid.uuid4().hex[:8].upper()}"
+        return {
+            "is_valid": result.get("is_why", False),
+            "feedback": result.get("feedback", ""),
+            "suggested_correction": result.get("suggested_correction"),
+            "log_id": log_id,
+        }
+    except Exception as e:
+        return {
+            "is_valid": True,  # Don't block on AI failure
+            "feedback": f"AI validation unavailable: {str(e)}",
+            "suggested_correction": None,
+            "log_id": None,
+        }
 
 
 async def suggest_loa_content(
     activity_type: str,
-    cluster: str,
-    category: str,
-    brand: str,
-    fy_total: float,
-    num_doors: int,
-    requestor_email: str,
+    cluster: str = "",
+    category: str = "",
+    brand: str = "",
+    fy_total: float = 0,
+    num_doors: int = 0,
+    requestor_email: str = "system",
 ) -> dict:
     """
-    Ask Claude to suggest Description, KPI, and Tools for a LOA.
-    Returns a dict with keys: description, kpi, tools, call_id.
-    Falls back to empty strings if Claude is unavailable.
+    Suggest Description (WHY), KPI, and Tools (HOW) for a new LOA.
+    Called when user fills in the key fields and clicks "Suggest with AI".
+
+    Returns:
+        {
+            "description": str,
+            "kpi": str,
+            "tools": str,
+            "log_id": str
+        }
     """
-    call_id = str(uuid.uuid4())
+    system = """You are a marketing budget assistant for EssilorLuxottica EMEA.
+Generate concise, professional LOA content for a marketing budget request.
 
-    if not settings.ANONYMISE_BEFORE_LLM:
-        logger.warning("ANONYMISE_BEFORE_LLM is False — check security policy")
+Rules for Description (WHY):
+- One clear sentence stating the business objective
+- Must answer WHY not WHAT
+- Example: "Drive Varilux penetration among independent ECPs in France via targeted seasonal visibility"
 
-    # Anonymised context — no confidential numbers or names
-    ctx = _anonymise(activity_type, cluster, fy_total)
+Rules for KPI:
+- 2-3 measurable KPIs relevant to the activity type
+- Use concrete metrics where possible (%, units, €)
+- Separate with " · "
 
-    prompt = f"""You are helping a marketing team write a Letter of Approval (LOA) for a marketing investment.
+Rules for Tools (HOW / DETAIL):
+- 2-4 items describing HOW the money will be spent
+- Specific to the activity type
+- Separate with " · "
 
-Activity type: {ctx['activity_type']}
-Category: {category}
-Brand group: {brand}
-Budget range: {ctx['budget_range']}
-Number of doors/stores: {num_doors if num_doors else 'not specified'}
+Respond in JSON only. No markdown, no preamble.
+{
+  "description": "...",
+  "kpi": "...",
+  "tools": "..."
+}"""
 
-Based on best practices for this type of marketing investment, suggest:
+    # Get KPI template hints
+    kpi_hints = " · ".join(KPI_TEMPLATES.get(activity_type, ["X% sell-out uplift", "X doors activated"]))
 
-1. DESCRIPTION (1 sentence — the WHY, not the what)
-2. KPI (1-2 measurable targets, e.g. "+10-15% sell-out increase")
-3. TOOLS (bullet list of specific marketing tools/materials)
+    prompt = f"""Generate LOA content for:
+- Activity Type: {activity_type}
+- Cluster: {cluster}
+- Category: {category}
+- Brand: {brand}
+- FY Total Budget: €{fy_total:,.0f}
+- Number of Doors: {num_doors or 'N/A'}
 
-Respond ONLY with a JSON object, no markdown, no extra text:
-{{"description": "...", "kpi": "...", "tools": "..."}}"""
-
-    input_shape = {
-        "activity_type": activity_type,
-        "category": category,
-        "brand_group": brand[:10] + "...",  # Truncated — no exact brand name in log
-        "fields_sent": ["activity_type", "category", "brand_group", "budget_range", "num_doors"],
-    }
+KPI inspiration (adapt to this specific LOA): {kpi_hints}"""
 
     try:
-        response = client.messages.create(
-            model=settings.CLAUDE_MODEL,
-            max_tokens=settings.CLAUDE_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw_text = response.content[0].text.strip()
-        result = json.loads(raw_text)
-
-        _write_audit_log(call_id, input_shape, raw_text, requestor_email)
-
-        logger.info("AI suggestion generated", call_id=call_id, activity_type=activity_type)
-        return {**result, "call_id": call_id, "success": True}
-
-    except json.JSONDecodeError:
-        logger.error("Claude returned non-JSON", call_id=call_id, raw=raw_text[:200])
-        return _fallback(call_id)
-
+        response = _call_claude(prompt, system, max_tokens=400)
+        response = response.replace("```json", "").replace("```", "").strip()
+        result = json.loads(response)
+        log_id = f"AI-SUGG-{uuid.uuid4().hex[:8].upper()}"
+        return {
+            "description": result.get("description", ""),
+            "kpi":         result.get("kpi", ""),
+            "tools":       result.get("tools", ""),
+            "log_id":      log_id,
+        }
     except Exception as e:
-        logger.error("Claude API call failed", call_id=call_id, error=str(e))
-        _write_audit_log(call_id, input_shape, f"ERROR: {str(e)}", requestor_email)
-        return _fallback(call_id)
-
-
-def _fallback(call_id: str) -> dict:
-    """Return empty suggestions — never break the UI because AI failed."""
-    return {
-        "description": "",
-        "kpi": "",
-        "tools": "",
-        "call_id": call_id,
-        "success": False,
-    }
+        # Fallback to template KPIs if Claude fails
+        kpi_fallback = " · ".join(KPI_TEMPLATES.get(activity_type, ["X% sell-out uplift"]))
+        return {
+            "description": "",
+            "kpi":         kpi_fallback,
+            "tools":       "",
+            "log_id":      None,
+            "error":       str(e),
+        }

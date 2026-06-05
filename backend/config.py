@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # App
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]
+    ALLOWED_ORIGINS: str = "http://localhost:3000,https://laura.vercel.app"
 
     # Database (optional in dev — uses in-memory store)
     DATABASE_URL: str = "sqlite:///./laura_dev.db"
