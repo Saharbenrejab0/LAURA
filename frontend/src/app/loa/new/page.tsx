@@ -14,6 +14,8 @@ import { ThemeToggle } from '@/components/ThemeProvider'
 import { useToast } from '@/components/Toast'
 import VoiceInput from '@/components/VoiceInput'
 import PreviewModal from '@/components/PreviewModal'
+import MultiSelect from '@/components/MultiSelect'
+import { createPortal } from 'react-dom'
 import { useAutoSave, clearDraft, scrollToFirstError, useLeaveConfirmation } from '@/components/useFormGuard'
 
 const CATEGORY_BRANDS: Record<string, string[]> = {
@@ -42,6 +44,90 @@ function formatEuros(n: number) {
   if (n >= 1_000_000) return `€${(n/1_000_000).toFixed(2)}M`
   if (n >= 1_000) return `€${Math.round(n/1_000)}k`
   return `€${n}`
+}
+
+// ── k€ input — user types in thousands, stored value is in actual euros ────
+// Display: input shows `val / 1000`, with a visual "k" suffix on the right.
+// Storage: onChange multiplies by 1000 before saving.
+function KEurosInput({ value, onChange, placeholder = '0' }: {
+  value: number
+  onChange: (newValueInEuros: number) => void
+  placeholder?: string
+}) {
+  const displayValue = value ? value / 1000 : ''
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type="number"
+        className="input"
+        style={{ paddingRight: '32px' }}
+        value={displayValue}
+        min={0}
+        step="0.1"
+        onChange={e => {
+          const v = e.target.value
+          onChange(v === '' ? 0 : Math.round(Number(v) * 1000))
+        }}
+        placeholder={placeholder}
+      />
+      <span style={{
+        position: 'absolute', right: '12px', top: '50%',
+        transform: 'translateY(-50%)',
+        color: 'var(--text-muted)', fontSize: '13px',
+        pointerEvents: 'none',
+      }}>k</span>
+    </div>
+  )
+}
+
+// ── Percent input — user types whole percentages (0–100), stored as 0–1 ──
+// Display: input shows `value * 100`, with a visual "%" suffix on the right.
+// Storage: onChange divides by 100 before saving.
+// If `onComplement` provided, auto-fills the other field to (100 − this value).
+function PercentInput({ value, onChange, onComplement, placeholder = '0' }: {
+  value: number | ''
+  onChange: (newDecimalValue: number | '') => void
+  onComplement?: (complementDecimalValue: number) => void
+  placeholder?: string
+}) {
+  const displayValue = value === '' || value === null || value === undefined
+    ? ''
+    : Math.round(Number(value) * 100)
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type="number"
+        className="input"
+        style={{ paddingRight: '32px' }}
+        value={displayValue}
+        min={0}
+        max={100}
+        step="1"
+        onChange={e => {
+          const raw = e.target.value
+          if (raw === '') {
+            onChange('')
+            return
+          }
+          const num = Number(raw)
+          if (isNaN(num)) return
+          const clamped = Math.max(0, Math.min(100, num))
+          onChange(clamped / 100)
+          if (onComplement) {
+            onComplement((100 - clamped) / 100)
+          }
+        }}
+        placeholder={placeholder}
+      />
+      <span style={{
+        position: 'absolute', right: '12px', top: '50%',
+        transform: 'translateY(-50%)',
+        color: 'var(--text-muted)', fontSize: '13px',
+        pointerEvents: 'none',
+      }}>%</span>
+    </div>
+  )
 }
 
 // ── Searchable dropdown ───────────────────────────────────────────────────
@@ -152,7 +238,8 @@ function SectionCard({ number, title, children }: { number: number; title: strin
 }
 
 function LeaveDialog({ onStay, onLeave }: { onStay: () => void; onLeave: () => void }) {
-  return (
+  if (typeof document === 'undefined') return null
+  return createPortal(
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -168,7 +255,8 @@ function LeaveDialog({ onStay, onLeave }: { onStay: () => void; onLeave: () => v
           <button onClick={onStay} className="btn-primary text-sm flex-1">Stay & save</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -201,7 +289,7 @@ export default function NewLOAPage() {
   const [eventPurpose, setEventPurpose] = useState('')
   const [sapEventCode, setSapEventCode] = useState('')
   const [cot, setCot]                   = useState('All COT')
-  const [category, setCategory]         = useState('')
+  const [category, setCategory]         = useState<string[]>([])
   const [brand, setBrand]               = useState('')
   const [capexOpex, setCapexOpex]       = useState('OpEx')
   const [advSelling, setAdvSelling]     = useState('ADV')
@@ -256,7 +344,11 @@ export default function NewLOAPage() {
         setEventPurpose(loa.event_purpose || '')
         setSapEventCode((loa as any).sap_event_code || '')
         setCot(loa.cot || 'All COT')
-        setCategory(loa.category || '')
+        // Category may come back as string (legacy) or array (new) — normalize to array
+        const cat = loa.category
+        if (Array.isArray(cat)) setCategory(cat)
+        else if (typeof cat === 'string' && cat) setCategory([cat])
+        else setCategory([])
         setBrand(loa.brand || '')
         setCapexOpex(loa.capex_opex || 'OpEx')
         setAdvSelling(loa.adv_selling || 'ADV')
@@ -303,14 +395,17 @@ export default function NewLOAPage() {
   const pptRequired = fyTotal > 50_000
 
   const isEvent       = EVENT_ACTIVITY_TYPES.includes(activityType as ActivityType)
-  const isPermanent   = activityType === 'Tailor Made Permanent'
+  const isPermanent   = activityType === 'Permanent Visibility' || activityType === 'Tailor Made Permanent'
   const isSponsorship = activityType === 'Sponsorship'
   const hasDoors      = !isSponsorship && DOOR_ACTIVITY_TYPES.includes(activityType as ActivityType)
   const showCostSplit = activityType === 'Events'
-  const availableBrands = category ? (CATEGORY_BRANDS[category] || BRAND_OPTIONS) : BRAND_OPTIONS
+  const availableBrands = category.length > 0
+    ? Array.from(new Set(category.flatMap(c => CATEGORY_BRANDS[c] || [])))
+    : BRAND_OPTIONS
 
   const costSplitTotal = (Number(costSplitLenses)||0) + (Number(costSplitFrames)||0)
   const costSplitValid = costSplitLenses === '' && costSplitFrames === '' ? true : Math.abs(costSplitTotal - 1.0) < 0.001
+  const costSplitTotalPct = Math.round(costSplitTotal * 100)
 
   // Don't reset cascades when in edit mode (already loaded)
   const [clusterInitialized, setClusterInitialized] = useState(false)
@@ -350,7 +445,7 @@ export default function NewLOAPage() {
 
   // ── AI ────────────────────────────────────────────────────────────────
   async function fetchSuggestion() {
-    if (!activityType || !category || !brand) return
+    if (!activityType || category.length === 0 || !brand) return
     setLoadingSuggestion(true)
     try {
       const result = await getAISuggestion({ activity_type: activityType, cluster, category, brand, fy_total: fyTotal, num_doors: numDoors })
@@ -388,7 +483,7 @@ export default function NewLOAPage() {
     if (!cluster) e.cluster = 'Required'
     if (!country) e.country = 'Required'
     if (!activityType) e.activityType = 'Required'
-    if (!category) e.category = 'Required'
+    if (category.length === 0) e.category = 'Required'
     if (!brand) e.brand = 'Required'
     if (!cot) e.cot = 'Required'
     if (!requestorEmail) e.requestorEmail = 'Required'
@@ -400,7 +495,7 @@ export default function NewLOAPage() {
     if (isEvent && !eventType) e.eventType = 'Required'
     if (isEvent && !eventPurpose) e.eventPurpose = 'Required'
     if (fyTotal === 0 && fy2025Total === 0) e.q1 = 'At least one quarterly value required'
-    if (showCostSplit && !costSplitValid) e.costSplit = `Lenses + Frames must equal 1.0 (currently ${costSplitTotal.toFixed(4)})`
+    if (showCostSplit && !costSplitValid) e.costSplit = `Lenses + Frames must equal 100% (currently ${costSplitTotalPct}%)`
     setErrors(e)
     if (Object.keys(e).length > 0) scrollToFirstError(e)
     return Object.keys(e).length === 0
@@ -504,6 +599,7 @@ export default function NewLOAPage() {
   const pageTitle = isEditMode ? 'Edit LOA' : 'New LOA'
   const submitLabel = isEditMode ? 'Save & resubmit' : 'Submit LOA'
   const draftLabel  = isEditMode ? 'Save changes' : 'Save draft'
+  const categoryLabel = category.length > 0 ? category.join(' + ') : ''
 
   return (
     <div className="min-h-screen page-enter" style={{ background: 'var(--bg-base)' }}>
@@ -519,7 +615,7 @@ export default function NewLOAPage() {
         <PreviewModal
           isOpen={showPreview}
           onClose={() => setShowPreview(false)}
-          category={category} country={country} brand={brand} fyTotal={fyTotal}
+          category={categoryLabel} country={country} brand={brand} fyTotal={fyTotal}
           description={description} tools={tools} kpi={kpi} costDrillDown={costDrillDown}
           numDoors={numDoors} avgPerDoor={avgPerDoor} activityType={activityType} detail={detail}
           photos={photos}
@@ -632,8 +728,8 @@ export default function NewLOAPage() {
                   <option value="OpEx">OpEx</option>
                   <option value="CapEx">CapEx</option>
                 </select>
-                {capexOpex === 'CapEx' && activityType !== 'Tailor Made Permanent' && (
-                  <p className="text-xs mt-1" style={{ color: 'var(--amber-text)' }}>⚠ CapEx is typically only for Tailor Made Permanent</p>
+                {capexOpex === 'CapEx' && !isPermanent && (
+                  <p className="text-xs mt-1" style={{ color: 'var(--amber-text)' }}>⚠ CapEx is typically only for Permanent Visibility</p>
                 )}
               </Field>
               <Field label="ADV / Selling / Others" required>
@@ -649,14 +745,16 @@ export default function NewLOAPage() {
           <SectionCard number={3} title="Product">
             <div className="grid grid-cols-2 gap-4">
               <Field label="Category" required error={errors.category} fieldKey="category">
-                <select className="input" value={category} onChange={e => { setCategory(e.target.value); markDirty() }}>
-                  <option value="">Select category…</option>
-                  {CATEGORY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <MultiSelect
+                  options={CATEGORY_OPTIONS}
+                  values={category}
+                  onChange={v => { setCategory(v); markDirty() }}
+                  placeholder="Select one or more categories…"
+                />
               </Field>
-              <Field label="Brand" required hint="Type to search — Ray-Ban ≠ Ray-Ban Meta" error={errors.brand} fieldKey="brand">
+              <Field label="Brand" required hint="Type to search" error={errors.brand} fieldKey="brand">
                 <SearchableSelect value={brand} onChange={v => { setBrand(v); markDirty() }}
-                  options={availableBrands} placeholder="Search brand…" disabled={!category} />
+                  options={availableBrands} placeholder="Search brand…" disabled={category.length === 0} />
               </Field>
             </div>
           </SectionCard>
@@ -690,20 +788,28 @@ export default function NewLOAPage() {
             </div>
             {showCostSplit && (
               <div className="mt-4 p-4 rounded-xl" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-                <p className="section-heading mb-3">Cost Split — must sum to exactly 1.0</p>
+                <p className="section-heading mb-3">Cost Split — Lenses + Frames must equal 100%</p>
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="% Lenses" error={errors.costSplit} fieldKey="costSplit">
-                    <input type="number" className="input" step="0.01" min="0" max="1"
-                      value={costSplitLenses} onChange={e => { setCostSplitLenses(e.target.value===''?'':Number(e.target.value)); markDirty() }} placeholder="e.g. 0.30" />
+                    <PercentInput
+                      value={costSplitLenses}
+                      onChange={v => { setCostSplitLenses(v); markDirty() }}
+                      onComplement={c => setCostSplitFrames(c)}
+                      placeholder="30"
+                    />
                   </Field>
                   <Field label="% Frames">
-                    <input type="number" className="input" step="0.01" min="0" max="1"
-                      value={costSplitFrames} onChange={e => { setCostSplitFrames(e.target.value===''?'':Number(e.target.value)); markDirty() }} placeholder="e.g. 0.70" />
+                    <PercentInput
+                      value={costSplitFrames}
+                      onChange={v => { setCostSplitFrames(v); markDirty() }}
+                      onComplement={c => setCostSplitLenses(c)}
+                      placeholder="70"
+                    />
                   </Field>
                 </div>
                 {costSplitLenses!=='' && costSplitFrames!=='' && (
                   <p className="text-xs mt-2" style={{ color: costSplitValid ? 'var(--green)' : 'var(--red)' }}>
-                    Total: {costSplitTotal.toFixed(4)} {costSplitValid ? '✓' : '— must equal 1.0'}
+                    Total: {costSplitTotalPct}% {costSplitValid ? '✓' : '— must equal 100%'}
                   </p>
                 )}
               </div>
@@ -720,19 +826,25 @@ export default function NewLOAPage() {
             )}
           </SectionCard>
 
-          <SectionCard number={5} title="Financials">
+          <SectionCard number={5} title="Budget">
             {errors.q1 && <p className="text-xs mb-3" style={{ color: 'var(--red-text)' }}>{errors.q1}</p>}
+            <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+              Enter amounts in thousands of euros. Example: type 45 for €45,000.
+            </p>
             <div className="grid grid-cols-3 gap-4" data-field="q1">
               {[
-                { label:'Q4 2025 (€)', val:q4_2025, set:setQ4_2025 },
-                { label:'Q1 2026 (€)', val:q1, set:setQ1 },
-                { label:'Q2 2026 (€)', val:q2, set:setQ2 },
-                { label:'Q3 2026 (€)', val:q3, set:setQ3 },
-                { label:'Q4 2026 (€)', val:q4, set:setQ4 },
+                { label:'Q4 2025 (k€)', val:q4_2025, set:setQ4_2025 },
+                { label:'Q1 2026 (k€)', val:q1, set:setQ1 },
+                { label:'Q2 2026 (k€)', val:q2, set:setQ2 },
+                { label:'Q3 2026 (k€)', val:q3, set:setQ3 },
+                { label:'Q4 2026 (k€)', val:q4, set:setQ4 },
               ].map(({ label, val, set }) => (
                 <Field key={label} label={label}>
-                  <input type="number" className="input" value={val||''} min={0}
-                    onChange={e => { set(Number(e.target.value)); markDirty() }} placeholder="0" />
+                  <KEurosInput
+                    value={val}
+                    onChange={n => { set(n); markDirty() }}
+                    placeholder="0"
+                  />
                 </Field>
               ))}
             </div>
@@ -762,7 +874,7 @@ export default function NewLOAPage() {
                 <div>
                   <label className="label">End Date</label>
                   <div className="input cursor-not-allowed text-xs" style={{ color:'var(--text-muted)', background:'var(--bg-elevated)' }}>
-                    Hidden — Tailor Made Permanent uses 01/01 → 31/12
+                    Hidden — Permanent Visibility uses 01/01 → 31/12
                   </div>
                 </div>
               )}
@@ -773,7 +885,7 @@ export default function NewLOAPage() {
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Fill description, tools and KPI — or let LAURA suggest</p>
               <button onClick={fetchSuggestion}
-                disabled={!activityType||!category||!brand||loadingSuggestion}
+                disabled={!activityType||category.length === 0||!brand||loadingSuggestion}
                 className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-40">
                 {loadingSuggestion ? 'Asking LAURA…' : '✦ Suggest with AI'}
               </button>
@@ -891,15 +1003,15 @@ export default function NewLOAPage() {
         </div>
 
         {/* RIGHT — live preview */}
-        <div className="space-y-4 sticky top-20 self-start">
-          <div className="card overflow-hidden">
+        <div className="flex flex-col gap-4 sticky top-20 self-start">
+          <div className="card overflow-hidden order-2">
             <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
               <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>PPT slide preview</span>
               <button onClick={() => setShowPreview(true)} className="btn-ghost text-xs px-2 py-1">⤢ Expand</button>
             </div>
             <div className="m-3 rounded-lg overflow-hidden text-[10px]" style={{ border: '1px solid var(--border)' }}>
               <div className="px-3 py-1.5 flex justify-between" style={{ background: '#0D1B2A' }}>
-                <span style={{ color: '#aaa' }}>{category||'Category'}</span>
+                <span style={{ color: '#aaa' }}>{categoryLabel||'Category'}</span>
                 <span className="font-semibold" style={{ color: 'white' }}>{country||'COUNTRY'} · {formatEuros(fyTotal)}</span>
               </div>
               <div className="px-3 py-1.5 font-semibold text-xs truncate"
@@ -937,14 +1049,14 @@ export default function NewLOAPage() {
             </div>
           </div>
 
-          <div className="card overflow-hidden">
+          <div className="card overflow-hidden order-1">
             <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
               <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Excel row preview</span>
             </div>
             <div className="px-4 py-3 space-y-1.5 text-xs">
               {[
                 ['Cluster',cluster],['Country',country],['Activity',activityType],
-                ['Category',category],['Brand',brand],['COT',cot],
+                ['Category',categoryLabel],['Brand',brand],['COT',cot],
                 ['Customer',customer],['Vendor',vendor],
                 ['Q4-25',q4_2025?formatEuros(q4_2025):'—'],
                 ['Q1-26',q1?formatEuros(q1):'—'],['Q2-26',q2?formatEuros(q2):'—'],

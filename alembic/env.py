@@ -22,7 +22,12 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from backend.models.loa import Base
+# Import Base from database.py (where it's defined)
+from backend.models.database import Base
+
+# Import every model so SQLAlchemy registers them on Base.metadata
+# (Alembic only sees what's been imported — silent omissions = silent table drops)
+from backend.models import loa, user   # noqa: F401
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

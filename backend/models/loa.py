@@ -5,7 +5,7 @@ Sources: discovery meetings with Vanessa Stöecklein & Thibault de Bodman
 """
 
 from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, Enum
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 import uuid
 import enum
@@ -125,7 +125,9 @@ class LOA(Base):
 
     # ── Product cascade (Category → Brand) ────────────────────────────────────
     # Category: 6 confirmed options — Frames/Lenses/Wearables/Audio/Instruments/All cat.
-    category = Column(String(50), nullable=False)
+    # Category — MULTI-SELECT (e.g. Frames + Lenses on the same LOA).
+    # Stored as PostgreSQL ARRAY. Validation against reference_data.CATEGORIES.
+    category = Column(ARRAY(String), nullable=False)
     # Brand: cascades from Category. Ray-Ban ≠ Ray-Ban Meta (separate entries, confirmed Vanessa Mtg 2)
     brand    = Column(String(200), nullable=False)
 
@@ -145,9 +147,9 @@ class LOA(Base):
     # Show when activity_type IN (Events, Medical Affairs) — confirmed Vanessa Mtg 1
     # event_type: 7 options — Roadshow/Showroom/Sales Convention/Trade Fairs/
     #             Medical Symposium/Client Award Travel/Tortona EL Days
-    event_type    = Column(String(50), nullable=True)
+    event_type    = Column(String(100), nullable=True)
     # event_purpose: 4 options — Transactional/Inspirational/Influential/Relational
-    event_purpose = Column(String(50), nullable=True)
+    event_purpose = Column(String(100), nullable=True)
     # SAP Event Code — created in SAP first, then typed here manually
     # Shown only when activity = Events or Medical Affairs
     sap_event_code = Column(String(100), nullable=True)
@@ -251,6 +253,12 @@ class LOA(Base):
     ai_suggestion_log_id = Column(String(100), nullable=True)  # Links to logs/
 
     # ── Metadata ───────────────────────────────────────────────────────────────
+    # ── Demo mode flag ──────────────────────────────────────────────
+    # When True, this LOA was created via the LAURA form (visible in
+    # tracker by default). When False, this is a historical/imported
+    # LOA (hidden behind the "Show historical" toggle).
+    # The 1330 historical LOAs from the ETL all have is_demo=False.
+    is_demo = Column(Boolean, nullable=False, server_default='false', default=False, index=True)
     created_at   = Column(DateTime, server_default=func.now())
     updated_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
     submitted_at = Column(DateTime, nullable=True)

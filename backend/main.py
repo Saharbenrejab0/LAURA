@@ -9,6 +9,7 @@ import structlog
 
 from backend.api import loa, auth, health
 from backend.config import settings
+from backend.api import reference
 
 logger = structlog.get_logger()
 
@@ -31,5 +32,6 @@ app.add_middleware(
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(loa.router, prefix="/loa", tags=["loa"])
+app.include_router(reference.router) 
 
 logger.info("LAURA backend ready", environment=settings.ENVIRONMENT)

@@ -15,21 +15,27 @@ from datetime import datetime
 from backend.config import settings
 
 # ── KPI templates per activity type ───────────────────────────────────────────
+# ── KPI templates per activity type (aligned with PDF v2) ───────────────
 KPI_TEMPLATES = {
-    "Tailor Made Seasonal": [
-        "+10-15% sell-out uplift during campaign period",
-        "X% increase in brand visibility score",
-        "Sell-through rate of X% within campaign window",
-    ],
-    "Tailor Made Permanent": [
+    "Permanent Visibility": [
         "+X% sell-out increase at activated doors vs control doors",
         "X doors activated with permanent fixture",
         "ROI: X€ incremental revenue per €1 invested",
+    ],
+    "Seasonal Visibility": [
+        "+10-15% sell-out uplift during campaign period",
+        "X% increase in brand visibility score",
+        "Sell-through rate of X% within campaign window",
     ],
     "Coop Advertising": [
         "Order uplift avg +5-9% vs baseline",
         "Open rate min 40%, click rate min 10% (digital)",
         "+X% brand share at partner doors",
+    ],
+    "e-Tools": [
+        "X site visitors / leads generated",
+        "X% conversion rate on digital activations",
+        "X% increase in branded search volume",
     ],
     "In Store / Consumer Activation": [
         "+10% traffic uplift during activation period",
@@ -62,11 +68,6 @@ KPI_TEMPLATES = {
         "X medical professionals reached",
         "X prescriptions / referrals generated",
     ],
-    "Coop Advertising": [
-        "+5-9% order uplift vs baseline",
-        "Open rate >40%, click rate >10%",
-        "+X% brand share at partner",
-    ],
     "Other ADV Expenses": [
         "X M reach / X M impressions",
         "X% increase in brand awareness",
@@ -82,8 +83,26 @@ KPI_TEMPLATES = {
         "X M earned media reach",
         "X influencers activated",
     ],
+    "Others (non ADV)": [
+        "X custom KPI",
+        "X% target attainment",
+    ],
 }
 
+def _format_for_prompt(value) -> str:
+    """
+    Convert list/str/None to a clean string for Claude prompts.
+    ['Frames', 'Lenses'] → 'Frames + Lenses'
+    'Frames'             → 'Frames'
+    [] / None            → ''
+    """
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return " + ".join(str(v) for v in value if v)
+    return str(value)
 
 def _anonymise(loa_data: dict) -> dict:
     """
@@ -186,8 +205,8 @@ Is this a WHY statement (business objective) or a WHAT statement (list of activi
 async def suggest_loa_content(
     activity_type: str,
     cluster: str = "",
-    category: str = "",
-    brand: str = "",
+    category=None,          # accepts str (legacy) or list[str] (new)
+    brand=None,             # accepts str (legacy) or list[str] (future)
     fy_total: float = 0,
     num_doors: int = 0,
     requestor_email: str = "system",
@@ -232,11 +251,14 @@ Respond in JSON only. No markdown, no preamble.
     # Get KPI template hints
     kpi_hints = " · ".join(KPI_TEMPLATES.get(activity_type, ["X% sell-out uplift", "X doors activated"]))
 
+    category_str = _format_for_prompt(category)
+    brand_str    = _format_for_prompt(brand)
+
     prompt = f"""Generate LOA content for:
 - Activity Type: {activity_type}
 - Cluster: {cluster}
-- Category: {category}
-- Brand: {brand}
+- Category: {category_str}
+- Brand: {brand_str}
 - FY Total Budget: €{fy_total:,.0f}
 - Number of Doors: {num_doors or 'N/A'}
 

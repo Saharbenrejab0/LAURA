@@ -1,23 +1,46 @@
-"""LAURA — LOA routes"""
+"""LAURA — LOA routes
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+Connected to:
+  - backend.reference_data : source of truth for all dropdowns (validates inputs)
+  - backend.models.loa     : SQLAlchemy LOA model (category is now ARRAY)
+  - backend.engines.*       : PPT/Excel/AI generation
+"""
+
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
 import uuid
 import httpx
 import os
+import shutil
 
 from backend.models.database import get_db
 from backend.models.loa import LOA, LOAStatus
+from backend.reference_data import (
+    CLUSTERS,
+    CATEGORIES,
+    ACTIVITY_TYPES,
+    EVENT_TYPES,
+    EVENT_PURPOSES,
+    COT_OPTIONS,
+    CAPEX_OPEX,
+    ADV_SELLING,
+    is_valid_cluster,
+    is_valid_country,
+    is_valid_activity_type,
+)
 
 router = APIRouter()
 
 
-# ── n8n webhook ───────────────────────────────────────────────────────────────
-async def notify_n8n(event: str, loa_id: str, extra: dict = {}):
+# ── n8n webhook ─────────────────────────────────────────────────────────
+async def notify_n8n(event: str, loa_id: str, extra: dict = None):
     """Fire-and-forget webhook to n8n. Never blocks if n8n is down."""
+    if extra is None:
+        extra = {}
     url = os.getenv("N8N_WEBHOOK_URL", "")
     if not url:
         return
@@ -28,8 +51,16 @@ async def notify_n8n(event: str, loa_id: str, extra: dict = {}):
         pass
 
 
-# ── Pydantic schemas ──────────────────────────────────────────────────────────
+# ── Pydantic schemas ────────────────────────────────────────────────────
 class LOACreate(BaseModel):
+    """
+    Schema for creating / updating a LOA.
+
+    Validation rules:
+      - `category` is now a list (multi-select, e.g. ["Frames", "Lenses"])
+      - All dropdown fields validated against reference_data.py
+      - Empty strings allowed during draft creation (only blocking at /submit)
+    """
     cluster: str = ""
     country: str = ""
     legal_entity: Optional[str] = None
@@ -38,7 +69,12 @@ class LOACreate(BaseModel):
     event_purpose: Optional[str] = None
     sap_event_code: Optional[str] = None
     cot: str = ""
-    category: str = ""
+
+    # ── CATEGORY: now a LIST (multi-select) ─────────────────────────────
+    # Examples: ["Frames"], ["Frames", "Lenses"], ["All cat."]
+    # Stored as PostgreSQL ARRAY in the database.
+    category: list[str] = []
+
     brand: str = ""
     capex_opex: str = "OpEx"
     adv_selling: str = "ADV"
@@ -69,6 +105,99 @@ class LOACreate(BaseModel):
     finance_validator_email: Optional[str] = None
     requestor_email: str = ""
 
+    # ── Validators against reference_data.py ────────────────────────────
+    # These run on EVERY create/update — keep them lightweight.
+    # Empty string = no value provided yet (draft mode), accepted.
+    # A non-empty value MUST exist in the reference data.
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, v):
+        """
+        Accepts a single string OR a list. Always returns a clean list:
+          - "Frames"  → ["Frames"]
+          - ["Frames", "Lenses"]  → ["Frames", "Lenses"]
+          - ["Frames", "Frames"]  → ["Frames"]    (dedupes)
+          - None / ""  → []
+        """
+        if v is None or v == "":
+            return []
+        if isinstance(v, str):
+            v = [v]
+        # Dedupe while preserving order
+        seen = set()
+        result = []
+        for item in v:
+            if item and item not in seen:
+                seen.add(item)
+                result.append(item)
+        return result
+
+    @field_validator("category")
+    @classmethod
+    def validate_category(cls, v: list[str]):
+        if v:  # only validate non-empty (drafts can be empty)
+            invalid = [c for c in v if c not in CATEGORIES]
+            if invalid:
+                raise ValueError(
+                    f"Invalid category value(s): {invalid}. "
+                    f"Allowed: {CATEGORIES}"
+                )
+        return v
+
+    @field_validator("cluster")
+    @classmethod
+    def validate_cluster(cls, v: str):
+        if v and not is_valid_cluster(v):
+            raise ValueError(f"Invalid cluster '{v}'. Allowed: {CLUSTERS}")
+        return v
+
+    @field_validator("activity_type")
+    @classmethod
+    def validate_activity_type(cls, v: str):
+        if v and not is_valid_activity_type(v):
+            raise ValueError(
+                f"Invalid activity_type '{v}'. Allowed: {ACTIVITY_TYPES}"
+            )
+        return v
+
+    @field_validator("event_type")
+    @classmethod
+    def validate_event_type(cls, v: Optional[str]):
+        if v and v not in EVENT_TYPES:
+            raise ValueError(f"Invalid event_type '{v}'. Allowed: {EVENT_TYPES}")
+        return v
+
+    @field_validator("event_purpose")
+    @classmethod
+    def validate_event_purpose(cls, v: Optional[str]):
+        if v and v not in EVENT_PURPOSES:
+            raise ValueError(
+                f"Invalid event_purpose '{v}'. Allowed: {EVENT_PURPOSES}"
+            )
+        return v
+
+    @field_validator("cot")
+    @classmethod
+    def validate_cot(cls, v: str):
+        if v and v not in COT_OPTIONS:
+            raise ValueError(f"Invalid cot '{v}'. Allowed: {COT_OPTIONS}")
+        return v
+
+    @field_validator("capex_opex")
+    @classmethod
+    def validate_capex_opex(cls, v: str):
+        if v and v not in CAPEX_OPEX:
+            raise ValueError(f"Invalid capex_opex '{v}'. Allowed: {CAPEX_OPEX}")
+        return v
+
+    @field_validator("adv_selling")
+    @classmethod
+    def validate_adv_selling(cls, v: str):
+        if v and v not in ADV_SELLING:
+            raise ValueError(f"Invalid adv_selling '{v}'. Allowed: {ADV_SELLING}")
+        return v
+
 
 class DescriptionValidateRequest(BaseModel):
     description: str
@@ -76,24 +205,39 @@ class DescriptionValidateRequest(BaseModel):
 
 
 class SuggestRequest(BaseModel):
+    """Input for AI suggestion. category is now multi-select too."""
     activity_type: str
     cluster: str = ""
-    category: str = ""
+    category: list[str] = []   # ← was: str. Now multi.
     brand: str = ""
     fy_total: float = 0
     num_doors: int = 0
     requestor_email: str = "system"
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, v):
+        if v is None or v == "":
+            return []
+        if isinstance(v, str):
+            return [v]
+        return list(v)
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+
+# ── Routes ──────────────────────────────────────────────────────────────
 
 @router.get("")
 async def get_loas(
     status: Optional[str] = None,
     cluster: Optional[str] = None,
+    include_historical: bool = False,
     db: Session = Depends(get_db),
 ):
     query = db.query(LOA)
+    # Demo mode: by default, only show LOAs created via the LAURA form.
+    # Set include_historical=true to also show the 1330 imported LOAs.
+    if not include_historical:
+        query = query.filter(LOA.is_demo == True)
     if status:
         query = query.filter(LOA.status == status)
     if cluster:
@@ -118,6 +262,7 @@ async def create_loa(body: LOACreate, db: Session = Depends(get_db)):
         id=loa_id,
         loa_draft_id=draft_id,
         status="draft",
+        is_demo=True,   # Demo mode: all LOAs created via the form are demo
         **body.model_dump(),
     )
     loa.calculate_totals()
@@ -159,7 +304,6 @@ async def submit_loa(loa_id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(loa)
 
-    # Notify n8n
     await notify_n8n("loa_submitted", str(loa_id), {
         "requestor_email": loa.requestor_email,
         "loa_draft_id": loa.loa_draft_id,
@@ -183,7 +327,6 @@ async def approve_loa(loa_id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(loa)
 
-    # Notify n8n
     await notify_n8n("loa_approved", str(loa_id), {
         "requestor_email": loa.requestor_email,
         "loa_draft_id": loa.loa_draft_id,
@@ -206,7 +349,6 @@ async def reject_loa(loa_id: str, reason: str = "", db: Session = Depends(get_db
     db.commit()
     db.refresh(loa)
 
-    # Notify n8n
     await notify_n8n("loa_rejected", str(loa_id), {
         "requestor_email": loa.requestor_email,
         "loa_draft_id": loa.loa_draft_id,
@@ -235,8 +377,10 @@ async def download_loa_pptx(loa_id: str, db: Session = Depends(get_db)):
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
     from backend.engines.ppt import generate_loa_slide
-    from fastapi.responses import Response
+
+    # Serialize to dict — category is already a list (PostgreSQL ARRAY → Python list)
     loa_dict = {c.name: getattr(loa, c.name) for c in loa.__table__.columns}
+
     pptx_bytes = generate_loa_slide(loa_dict)
     filename = f"LOA_{loa.loa_draft_id}.pptx"
     return Response(
@@ -255,10 +399,12 @@ async def validate_description(body: DescriptionValidateRequest):
 @router.post("/ai/suggest")
 async def suggest_content(body: SuggestRequest):
     from backend.engines.ai import suggest_loa_content
+    # category is now a list — pass the first element for legacy AI signature,
+    # or join with " + " for prompts. We pass as-is and let ai.py handle it.
     return await suggest_loa_content(
         activity_type=body.activity_type,
         cluster=body.cluster,
-        category=body.category,
+        category=body.category,           # list[str] now
         brand=body.brand,
         fy_total=body.fy_total,
         num_doors=body.num_doors,
@@ -266,11 +412,7 @@ async def suggest_content(body: SuggestRequest):
     )
 
 
-# ── Photo upload ──────────────────────────────────────────────────────────────
-import shutil
-from fastapi import UploadFile, File
-from fastapi.responses import FileResponse
-
+# ── Photo upload ────────────────────────────────────────────────────────
 UPLOAD_DIR = "uploads/loa_photos"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 

@@ -67,6 +67,7 @@ export const getLOAs = async (filters?: {
   status?: string
   cluster?: string
   activity_type?: string
+  include_historical?: boolean
 }): Promise<LOA[]> => {
   const { data } = await api.get('/loa', { params: filters })
   return data

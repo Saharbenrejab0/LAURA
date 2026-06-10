@@ -15,9 +15,9 @@ from backend.models.database import Base
 class User(Base):
     __tablename__ = "users"
 
-    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email          = Column(String(255), unique=True, nullable=False)
-    full_name      = Column(String(200), nullable=False)
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email           = Column(String(255), unique=True, nullable=False, index=True)
+    full_name       = Column(String(200), nullable=False)
     hashed_password = Column(String(255), nullable=False)
 
     # Role: editor | approver | finance | admin
@@ -25,10 +25,12 @@ class User(Base):
     # approver = CMO / CFO / VP, sees all clusters
     # finance  = Thibault / Simona, sees financial data
     # admin    = AI to Market, full access
-    role    = Column(String(20), default="editor")
+    role    = Column(String(20), nullable=False, default="editor")
+
     cluster = Column(String(50), nullable=True)   # editors are locked to one cluster
 
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+
     created_at = Column(DateTime, server_default=func.now())
     last_login = Column(DateTime, nullable=True)
 
