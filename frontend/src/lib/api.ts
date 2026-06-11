@@ -175,3 +175,25 @@ export const deletePhoto = async (loaId: string, index: number) => {
   const { data } = await api.delete(`/loa/${loaId}/photos/${index}`)
   return data
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// SPRINT 2 — Permissions API
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Get the current user's permissions on a specific LOA.
+ * Endpoint: GET /permissions/loa/{loa_id}
+ */
+export async function getMyPermissionsOnLOA(loaId: string) {
+  const response = await api.get(`/permissions/loa/${loaId}`)
+  return response.data
+}
+
+/**
+ * Get the current user's role info.
+ * Endpoint: GET /permissions/my-role
+ */
+export async function getMyRole() {
+  const response = await api.get('/permissions/my-role')
+  return response.data
+}

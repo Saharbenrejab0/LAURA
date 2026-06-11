@@ -27,7 +27,7 @@ from backend.models.database import Base
 
 # Import every model so SQLAlchemy registers them on Base.metadata
 # (Alembic only sees what's been imported — silent omissions = silent table drops)
-from backend.models import loa, user   # noqa: F401
+from backend.models import loa, user, role, permission, role_permission   # noqa: F401
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
