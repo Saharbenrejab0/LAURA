@@ -20,7 +20,7 @@ Seed users for POC (run seed_users() once). All passwords: laura2026
     admin@aitomarket.com                  → admin
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
@@ -82,11 +82,10 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 def get_current_user(
-    authorization: str = "",
+    authorization: str = Header(default="", alias="Authorization"),
     db: Session = Depends(get_db)
 ) -> User:
-    """Dependency — extract user from Bearer token."""
-    from fastapi import Header
+    """Dependency — extract user from Bearer token in Authorization header."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = authorization[7:]

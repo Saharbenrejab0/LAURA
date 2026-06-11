@@ -32,6 +32,9 @@ from backend.reference_data import (
     is_valid_country,
     is_valid_activity_type,
 )
+from backend.models.user import User
+from backend.models.role import Role
+from backend.api.auth import get_current_user
 
 router = APIRouter()
 
@@ -232,24 +235,101 @@ async def get_loas(
     cluster: Optional[str] = None,
     include_historical: bool = False,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
+    """
+    Return LOAs filtered by the current user's role scope.
+
+    Sprint 2: a user only sees LOAs that match their role's scope:
+      - cluster role → only LOAs from their cluster
+      - brand role   → only LOAs whose brand is in their scope_value list
+      - function role → only LOAs whose activity_type is in their scope_value list
+      - 'all' role   → all LOAs
+      - 'author_only' (drafts) → only LOAs they personally created
+
+    Drafts are always filtered to the author only, regardless of role —
+    drafts are private to their creator.
+    """
     query = db.query(LOA)
-    # Demo mode: by default, only show LOAs created via the LAURA form.
-    # Set include_historical=true to also show the 1330 imported LOAs.
+
+    # Demo mode toggle (legacy behavior preserved)
     if not include_historical:
         query = query.filter(LOA.is_demo == True)
+
+    # ── Apply role-based scope filter ──────────────────────────────
+    role = user.role_obj
+    if role is None:
+        # User has no role assigned → see nothing
+        return []
+
+    if role.scope_type == 'cluster':
+        allowed_clusters = role.scope_value or []
+        query = query.filter(LOA.cluster.in_(allowed_clusters))
+
+    elif role.scope_type == 'brand':
+        allowed_brands = role.scope_value or []
+        query = query.filter(LOA.brand.in_(allowed_brands))
+
+    elif role.scope_type == 'function':
+        allowed_functions = role.scope_value or []
+        query = query.filter(LOA.activity_type.in_(allowed_functions))
+
+    elif role.scope_type == 'all':
+        # No additional filter — user sees everything in scope
+        pass
+
+    elif role.scope_type == 'author_only':
+        # User only sees LOAs they personally authored
+        query = query.filter(LOA.requestor_email == user.email)
+
+    # ── Apply UI filters from query params (optional) ──────────────
     if status:
         query = query.filter(LOA.status == status)
     if cluster:
+        # Allowed only if user has visibility on that cluster
         query = query.filter(LOA.cluster == cluster)
+
+    # ── Drafts are private to their author, regardless of role ─────
+    # A user can only see drafts they created themselves.
+    # (Super-admins can see all drafts as part of their override capability,
+    #  but they don't get edit permission on someone else's draft.)
+    if not role.can_override_lock:
+        query = query.filter(
+            (LOA.status != 'draft') | (LOA.requestor_email == user.email)
+        )
+
     return query.all()
 
 
 @router.get("/{loa_id}")
-async def get_loa(loa_id: str, db: Session = Depends(get_db)):
+async def get_loa(
+    loa_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Return a single LOA, but only if the user has visibility on it.
+    Otherwise return 403 Forbidden.
+    """
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
+
+    # Check scope visibility before returning
+    role = user.role_obj
+    if role is None:
+        raise HTTPException(status_code=403, detail="No role assigned")
+
+    # Super-admins always see (their override applies to visibility too)
+    if not role.can_override_lock:
+        # Draft visibility: only author can see their own drafts
+        if loa.status == 'draft' and loa.requestor_email != user.email:
+            raise HTTPException(status_code=403, detail="Draft is private to its author")
+
+        # Scope check
+        if not role.matches_loa(loa):
+            raise HTTPException(status_code=403, detail="LOA outside your scope")
+
     return loa
 
 
