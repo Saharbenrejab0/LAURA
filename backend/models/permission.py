@@ -45,12 +45,14 @@ PERMISSION_VIEW = 'view'
 PERMISSION_COMMENT = 'comment'
 PERMISSION_VALIDATE = 'validate'
 PERMISSION_EDIT = 'edit'
+PERMISSION_ADVANCE_PHASE = 'advance_phase'
 
 ALL_PERMISSION_CODES = [
     PERMISSION_VIEW,
     PERMISSION_COMMENT,
     PERMISSION_VALIDATE,
     PERMISSION_EDIT,
+    PERMISSION_ADVANCE_PHASE
 ]
 
 
@@ -59,37 +61,46 @@ def implies(actual_permission: str, required_permission: str) -> bool:
     Check whether `actual_permission` is sufficient for `required_permission`.
 
     Hierarchy rules:
-      - edit implies comment, view (NOT validate — different axis)
-      - comment implies view
-      - validate implies view (NOT comment or edit — separate)
-      - view only implies view
+      - advance_phase: super-permission, implies edit, comment, view, validate
+      - edit:          implies comment, view (NOT validate — different axis)
+      - validate:      implies view (NOT comment or edit — separate axis)
+      - comment:       implies view
+      - view:          only implies view
+
+    The 'advance_phase' permission is special: it's granted to people who
+    have responsibility for moving a LOA from one phase to another
+    (Vanessa, super-admins). It includes edit because someone who can
+    advance a phase necessarily needs to be able to edit too.
 
     Examples:
-      implies('edit', 'view')      -> True
-      implies('edit', 'comment')   -> True
-      implies('edit', 'validate')  -> False  (different axis)
-      implies('comment', 'edit')   -> False
-      implies('validate', 'view')  -> True
-      implies('validate', 'edit')  -> False
+      implies('advance_phase', 'edit')     -> True
+      implies('advance_phase', 'validate') -> True
+      implies('edit', 'view')              -> True
+      implies('edit', 'comment')           -> True
+      implies('edit', 'validate')          -> False  (different axis)
+      implies('validate', 'view')          -> True
+      implies('validate', 'edit')          -> False
     """
     if actual_permission == required_permission:
         return True
 
+    # advance_phase is a super-permission
+    if actual_permission == 'advance_phase':
+        return required_permission in ('view', 'comment', 'edit', 'validate', 'advance_phase')
+
     if required_permission == PERMISSION_VIEW:
-        # Anything implies view
-        return actual_permission in (PERMISSION_VIEW, PERMISSION_COMMENT,
-                                      PERMISSION_VALIDATE, PERMISSION_EDIT)
+        return actual_permission in (
+            PERMISSION_VIEW, PERMISSION_COMMENT,
+            PERMISSION_VALIDATE, PERMISSION_EDIT,
+        )
 
     if required_permission == PERMISSION_COMMENT:
-        # Only edit implies comment (validate does NOT)
         return actual_permission == PERMISSION_EDIT
 
     if required_permission == PERMISSION_VALIDATE:
-        # Only exact match
         return False
 
     if required_permission == PERMISSION_EDIT:
-        # Only exact match
         return False
 
     return False

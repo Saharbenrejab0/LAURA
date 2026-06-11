@@ -259,6 +259,10 @@ class LOA(Base):
     # LOA (hidden behind the "Show historical" toggle).
     # The 1330 historical LOAs from the ETL all have is_demo=False.
     is_demo = Column(Boolean, nullable=False, server_default='false', default=False, index=True)
+    # Sprint 2.5: edit-lock flag, settable only by super-admin.
+    # When true, all edits are blocked regardless of workflow status.
+    # When unlocked, the LOA resumes its normal workflow at its current status.
+    is_locked = Column(Boolean, nullable=False, server_default='false', default=False)
     created_at   = Column(DateTime, server_default=func.now())
     updated_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
     submitted_at = Column(DateTime, nullable=True)
