@@ -25,23 +25,21 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401 && typeof window !== 'undefined') {
-  localStorage.removeItem('laura_token')
-  if (!window.location.pathname.startsWith('/login')) {
-    window.location.href = '/login'
-  }
-}
+      localStorage.removeItem('laura_token')
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login'
+      }
+    }
     return Promise.reject(err)
   }
 )
 
-// ---- Auth ----
 // ---- Auth ----
 export const login = async (email: string, password: string) => {
   const { data } = await api.post('/auth/login', { email, password })
   if (typeof window !== 'undefined') {
     localStorage.setItem('laura_token', data.token)
     localStorage.setItem('laura_user', JSON.stringify(data.user))
-    // Store in cookie for middleware auth guard
     document.cookie = `laura_token=${data.token}; path=/; max-age=86400`
   }
   return data
@@ -95,17 +93,52 @@ export const submitLOA = async (id: string): Promise<LOA> => {
   return data
 }
 
+// ── DEPRECATED — /approve does not exist in backend Sprint 2.5 ─────────────
+// Kept for backward compatibility. New code should use validateWorkflowStep.
 export const approveLOA = async (id: string, comment?: string): Promise<LOA> => {
   const { data } = await api.post(`/loa/${id}/approve`, { comment })
   return data
 }
 
 export const rejectLOA = async (id: string, reason: string): Promise<LOA> => {
-  // reason goes as query param to match FastAPI signature
   const { data } = await api.post(`/loa/${id}/reject`, null, { params: { reason } })
   return data
 }
 
+// ── Workflow — Sprint 2.5 endpoints ─────────────────────────────────────────
+
+/**
+ * Advance a LOA one step in the approval workflow.
+ * Backend smart-dispatches: 'validate' permission for CMO/CFO/CEO steps,
+ * 'advance_phase' for EMEA orchestration steps.
+ * Frontend just calls this — backend decides what's allowed.
+ */
+export const validateWorkflowStep = async (id: string): Promise<LOA> => {
+  const { data } = await api.post(`/loa/${id}/validate`)
+  return data
+}
+
+/**
+ * Lock a LOA against any editing. Super-admin only (can_override_lock).
+ * The LOA keeps its workflow status — can resume once unlocked.
+ */
+export const lockLOA = async (id: string): Promise<LOA> => {
+  const { data } = await api.post(`/loa/${id}/lock`)
+  return data
+}
+
+/**
+ * Unlock a LOA. Super-admin only (can_override_lock).
+ */
+export const unlockLOA = async (id: string): Promise<LOA> => {
+  const { data } = await api.post(`/loa/${id}/unlock`)
+  return data
+}
+
+export const deleteLOA = async (id: string) => {
+  const { data } = await api.delete(`/loa/${id}`)
+  return data
+}
 // ---- AI suggestions ----
 export const getAISuggestion = async (params: {
   activity_type: string
@@ -115,7 +148,6 @@ export const getAISuggestion = async (params: {
   fy_total: number
   num_doors: number
 }): Promise<AISuggestion> => {
-  // correct endpoint: /loa/ai/suggest
   const { data } = await api.post('/loa/ai/suggest', {
     ...params,
     requestor_email: 'system',
@@ -141,7 +173,6 @@ export const validateDescription = async (
 
 // ---- File downloads ----
 export const downloadPPT = async (id: string) => {
-  // correct endpoint: /loa/{id}/pptx (not /ppt)
   const response = await api.get(`/loa/${id}/pptx`, { responseType: 'blob' })
   const url = window.URL.createObjectURL(new Blob([response.data]))
   const link = document.createElement('a')

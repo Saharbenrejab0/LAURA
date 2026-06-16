@@ -6,8 +6,9 @@ import { useRouter } from 'next/navigation'
 import { getLOAs } from '@/lib/api'
 import { useMyRole } from '@/hooks/usePermissions'
 import type { LOA } from '@/types/loa'
-import { ThemeToggle } from '@/components/ThemeProvider'
+import { CLUSTERS, STATUS_CONFIG } from '@/types/loa'
 import { useToast } from '@/components/Toast'
+import NavHeader from '@/components/NavHeader'
 
 function formatEuros(n: number) {
   if (!n) return '€0'
@@ -40,41 +41,38 @@ function timeAgo(iso: string | undefined | null): string {
 function lastAction(loa: LOA): string {
   if (loa.status === 'approved') return 'approved'
   if (loa.status === 'rejected') return 'rejected'
-  if (loa.status === 'submitted') return 'submitted'
   if (loa.status === 'local_prep') return 'submitted'
   if (loa.status === 'country_review') return 'in country review'
   if (loa.status === 'global_review') return 'in global review'
-  if (loa.status === 'brand_review') return 'in review'
   if (loa.status === 'cmo_review') return 'in CMO review'
   if (loa.status === 'cfo_review') return 'in CFO review'
   if (loa.status === 'corporate_review') return 'in corporate review'
   if (loa.status === 'ceo_validation') return 'awaiting CEO'
   if (loa.status === 'draft') return 'edited'
-  if (loa.status === 'locked') return 'locked'
   return 'updated'
 }
 
-// Status labels cover BOTH legacy statuses (for historical LOAs) AND new
-// Sprint 2 statuses (for LOAs going through the 9-step workflow).
-const STATUS: Record<string, { label: string; cls: string }> = {
-  // Legacy statuses (kept for historical LOAs imported from before Sprint 2)
-  draft:            { label: 'Draft',            cls: 'badge-draft' },
-  submitted:        { label: 'Submitted',        cls: 'badge-submitted' },
-  brand_review:     { label: 'Brand review',     cls: 'badge-brand-review' },
-  // New Sprint 2 workflow statuses
-  local_prep:       { label: 'Local prep',       cls: 'badge-submitted' },
-  country_review:   { label: 'Country review',   cls: 'badge-submitted' },
-  global_review:    { label: 'Global review',    cls: 'badge-brand-review' },
-  cmo_review:       { label: 'CMO review',       cls: 'badge-cmo-review' },
-  cfo_review:       { label: 'CFO review',       cls: 'badge-cfo-review' },
-  corporate_review: { label: 'Corporate review', cls: 'badge-cfo-review' },
-  ceo_validation:   { label: 'CEO validation',   cls: 'badge-cmo-review' },
-  approved:         { label: 'Approved',         cls: 'badge-approved' },
-  rejected:         { label: 'Rejected',         cls: 'badge-rejected' },
-  locked:           { label: 'Locked',           cls: 'badge-rejected' },
+// ── Status badge lookup ────────────────────────────────────────────────
+// Primary source: STATUS_CONFIG from types/loa.ts (the 10 real statuses).
+// Legacy fallback: historical LOAs imported before Sprint 2 may carry
+// statuses that no longer exist in the workflow. We handle them gracefully.
+const LEGACY_STATUS_FALLBACK: Record<string, { label: string; cls: string }> = {
+  submitted:    { label: 'Submitted',    cls: 'badge-submitted' },
+  brand_review: { label: 'Brand review', cls: 'badge-brand-review' },
+  locked:       { label: 'Locked',       cls: 'badge-rejected' },
 }
 
-const CLUSTERS = ['FRANCE','ITALY','DACH','IBERIA','NORTH','META','EAST','EMEA','RUSSIA']
+function getStatusBadge(status: string): { label: string; cls: string } {
+  return (STATUS_CONFIG as any)[status]
+    ?? LEGACY_STATUS_FALLBACK[status]
+    ?? { label: status, cls: 'badge-draft' }
+}
+
+// All statuses for the filter dropdown (real + legacy for historical LOAs)
+const ALL_FILTER_STATUSES: { key: string; label: string }[] = [
+  ...Object.entries(STATUS_CONFIG).map(([key, val]) => ({ key, label: val.label })),
+  ...Object.entries(LEGACY_STATUS_FALLBACK).map(([key, val]) => ({ key, label: val.label })),
+]
 
 const PAGE_SIZE = 50
 
@@ -96,13 +94,10 @@ export default function TrackerPage() {
   const [filterQuarter, setFQ]       = useState('')
   const [search, setSearch]          = useState('')
   const [page, setPage]              = useState(1)
-  const [user, setUser]              = useState<any>(null)
   const [showHistorical, setShowHistorical] = useState(false)
   const [visitedIds, setVisitedIds]  = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    const raw = localStorage.getItem('laura_user')
-    if (raw) setUser(JSON.parse(raw))
     try {
       const v = sessionStorage.getItem('laura.visitedLOAs')
       if (v) setVisitedIds(new Set(JSON.parse(v)))
@@ -135,14 +130,6 @@ export default function TrackerPage() {
       })
       setLOAs(data)
     } catch { } finally { setLoading(false) }
-  }
-
-  function handleLogout() {
-    localStorage.removeItem('laura_token')
-    localStorage.removeItem('laura_user')
-    sessionStorage.removeItem('laura.visitedLOAs')
-    document.cookie = 'laura_token=; path=/; max-age=0'
-    router.push('/login')
   }
 
   // ── Filtering ────────────────────────────────────────────────────────
@@ -205,52 +192,9 @@ export default function TrackerPage() {
   // ONLY the demo LOAs that match their scope.
   const canSeeHistorical = role?.can_override_lock === true
 
-  // Sprint 2.5: a human-readable description of what the user is seeing.
-  // E.g. "France Marketer — viewing FRANCE cluster"
-  const scopeDescription = useMemo(() => {
-    if (!role) return null
-    const parts = [role.role_display_name]
-    if (role.role_scope_type === 'cluster' && role.role_scope_value?.length) {
-      parts.push(`viewing ${role.role_scope_value.join(', ')}`)
-    } else if (role.role_scope_type === 'brand' && role.role_scope_value?.length) {
-      parts.push(`viewing ${role.role_scope_value.length} brand(s)`)
-    } else if (role.role_scope_type === 'function' && role.role_scope_value?.length) {
-      parts.push(`viewing ${role.role_scope_value.join(', ')}`)
-    } else if (role.role_scope_type === 'all') {
-      parts.push('full access')
-    }
-    return parts.join(' · ')
-  }, [role])
-
   return (
-    <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-      <header className="border-b" style={{ borderColor: 'var(--border)', background: 'var(--bg-secondary)' }}>
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
-              LAURA · Tracker
-            </h1>
-            {scopeDescription && (
-              <span
-                className="text-xs px-2 py-1 rounded"
-                style={{
-                  background: 'var(--bg-tertiary, rgba(0,0,0,0.05))',
-                  color: 'var(--text-secondary)',
-                }}
-              >
-                {scopeDescription}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            <Link href="/loa/new" className="btn-primary text-sm">+ New LOA</Link>
-            <ThemeToggle />
-            <button onClick={handleLogout} className="btn-ghost text-sm px-3">
-              Logout {user?.full_name ? `· ${user.full_name.split(' ')[0]}` : ''}
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <NavHeader active="tracker" />
 
       <main className="max-w-7xl mx-auto px-6 py-6">
 
@@ -292,37 +236,24 @@ export default function TrackerPage() {
             placeholder="Search LOA #, activity, country, brand, customer…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 min-w-[300px] px-3 py-2 text-sm rounded border"
-            style={{
-              background: 'var(--bg-tertiary, white)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-primary)',
-            }}
+            className="input flex-1 min-w-[300px]"
           />
           <select
             value={filterStatus}
             onChange={(e) => setFS(e.target.value)}
-            className="px-3 py-2 text-sm rounded border"
-            style={{
-              background: 'var(--bg-tertiary, white)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-primary)',
-            }}
+            className="input"
+            style={{ width: 'auto', minWidth: '150px' }}
           >
             <option value="">All statuses</option>
-            {Object.entries(STATUS).map(([key, val]) => (
-              <option key={key} value={key}>{val.label}</option>
+            {ALL_FILTER_STATUSES.map(({ key, label }) => (
+              <option key={key} value={key}>{label}</option>
             ))}
           </select>
           <select
             value={filterCluster}
             onChange={(e) => setFC(e.target.value)}
-            className="px-3 py-2 text-sm rounded border"
-            style={{
-              background: 'var(--bg-tertiary, white)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-primary)',
-            }}
+            className="input"
+            style={{ width: 'auto', minWidth: '140px' }}
           >
             <option value="">All clusters</option>
             {CLUSTERS.map(c => <option key={c} value={c}>{c}</option>)}
@@ -330,12 +261,8 @@ export default function TrackerPage() {
           <select
             value={filterQuarter}
             onChange={(e) => setFQ(e.target.value)}
-            className="px-3 py-2 text-sm rounded border"
-            style={{
-              background: 'var(--bg-tertiary, white)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-primary)',
-            }}
+            className="input"
+            style={{ width: 'auto', minWidth: '130px' }}
           >
             <option value="">All quarters</option>
             <option value="Q1">Q1 2026</option>
@@ -385,7 +312,7 @@ export default function TrackerPage() {
         {/* Grid rows */}
         <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
           {paginated.map((loa) => {
-            const st = STATUS[loa.status] ?? { label: loa.status, cls: 'badge-draft' }
+            const st = getStatusBadge(loa.status)
             const visited = visitedIds.has(loa.id)
             const dupInfo = duplicates.get(loa.id)
             const isDup = !!dupInfo
@@ -397,7 +324,7 @@ export default function TrackerPage() {
                 onClick={() => markVisited(loa.id)}
                 className={`grid ${GRID_COLS} gap-3 px-3 py-3 items-center hover:bg-opacity-50 transition`}
                 style={{
-                  background: visited ? 'transparent' : 'var(--bg-secondary)',
+                  background: visited ? 'transparent' : 'var(--bg-elevated)',
                 }}
               >
                 <span className="flex justify-center">
@@ -411,7 +338,7 @@ export default function TrackerPage() {
                 </span>
 
                 <span className="mono text-xs pt-0.5 truncate" style={{ color:'var(--text-muted)' }}>
-                  {loa.loa_number || loa.loa_draft_id?.slice(0,14)}
+                  {loa.loa_number || loa.loa_draft_id}
                 </span>
 
                 <div className="min-w-0">
@@ -420,17 +347,16 @@ export default function TrackerPage() {
                       {loa.detail||loa.activity_type}
                     </p>
                     {isDup && (
-                      <span title={`Duplicate of ${dupInfo!.originalLoaNumber}`}
-                        className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0"
-                        style={{ background: 'var(--amber, #f59e0b)', color: 'white' }}>
-                        Duplicate
+                      <span title={`Similar to ${dupInfo!.originalLoaNumber}`}
+                        className="badge badge-duplicate flex-shrink-0">
+                        Similar
                       </span>
                     )}
                   </div>
                   <p className="text-xs truncate" style={{ color:'var(--text-muted)' }}>
                     {loa.activity_type}
                     {isDup && (
-                      <span style={{ color: 'var(--amber, #f59e0b)' }}> · original: {dupInfo!.originalLoaNumber}</span>
+                      <span style={{ color: 'var(--pink-text)' }}> · similar to {dupInfo!.originalLoaNumber}</span>
                     )}
                   </p>
                 </div>

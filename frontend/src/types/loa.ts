@@ -4,14 +4,18 @@
 // Source of truth: LAURA_Dropdown_Rules_CLIENT_v2.pdf
 // ============================================================
 
+// Aligned with backend/api/loa.py WORKFLOW_TRANSITIONS
 export type LOAStatus =
-  | 'draft'
-  | 'submitted'
-  | 'brand_review'
-  | 'cmo_review'
-  | 'cfo_review'
-  | 'approved'
-  | 'rejected'
+  | 'draft'             // not yet submitted
+  | 'local_prep'        // submitted → EMEA phases begin
+  | 'country_review'    // advance_phase
+  | 'global_review'     // advance_phase
+  | 'cmo_review'        // validate (named approver)
+  | 'cfo_review'        // validate (named approver)
+  | 'corporate_review'  // advance_phase
+  | 'ceo_validation'    // validate (named approver — final gate)
+  | 'approved'          // terminal ✓
+  | 'rejected'          // terminal ✗ (resubmittable)
 
 export type ActivityType =
   | 'Permanent Visibility'
@@ -89,6 +93,7 @@ export interface LOA {
 
   // Status
   status: LOAStatus
+  is_locked: boolean          // set by super-admin via /lock and /unlock
   brand_review_deadline?: string
   cmo_comment?: string
   rejection_reason?: string
@@ -113,6 +118,7 @@ export type LOAFormValues = Omit <
   | 'avg_investment_per_door'
   | 'ppt_slide_required'
   | 'status'
+  | 'is_locked'
   | 'brand_review_deadline'
   | 'cmo_comment'
   | 'rejection_reason'
@@ -141,7 +147,6 @@ export const CLUSTERS = [
   'NORTH', 'META', 'EAST', 'EMEA', 'RUSSIA',
 ] as const
 
-// Cluster → Country cascade
 export const CLUSTER_COUNTRIES: Record<string, string[]> = {
   FRANCE: ['France'],
   ITALY:  ['Italy'],
@@ -154,7 +159,6 @@ export const CLUSTER_COUNTRIES: Record<string, string[]> = {
   RUSSIA: ['Russia'],
 }
 
-// Country → Legal Entities (combobox: pick or type freely)
 export const LEGAL_ENTITIES_BY_COUNTRY: Record<string, string[]> = {
   'France': ['EL France', 'Essilor France', 'Luxottica France', 'BBGR', 'Nikon France', 'NOVACEL', "France PS (all BU's)"],
   'Italy': ['ELWI', 'Essilor Italie'],
@@ -228,7 +232,6 @@ export const COT_OPTIONS = [
   'Others',
 ]
 
-// Categories are MULTI-SELECT (e.g. Frames + Lenses)
 export const CATEGORY_OPTIONS = [
   'Frames',
   'Lenses',
@@ -238,14 +241,11 @@ export const CATEGORY_OPTIONS = [
   'All cat.',
 ]
 
-// Brand list by category
 export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
   'Frames': [
-    // House Brands
     'HB - Ray-Ban', 'HB - Ray-Ban Meta', 'HB - Oakley', 'HB - Vogue',
     'HB - Persol', 'HB - Oliver Peoples', 'HB - Alain Mikli', 'HB - BLIZ',
     'HB - Arnette', 'HB - Others', 'all HB', 'Sport (OO/ZB/OW)',
-    // License Brands
     'LB - Luxury', 'LB - PFF', 'LB - Armani Exchange', 'LB - Brunello Cucinelli',
     'LB - Burberry', 'LB - Chanel', 'LB - Dolce & Gabbana', 'LB - Emporio Armani',
     'LB - Ferrari', 'LB - Ferrari Scuderia', 'LB - Giorgio Armani', 'LB - Jimmy Choo',
@@ -272,7 +272,6 @@ export const BRANDS_BY_CATEGORY: Record<string, string[]> = {
   ],
 }
 
-// Helper: get brands for multiple selected categories
 export function getBrandsForCategories(cats: string[]): string[] {
   const seen = new Set<string>()
   const result: string[] = []
@@ -288,19 +287,23 @@ export function getBrandsForCategories(cats: string[]): string[] {
   return result
 }
 
-// Legacy flat list — kept for backwards compatibility
 export const BRAND_OPTIONS = Array.from(
   new Set(Object.values(BRANDS_BY_CATEGORY).flat())
 )
 
-export const STATUS_CONFIG: Record<LOAStatus, { label: string; color: string }> = {
-  draft:        { label: 'Draft',         color: 'bg-slate-700 text-slate-300' },
-  submitted:    { label: 'Submitted',     color: 'bg-blue-900 text-blue-300' },
-  brand_review: { label: 'Brand review',  color: 'bg-purple-900 text-purple-300' },
-  cmo_review:   { label: 'CMO review',    color: 'bg-amber-900 text-amber-300' },
-  cfo_review:   { label: 'CFO review',    color: 'bg-orange-900 text-orange-300' },
-  approved:     { label: 'Approved',      color: 'bg-green-900 text-green-300' },
-  rejected:     { label: 'Rejected',      color: 'bg-red-900 text-red-300' },
+// Status badge config — single source of truth for all pages.
+// Badge CSS classes are defined in globals.css.
+export const STATUS_CONFIG: Record<LOAStatus, { label: string; cls: string }> = {
+  draft:            { label: 'Draft',             cls: 'badge-draft' },
+  local_prep:       { label: 'Local prep',        cls: 'badge-local-prep' },
+  country_review:   { label: 'Country review',    cls: 'badge-country-review' },
+  global_review:    { label: 'Global review',     cls: 'badge-global-review' },
+  cmo_review:       { label: 'CMO review',        cls: 'badge-cmo-review' },
+  cfo_review:       { label: 'CFO review',        cls: 'badge-cfo-review' },
+  corporate_review: { label: 'Corporate review',  cls: 'badge-corporate-review' },
+  ceo_validation:   { label: 'CEO validation',    cls: 'badge-ceo-validation' },
+  approved:         { label: 'Approved',          cls: 'badge-approved' },
+  rejected:         { label: 'Rejected',          cls: 'badge-rejected' },
 }
 
 export const EVENT_ACTIVITY_TYPES: ActivityType[] = ['Events', 'Medical Affairs']

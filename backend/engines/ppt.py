@@ -425,6 +425,8 @@ def _render_standard_table(slide, loa, hide_doors=False):
     }.get(activity, activity)
 
     fy_total = loa.get("fy_2026_total") or 0
+    q1 = loa.get("q1_2026") or 0
+    q2 = loa.get("q2_2026") or 0
     q3 = loa.get("q3_2026") or 0
     q4 = loa.get("q4_2026") or 0
     num_doors = loa.get("num_doors") or 0
@@ -451,11 +453,13 @@ def _render_standard_table(slide, loa, hide_doors=False):
         ]
 
     cols += [
-        ("VENDOR",             1.4,  (loa.get("vendor") or "—")[:25]),
-        ("CURR.\n(i.e. EUR)",  0.6,  loa.get("currency") or "€"),
-        ("Q3-26",              0.75, _fmt_eur_full(q3) if q3 else "—"),
-        ("Q4-26",              0.75, _fmt_eur_full(q4) if q4 else "—"),
-        ("FY-26",              0.85, _fmt_eur_full(fy_total) if fy_total else "—"),
+        ("VENDOR",             1.2,  (loa.get("vendor") or "—")[:20]),
+        ("CURR.",              0.45, loa.get("currency") or "€"),
+        ("Q1-26",              0.65, _fmt_eur_full(q1) if q1 else "—"),
+        ("Q2-26",              0.65, _fmt_eur_full(q2) if q2 else "—"),
+        ("Q3-26",              0.65, _fmt_eur_full(q3) if q3 else "—"),
+        ("Q4-26",              0.65, _fmt_eur_full(q4) if q4 else "—"),
+        ("FY-26",              0.75, _fmt_eur_full(fy_total) if fy_total else "—"),
     ]
 
     # Render headers + data

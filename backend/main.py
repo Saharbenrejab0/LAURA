@@ -7,9 +7,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import structlog
 
-from backend.api import loa, auth, health, permissions  
+from backend.api import loa, auth, health, permissions, reference, admin
 from backend.config import settings
-from backend.api import reference
 
 logger = structlog.get_logger()
 
@@ -34,5 +33,6 @@ app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(loa.router, prefix="/loa", tags=["loa"])
 app.include_router(permissions.router)
 app.include_router(reference.router)
+app.include_router(admin.router)
 
 logger.info("LAURA backend ready", environment=settings.ENVIRONMENT)

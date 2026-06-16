@@ -91,14 +91,25 @@ def compute_permissions(user: User, loa: LOA, db: Session) -> dict:
     # but not edit them (drafts belong to their creator).
     if loa.status == 'draft':
         if role.can_override_lock:
-            # Super-admin can view drafts
-            is_scope_match = True
             result['is_scope_match'] = True
             result['can_view'] = True
             return result
-        # For non-super-admins, only the author has access to drafts
         if not result['is_author']:
-            return result  # no access at all
+            return result
+        # Author of their own draft — always full edit access
+        result['is_scope_match'] = True
+        result['can_view'] = True
+        result['can_edit'] = True
+        result['can_comment'] = True
+        return result
+
+    # Same logic for rejected — author can always edit to revise & resubmit
+    if loa.status == 'rejected' and result['is_author']:
+        result['is_scope_match'] = True
+        result['can_view'] = True
+        result['can_edit'] = True
+        result['can_comment'] = True
+        # Don't return — let matrix add validate if applicable
         # else: author of the draft has the access defined by the matrix below
 
     result['is_scope_match'] = is_scope_match

@@ -94,6 +94,7 @@ class LOACreate(BaseModel):
     description: Optional[str] = None
     customer: Optional[str] = None
     vendor: Optional[str] = None
+    cost_justification: Optional[str] = None
     currency: str = "EUR"
     num_customers: Optional[int] = None
     num_doors: Optional[int] = None
@@ -715,6 +716,37 @@ async def validate_loa(loa_id: str, db: Session = Depends(get_db)):
         "is_valid": not any(i["type"] == "error" for i in issues),
         "issues": issues,
     }
+
+@router.delete("/{loa_id}")
+async def delete_loa(
+    loa_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Delete a LOA. Only allowed when status is draft or local_prep,
+    and only by the author or a super-admin.
+    """
+    loa = db.query(LOA).filter(LOA.id == loa_id).first()
+    if not loa:
+        raise HTTPException(status_code=404, detail="LOA not found")
+
+    role = user.role_obj
+    is_author = loa.requestor_email == user.email
+    is_admin = role and role.can_override_lock
+
+    if not is_author and not is_admin:
+        raise HTTPException(status_code=403, detail="Only the author or a super-admin can delete a LOA.")
+
+    if loa.status not in ("draft", "local_prep"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete a LOA in status '{loa.status}'. Only draft and local_prep LOAs can be deleted.",
+        )
+
+    db.delete(loa)
+    db.commit()
+    return {"deleted": True, "loa_id": loa_id}
 
 
 @router.get("/{loa_id}/pptx")

@@ -225,6 +225,8 @@ class LOA(Base):
     pct_central_budget = Column(Float, nullable=True)   # e.g. 0.30 = 30%
 
     # ── PPT content (filled by user, validated/suggested by Claude) ───────────
+    # ── Sprint 4 #34: mandatory cost justification when FY-26 > 100K€ ────
+    cost_justification = Column(Text, nullable=True)
     tools          = Column(Text, nullable=True)    # The HOW (= DETAIL field in PPT)
     kpi            = Column(Text, nullable=True)    # Required for all types except Others
     cost_drill_down = Column(Text, nullable=True)   # Investment breakdown for PPT

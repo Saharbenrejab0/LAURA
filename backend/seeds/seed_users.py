@@ -31,7 +31,7 @@ def hash_password(pw: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════
 # USER DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════
-#
+#45users
 # Format: (email, full_name, role_code, optional cluster shortcut for legacy
 # `cluster` field — kept for backward compatibility).
 
