@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 interface PreviewModalProps {
   isOpen: boolean
@@ -40,30 +41,30 @@ export default function PreviewModal({
     return () => document.removeEventListener('keydown', handler)
   }, [isOpen, onClose])
 
-  if (!isOpen) return null
+  // Lock body scroll when modal is open
+  useEffect(() => {
+    if (!isOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [isOpen])
+
+  if (!isOpen || typeof document === 'undefined') return null
 
   const slideTitle = brand ? `${brand}: ${activityType}` : activityType
 
-  // Use a portal-like approach without position:fixed
-  // Render as a full-page overlay that's part of the document flow
-  return (
+  const modal = (
     <div
       style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        minHeight: '100vh',
+        position: 'fixed',
+        inset: 0,
         zIndex: 9999,
         background: 'rgba(0,0,0,0.85)',
         display: 'flex',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         justifyContent: 'center',
-        paddingTop: '60px',
-        paddingBottom: '60px',
-        paddingLeft: '24px',
-        paddingRight: '24px',
+        padding: '32px 24px',
+        overflowY: 'auto',
       }}
       onClick={onClose}
     >
@@ -71,7 +72,7 @@ export default function PreviewModal({
         onClick={e => e.stopPropagation()}
         style={{
           width: '100%',
-          maxWidth: '860px',
+          maxWidth: '960px',
           background: 'var(--bg-surface)',
           borderRadius: '16px',
           border: '1px solid var(--border)',
@@ -92,177 +93,201 @@ export default function PreviewModal({
           <button onClick={onClose} style={{
             background: 'none', border: 'none', cursor: 'pointer',
             color: 'var(--text-muted)', fontSize: '20px', lineHeight: 1,
-            padding: '0 4px', borderRadius: '6px', display: 'flex',
+            padding: '4px 8px', borderRadius: '6px', display: 'flex',
             alignItems: 'center', justifyContent: 'center',
-          }}>×</button>
+          }}
+            aria-label="Close preview"
+          >×</button>
         </div>
 
         {/* Slide container */}
         <div style={{ padding: '20px', background: 'var(--bg-elevated)' }}>
-          {/* The actual slide — white background always */}
+          {/* The actual slide — forced 16:9 via padding trick for bulletproof aspect ratio */}
           <div style={{
+            position: 'relative',
+            width: '100%',
+            paddingBottom: '56.25%', /* 9/16 = 56.25% */
             background: '#ffffff',
             borderRadius: '6px',
             overflow: 'hidden',
             border: '1px solid #ddd',
-            aspectRatio: '16/9',
-            position: 'relative',
             fontFamily: 'Arial, sans-serif',
           }}>
-            {/* Top dark bar */}
+            {/* Absolutely positioned inner container fills the 16:9 box */}
             <div style={{
-              background: '#0D1B2A',
-              padding: '7px 14px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}>
-              <span style={{ color: 'white', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em' }}>
-                {category?.toUpperCase() || 'CATEGORY'}
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ color: 'white', fontSize: '10px', fontWeight: 600 }}>
-                  {country?.toUpperCase() || 'COUNTRY'} · {formatEuros(fyTotal)}
-                </span>
-                <span style={{
-                  background: '#C9A84C', color: 'white',
-                  fontSize: '8px', fontWeight: 700,
-                  padding: '2px 7px', borderRadius: '2px',
-                }}>LOA #</span>
-              </div>
-            </div>
-
-            {/* Title row */}
-            <div style={{
-              padding: '6px 14px 4px',
-              borderBottom: '1px solid #eee',
-              background: '#fff',
-            }}>
-              <p style={{ fontSize: '13px', fontWeight: 700, color: '#0D1B2A', margin: 0, lineHeight: 1.3 }}>
-                {slideTitle}
-              </p>
-            </div>
-
-            {/* Table header */}
-            <div style={{
-              background: '#F2F2F2',
-              padding: '4px 14px',
-              borderBottom: '1px solid #ddd',
-            }}>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1.2fr 1.1fr 1.3fr 2.5fr 0.6fr 0.8fr 1.2fr 0.75fr 1.5fr',
-                gap: '4px',
-              }}>
-                {['SAP CODE','EVENT TYPE','BRANDS','DESCRIPTION','# CUST','AVG/CUST','VENDOR','BUDGET','DATE'].map(h => (
-                  <span key={h} style={{ color: '#666', fontWeight: 700, fontSize: '6.5px', letterSpacing: '0.03em' }}>{h}</span>
-                ))}
-              </div>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1.2fr 1.1fr 1.3fr 2.5fr 0.6fr 0.8fr 1.2fr 0.75fr 1.5fr',
-                gap: '4px',
-                marginTop: '3px',
-              }}>
-                {['TBC', activityType?.slice(0,12) || '—', brand?.slice(0,10) || '—', (description?.slice(0,50) + (description?.length > 50 ? '…' : '')) || '—', '—', '—', '—', formatEuros(fyTotal), '—'].map((v, i) => (
-                  <span key={i} style={{ color: '#222', fontSize: '7.5px' }}>{v}</span>
-                ))}
-              </div>
-            </div>
-
-            {/* Main content area */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 240px',
-              height: 'calc(100% - 120px)',
-              background: '#fff',
-            }}>
-              {/* Left — content */}
-              <div style={{ padding: '8px 14px', overflowY: 'auto' }}>
-                {description && (
-                  <div style={{ marginBottom: '7px' }}>
-                    <p style={{ fontSize: '7.5px', fontWeight: 700, color: '#666', margin: '0 0 2px', textTransform: 'uppercase' }}>Description:</p>
-                    <p style={{ fontSize: '8.5px', color: '#222', margin: 0, lineHeight: 1.5 }}>{description}</p>
-                  </div>
-                )}
-                {(tools || detail) && (
-                  <div style={{ marginBottom: '7px' }}>
-                    <p style={{ fontSize: '7.5px', fontWeight: 700, color: '#666', margin: '0 0 2px', textTransform: 'uppercase' }}>Tools:</p>
-                    <p style={{ fontSize: '8.5px', color: '#222', margin: 0, lineHeight: 1.5 }}>{tools || detail}</p>
-                  </div>
-                )}
-                {kpi && (
-                  <div style={{ marginBottom: '7px' }}>
-                    <p style={{ fontSize: '7.5px', fontWeight: 700, color: '#666', margin: '0 0 2px', textTransform: 'uppercase' }}>KPI:</p>
-                    <p style={{ fontSize: '8.5px', color: '#222', margin: 0, lineHeight: 1.5 }}>{kpi}</p>
-                  </div>
-                )}
-                {costDrillDown && (
-                  <div style={{ marginBottom: '7px' }}>
-                    <p style={{ fontSize: '7.5px', fontWeight: 700, color: '#666', margin: '0 0 2px', textTransform: 'uppercase' }}>Cost drill down:</p>
-                    <p style={{ fontSize: '8.5px', color: '#222', margin: 0, lineHeight: 1.5 }}>{costDrillDown}</p>
-                  </div>
-                )}
-                {numDoors > 0 && (
-                  <p style={{ fontSize: '8.5px', fontWeight: 700, color: '#1A7348', margin: 0 }}>
-                    {formatEuros(avgPerDoor)} avg/door · #{numDoors} doors
-                  </p>
-                )}
-                {!description && !tools && !kpi && (
-                  <p style={{ fontSize: '9px', color: '#aaa', fontStyle: 'italic' }}>Fill section 7 to see content here</p>
-                )}
-              </div>
-
-              {/* Right — photos */}
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                borderLeft: '1px solid #eee',
-              }}>
-                {[1, 2].map(idx => {
-                  const photo = photos.find(p => p.index === idx)
-                  return (
-                    <div key={idx} style={{
-                      flex: 1,
-                      borderBottom: idx === 1 ? '1px solid #eee' : 'none',
-                      background: '#f5f5f5',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                    }}>
-                      {photo ? (
-                        <img
-                          src={photo.url}
-                          alt={`Photo ${idx}`}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        <p style={{ fontSize: '9px', color: '#bbb', textAlign: 'center', fontStyle: 'italic' }}>
-                          [ Photo {idx} ]
-                        </p>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div style={{
-              background: '#0D1B2A',
-              padding: '4px 14px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
               position: 'absolute',
-              bottom: 0,
-              left: 0,
-              right: 0,
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
             }}>
-              <span style={{ color: 'white', fontSize: '8px', fontWeight: 700 }}>FRANCE</span>
-              <span style={{ color: '#aaa', fontSize: '7px' }}>Strictly confidential — for internal use only</span>
-              <span style={{ color: 'white', fontSize: '8px', fontWeight: 700 }}>EssilorLuxottica</span>
+              {/* Top dark bar */}
+              <div style={{
+                background: '#0D1B2A',
+                padding: '8px 16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexShrink: 0,
+              }}>
+                <span style={{ color: 'white', fontSize: '12px', fontWeight: 700, letterSpacing: '0.05em' }}>
+                  {category?.toUpperCase() || 'CATEGORY'}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ color: 'white', fontSize: '11px', fontWeight: 600 }}>
+                    {country?.toUpperCase() || 'COUNTRY'} · {formatEuros(fyTotal)}
+                  </span>
+                  <span style={{
+                    background: '#C9A84C', color: 'white',
+                    fontSize: '9px', fontWeight: 700,
+                    padding: '2px 8px', borderRadius: '2px',
+                  }}>LOA #</span>
+                </div>
+              </div>
+
+              {/* Title row */}
+              <div style={{
+                padding: '8px 16px 6px',
+                borderBottom: '1px solid #eee',
+                background: '#fff',
+                flexShrink: 0,
+              }}>
+                <p style={{ fontSize: '15px', fontWeight: 700, color: '#0D1B2A', margin: 0, lineHeight: 1.3 }}>
+                  {slideTitle}
+                </p>
+              </div>
+
+              {/* Table header + data row */}
+              <div style={{ flexShrink: 0 }}>
+                <div style={{
+                  background: '#F2F2F2',
+                  padding: '5px 16px',
+                  borderBottom: '1px solid #ddd',
+                }}>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1.2fr 1.1fr 1.3fr 2.5fr 0.6fr 0.8fr 1.2fr 0.75fr 1.5fr',
+                    gap: '4px',
+                  }}>
+                    {['SAP CODE', 'EVENT TYPE', 'BRANDS', 'DESCRIPTION', '# CUST', 'AVG/CUST', 'VENDOR', 'BUDGET', 'DATE'].map(h => (
+                      <span key={h} style={{ color: '#666', fontWeight: 700, fontSize: '7px', letterSpacing: '0.03em' }}>{h}</span>
+                    ))}
+                  </div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1.2fr 1.1fr 1.3fr 2.5fr 0.6fr 0.8fr 1.2fr 0.75fr 1.5fr',
+                    gap: '4px',
+                    marginTop: '3px',
+                  }}>
+                    {[
+                      'TBC',
+                      activityType?.slice(0, 14) || '—',
+                      brand?.slice(0, 12) || '—',
+                      (description?.slice(0, 55) + (description?.length > 55 ? '…' : '')) || '—',
+                      '—', '—', '—',
+                      formatEuros(fyTotal),
+                      '—',
+                    ].map((v, i) => (
+                      <span key={i} style={{ color: '#222', fontSize: '8px' }}>{v}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Main content area — flex:1 fills remaining space */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 240px',
+                flex: 1,
+                minHeight: 0,
+                background: '#fff',
+              }}>
+                {/* Left — content */}
+                <div style={{ padding: '10px 16px', overflowY: 'auto' }}>
+                  {description && (
+                    <div style={{ marginBottom: '8px' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 700, color: '#666', margin: '0 0 2px', textTransform: 'uppercase' }}>Description:</p>
+                      <p style={{ fontSize: '9.5px', color: '#222', margin: 0, lineHeight: 1.5 }}>{description}</p>
+                    </div>
+                  )}
+                  {(tools || detail) && (
+                    <div style={{ marginBottom: '8px' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 700, color: '#666', margin: '0 0 2px', textTransform: 'uppercase' }}>Tools:</p>
+                      <p style={{ fontSize: '9.5px', color: '#222', margin: 0, lineHeight: 1.5 }}>{tools || detail}</p>
+                    </div>
+                  )}
+                  {kpi && (
+                    <div style={{ marginBottom: '8px' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 700, color: '#666', margin: '0 0 2px', textTransform: 'uppercase' }}>KPI:</p>
+                      <p style={{ fontSize: '9.5px', color: '#222', margin: 0, lineHeight: 1.5 }}>{kpi}</p>
+                    </div>
+                  )}
+                  {costDrillDown && (
+                    <div style={{ marginBottom: '8px' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 700, color: '#666', margin: '0 0 2px', textTransform: 'uppercase' }}>Cost drill down:</p>
+                      <p style={{ fontSize: '9.5px', color: '#222', margin: 0, lineHeight: 1.5 }}>{costDrillDown}</p>
+                    </div>
+                  )}
+                  {numDoors > 0 && (
+                    <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#1A7348', margin: 0 }}>
+                      {formatEuros(avgPerDoor)} avg/door · #{numDoors} doors
+                    </p>
+                  )}
+                  {!description && !tools && !kpi && (
+                    <p style={{ fontSize: '10px', color: '#aaa', fontStyle: 'italic' }}>Fill section 7 to see content here</p>
+                  )}
+                </div>
+
+                {/* Right — photos */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  borderLeft: '1px solid #eee',
+                }}>
+                  {[1, 2].map(idx => {
+                    const photo = photos.find(p => p.index === idx)
+                    return (
+                      <div key={idx} style={{
+                        flex: 1,
+                        borderBottom: idx === 1 ? '1px solid #eee' : 'none',
+                        background: '#f5f5f5',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        overflow: 'hidden',
+                        minHeight: 0,
+                      }}>
+                        {photo ? (
+                          <img
+                            src={photo.url}
+                            alt={`Photo ${idx}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <p style={{ fontSize: '10px', color: '#bbb', textAlign: 'center', fontStyle: 'italic' }}>
+                            [ Photo {idx} ]
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Footer — inside the flex column, not absolutely positioned */}
+              <div style={{
+                background: '#0D1B2A',
+                padding: '5px 16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexShrink: 0,
+              }}>
+                <span style={{ color: 'white', fontSize: '9px', fontWeight: 700 }}>
+                  {country?.toUpperCase() || 'FRANCE'}
+                </span>
+                <span style={{ color: '#aaa', fontSize: '7.5px' }}>Strictly confidential — for internal use only</span>
+                <span style={{ color: 'white', fontSize: '9px', fontWeight: 700 }}>EssilorLuxottica</span>
+              </div>
             </div>
           </div>
         </div>
@@ -280,4 +305,6 @@ export default function PreviewModal({
       </div>
     </div>
   )
+
+  return createPortal(modal, document.body)
 }

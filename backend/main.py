@@ -7,7 +7,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import structlog
 
-from backend.api import loa, auth, health, permissions, reference, admin
+from backend.api import (
+    health, auth, loa, draft, permissions, reference,
+    admin, comments, duplicate, chat, templates,
+)
 from backend.config import settings
 
 logger = structlog.get_logger()
@@ -28,11 +31,32 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
+
+# ── Preload heavy resources at startup ──
+# Without this, the first user to trigger a Deep Search waits ~40s while
+# the 2 GB sentence-transformers model loads from disk.
+# With preload, the model is ready before the server accepts requests.
+@app.on_event("startup")
+async def preload_resources():
+    try:
+        logger.info("preloading_embedding_model")
+        from backend.engines.rag import _get_embed_model
+        _get_embed_model()
+        logger.info("embedding_model_ready")
+    except Exception as e:
+        logger.warning("embedding_model_preload_failed", error=str(e))
+
+
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(loa.router, prefix="/loa", tags=["loa"])
+app.include_router(draft.router, tags=["draft"])
 app.include_router(permissions.router)
 app.include_router(reference.router)
 app.include_router(admin.router)
+app.include_router(comments.router, tags=["comments"])
+app.include_router(duplicate.router, tags=["duplicate"])
+app.include_router(chat.router, tags=["chat"])
+app.include_router(templates.router, tags=["templates"])
 
 logger.info("LAURA backend ready", environment=settings.ENVIRONMENT)

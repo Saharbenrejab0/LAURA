@@ -3,15 +3,21 @@
 Connected to:
   - backend.reference_data : source of truth for all dropdowns (validates inputs)
   - backend.models.loa     : SQLAlchemy LOA model (category is now ARRAY)
-  - backend.engines.*       : PPT/Excel/AI generation
+  - backend.engines.*      : PPT/Excel/AI generation
 
 Sprint 2 + 2.5 additions:
   - Scope-based filtering on GET /loa and GET /loa/{id}
   - Permission-protected action endpoints (submit, validate, reject, lock, unlock)
-  - Workflow state machine with 9 statuses
+  - Workflow state machine with 8 statuses (5 active transitions)
   - is_locked flag enforced on edits
-  - Smart /validate endpoint dispatching between 'validate' (CMO/CFO/CEO)
-    and 'advance_phase' (EMEA orchestration) permissions
+  - Smart /validate endpoint dispatching between 'validate' (CMO/CFO,
+    Corporate) and 'advance_phase' (EMEA PS orchestration)
+
+Sprint 5 additions:
+  - GET /export/excel           — consolidated Excel (scope-filtered)
+  - GET /export/excel/approved  — all approved LOAs (called by n8n)
+  - GET /{loa_id}/excel         — single LOA as one-row .xlsx
+  - notify_n8n("loa_approved")  — triggers Excel regen + notification
 """
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
@@ -44,10 +50,13 @@ from backend.reference_data import (
 )
 from backend.models.user import User
 from backend.models.role import Role
+from backend.models.comment import Comment
 from backend.api.auth import get_current_user
 from backend.api.permission_middleware import require_permission
 
 router = APIRouter()
+
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 # ── n8n webhook ─────────────────────────────────────────────────────────
@@ -67,14 +76,6 @@ async def notify_n8n(event: str, loa_id: str, extra: dict = None):
 
 # ── Pydantic schemas ────────────────────────────────────────────────────
 class LOACreate(BaseModel):
-    """
-    Schema for creating / updating a LOA.
-
-    Validation rules:
-      - `category` is now a list (multi-select, e.g. ["Frames", "Lenses"])
-      - All dropdown fields validated against reference_data.py
-      - Empty strings allowed during draft creation (only blocking at /submit)
-    """
     cluster: str = ""
     country: str = ""
     legal_entity: Optional[str] = None
@@ -83,10 +84,7 @@ class LOACreate(BaseModel):
     event_purpose: Optional[str] = None
     sap_event_code: Optional[str] = None
     cot: str = ""
-
-    # ── CATEGORY: now a LIST (multi-select) ─────────────────────────────
     category: list[str] = []
-
     brand: str = ""
     capex_opex: str = "OpEx"
     adv_selling: str = "ADV"
@@ -200,7 +198,6 @@ class DescriptionValidateRequest(BaseModel):
 
 
 class SuggestRequest(BaseModel):
-    """Input for AI suggestion. category is now multi-select too."""
     activity_type: str
     cluster: str = ""
     category: list[str] = []
@@ -220,31 +217,129 @@ class SuggestRequest(BaseModel):
 
 
 # ── Workflow state machine ──────────────────────────────────────────────
-#
-# Status transition map: defines the next status after a successful
-# /validate call on the current status. This map IS the workflow.
 WORKFLOW_TRANSITIONS = {
-    "local_prep":       "country_review",
-    "country_review":   "global_review",
-    "global_review":    "cmo_review",
-    "cmo_review":       "cfo_review",
-    "cfo_review":       "corporate_review",
-    "corporate_review": "ceo_validation",
-    "ceo_validation":   "approved",
+    "emea_review":             "global_review",
+    "global_review":           "cmo_cfo_review",
+    "cmo_cfo_review":          "global_functions_review",
+    "global_functions_review": "corporate_review",
+    "corporate_review":        "approved",
 }
 
-# Statuses that require the 'validate' permission to advance
-# (explicit approval moments by named approvers).
-VALIDATION_STATUSES = {"cmo_review", "cfo_review", "ceo_validation"}
+VALIDATION_STATUSES = {"cmo_cfo_review", "corporate_review"}
 
-# Statuses that require the 'advance_phase' permission to advance
-# (phase opening/closing acts, orchestrated by EMEA).
 ADVANCE_PHASE_STATUSES = {
-    "local_prep", "country_review", "global_review", "corporate_review",
+    "emea_review", "global_review", "global_functions_review",
 }
 
 
-# ── Routes ──────────────────────────────────────────────────────────────
+# ── Scope filter helper (shared by get_loas and export_excel) ───────────
+def _apply_scope_filter(query, user: User):
+    """Apply role-based scope filtering to a LOA query."""
+    role = user.role_obj
+    if role is None:
+        return query.filter(False)
+
+    if role.scope_type == 'cluster':
+        query = query.filter(LOA.cluster.in_(role.scope_value or []))
+    elif role.scope_type == 'brand':
+        query = query.filter(LOA.brand.in_(role.scope_value or []))
+    elif role.scope_type == 'function':
+        query = query.filter(LOA.activity_type.in_(role.scope_value or []))
+    elif role.scope_type == 'all':
+        pass
+    elif role.scope_type == 'author_only':
+        query = query.filter(LOA.requestor_email == user.email)
+    return query
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sprint 5 — Skip helper for orphan workflow steps
+# ─────────────────────────────────────────────────────────────────────────────
+# If a LOA reaches global_review or global_functions_review but no active
+# reviewer is assigned for its brand/category, we skip the step automatically
+# instead of letting the LOA hang forever.
+
+def _has_reviewer_for_step(loa: LOA, target_status: str, db: Session) -> bool:
+    """
+    Returns True if at least one active user has comment rights at
+    `target_status` AND a scope matching this LOA. False otherwise.
+    """
+    from backend.models.role import Role, RolePermission
+    from backend.models.permission import Permission
+
+    # Find all roles with `comment` permission at the target status.
+    comment_perm = db.query(Permission).filter(Permission.code == "comment").first()
+    if not comment_perm:
+        return True  # safety: if permission system is misconfigured, do not skip
+
+    roles_with_comment = (
+        db.query(Role)
+        .join(RolePermission, RolePermission.role_id == Role.id)
+        .filter(RolePermission.permission_id == comment_perm.id)
+        .filter(RolePermission.status == target_status)
+        .all()
+    )
+
+    if not roles_with_comment:
+        return False
+
+    # For each candidate role, check if at least one user fits the LOA's scope
+    for role in roles_with_comment:
+        users_in_role = db.query(User).filter(User.role_id == role.id).all()
+        if not users_in_role:
+            continue
+
+        # Scope check:
+        #   - "all" scope → any user matches
+        #   - "brand" scope → user.role.scope_value must include the LOA's brand
+        #   - "function" scope → user.role.scope_value must include a LOA category
+        #   - "cluster" scope → user.role.scope_value must include the LOA's cluster
+        scope_type = role.scope_type
+        scope_values = role.scope_value or []
+
+        if scope_type == "all":
+            return True
+
+        if scope_type == "brand" and loa.brand:
+            if any(loa.brand.lower() in (sv or "").lower() or (sv or "").lower() in loa.brand.lower() for sv in scope_values):
+                return True
+
+        if scope_type == "function" and loa.category:
+            cats = loa.category if isinstance(loa.category, list) else [loa.category]
+            for cat in cats:
+                if any((cat or "").lower() in (sv or "").lower() or (sv or "").lower() in (cat or "").lower() for sv in scope_values):
+                    return True
+
+        if scope_type == "cluster" and loa.cluster:
+            if any(loa.cluster.lower() == (sv or "").lower() for sv in scope_values):
+                return True
+
+    return False
+
+
+# Status steps that we may skip if no reviewer is available
+SKIPPABLE_STATUSES = {"global_review", "global_functions_review"}
+
+
+def _resolve_next_status(loa: LOA, current_status: str, db: Session) -> tuple[str, list[str]]:
+    """
+    Compute the next status, skipping orphan steps.
+    Returns (final_status, list_of_skipped_steps).
+    """
+    skipped: list[str] = []
+    next_status = WORKFLOW_TRANSITIONS.get(current_status)
+
+    while next_status in SKIPPABLE_STATUSES:
+        if _has_reviewer_for_step(loa, next_status, db):
+            break  # someone can review here, stop and use this status
+        skipped.append(next_status)
+        next_status = WORKFLOW_TRANSITIONS.get(next_status)
+        if next_status is None:
+            break
+
+    return next_status or "approved", skipped
+# ════════════════════════════════════════════════════════════════════════
+# ROUTES — order matters: /export/* BEFORE /{loa_id} to avoid UUID parse
+# ════════════════════════════════════════════════════════════════════════
 
 @router.get("")
 async def get_loas(
@@ -254,9 +349,6 @@ async def get_loas(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Return LOAs filtered by the current user's role scope.
-    """
     query = db.query(LOA)
 
     if not include_historical:
@@ -266,19 +358,20 @@ async def get_loas(
     if role is None:
         return []
 
-    if role.scope_type == 'cluster':
-        allowed_clusters = role.scope_value or []
-        query = query.filter(LOA.cluster.in_(allowed_clusters))
-    elif role.scope_type == 'brand':
-        allowed_brands = role.scope_value or []
-        query = query.filter(LOA.brand.in_(allowed_brands))
-    elif role.scope_type == 'function':
-        allowed_functions = role.scope_value or []
-        query = query.filter(LOA.activity_type.in_(allowed_functions))
-    elif role.scope_type == 'all':
-        pass
-    elif role.scope_type == 'author_only':
-        query = query.filter(LOA.requestor_email == user.email)
+    query = _apply_scope_filter(query, user)
+
+    if not role.can_override_lock:
+        allowed_statuses = (
+            db.query(RolePermission.loa_status)
+            .filter(RolePermission.role_id == role.id)
+            .distinct()
+            .all()
+        )
+        allowed = [s[0] for s in allowed_statuses]
+        if allowed:
+            query = query.filter(LOA.status.in_(allowed))
+        else:
+            return []
 
     if status:
         query = query.filter(LOA.status == status)
@@ -293,29 +386,75 @@ async def get_loas(
     return query.all()
 
 
-@router.get("/{loa_id}")
-async def get_loa(
-    loa_id: str,
+# ── Excel export (BEFORE /{loa_id} routes) ──────────────────────────────
+
+@router.get("/export/excel")
+async def export_excel(
+    status: Optional[str] = None,
+    cluster: Optional[str] = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Return a single LOA, only if the user has visibility on it."""
-    loa = db.query(LOA).filter(LOA.id == loa_id).first()
-    if not loa:
-        raise HTTPException(status_code=404, detail="LOA not found")
+    """
+    Export LOAs as .xlsx — powers the tracker "Export Excel" button.
+    Respects scope filtering. Combine ?status=approved&cluster=FRANCE.
+    """
+    from backend.engines.excel import loas_to_rows, export_excel_bytes, safe_filename
 
-    role = user.role_obj
-    if role is None:
-        raise HTTPException(status_code=403, detail="No role assigned")
+    query = db.query(LOA).filter(LOA.is_demo == True)
+    query = _apply_scope_filter(query, user)
 
-    if not role.can_override_lock:
-        if loa.status == 'draft' and loa.requestor_email != user.email:
-            raise HTTPException(status_code=403, detail="Draft is private to its author")
-        if not role.matches_loa(loa):
-            raise HTTPException(status_code=403, detail="LOA outside your scope")
+    if status:
+        query = query.filter(LOA.status == status)
+    if cluster:
+        query = query.filter(LOA.cluster == cluster)
 
-    return loa
+    loas = query.all()
+    if not loas:
+        raise HTTPException(status_code=404, detail="No LOAs found matching filters.")
 
+    rows = loas_to_rows(loas)
+    xlsx_bytes = export_excel_bytes(
+        rows,
+        title=f"LAURA LOA {cluster or 'ALL'}",
+        split_by_cluster=(cluster is None),
+    )
+
+    filename = safe_filename(f"LAURA_LOA_{status or 'all'}_{cluster or 'ALL'}")
+    return Response(
+        content=xlsx_bytes,
+        media_type=XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
+    )
+
+
+@router.get("/export/excel/approved")
+async def export_approved_excel(
+    db: Session = Depends(get_db),
+):
+    """
+    Consolidated Excel of ALL approved LOAs.
+    Called by n8n after each approval — no user auth (internal endpoint).
+    In production, protect with API key or internal-only network.
+    """
+    from backend.engines.excel import loas_to_rows, export_excel_bytes
+
+    loas = db.query(LOA).filter(LOA.status == "approved").all()
+    rows = loas_to_rows(loas)
+    xlsx_bytes = export_excel_bytes(
+        rows,
+        title="LAURA Approved LOAs",
+        split_by_cluster=True,
+        include_summary=True,
+    )
+    return Response(
+        content=xlsx_bytes,
+        media_type=XLSX_MIME,
+        headers={"Content-Disposition": 'attachment; filename="LAURA_Approved_LOAs.xlsx"'},
+    )
+
+
+# ── CRUD ────────────────────────────────────────────────────────────────
 
 @router.post("")
 async def create_loa(body: LOACreate, db: Session = Depends(get_db)):
@@ -336,6 +475,29 @@ async def create_loa(body: LOACreate, db: Session = Depends(get_db)):
     return loa
 
 
+@router.get("/{loa_id}")
+async def get_loa(
+    loa_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    loa = db.query(LOA).filter(LOA.id == loa_id).first()
+    if not loa:
+        raise HTTPException(status_code=404, detail="LOA not found")
+
+    role = user.role_obj
+    if role is None:
+        raise HTTPException(status_code=403, detail="No role assigned")
+
+    if not role.can_override_lock:
+        if loa.status == 'draft' and loa.requestor_email != user.email:
+            raise HTTPException(status_code=403, detail="Draft is private to its author")
+        if not role.matches_loa(loa):
+            raise HTTPException(status_code=403, detail="LOA outside your scope")
+
+    return loa
+
+
 @router.patch("/{loa_id}")
 async def update_loa(
     loa_id: str,
@@ -344,10 +506,6 @@ async def update_loa(
     user: User = Depends(get_current_user),
     _: dict = Depends(require_permission('edit')),
 ):
-    """
-    Update a LOA's fields. Protected by 'edit' permission on the current
-    status, plus the is_locked flag check.
-    """
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
@@ -369,18 +527,40 @@ async def update_loa(
     return loa
 
 
+# ── Excel single-row download (detail page button) ─────────────────────
+
+@router.get("/{loa_id}/excel")
+async def export_loa_excel_row(
+    loa_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Download a single LOA as a one-row .xlsx."""
+    from backend.engines.excel import loa_to_row, export_single_loa_row, safe_filename
+
+    loa = db.query(LOA).filter(LOA.id == loa_id).first()
+    if not loa:
+        raise HTTPException(status_code=404, detail="LOA not found")
+
+    row = loa_to_row(loa)
+    xlsx_bytes = export_single_loa_row(row)
+
+    filename = safe_filename(f"LOA_{loa.loa_draft_id}")
+    return Response(
+        content=xlsx_bytes,
+        media_type=XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
+    )
+
+
+# ── Submit ──────────────────────────────────────────────────────────────
+
 @router.post("/{loa_id}/submit")
 async def submit_loa(
     loa_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Submit a LOA from draft (or rejected) to local_prep.
-
-    Only the LOA's author can submit. Handles both first submit (draft -> local_prep)
-    and Revise & Resubmit (rejected -> local_prep).
-    """
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
@@ -392,10 +572,10 @@ async def submit_loa(
         )
 
     if loa.status == "draft":
-        new_status = "local_prep"
+        new_status = "emea_review"
         event_name = "loa_submitted"
     elif loa.status == "rejected":
-        new_status = "local_prep"
+        new_status = "emea_review"
         event_name = "loa_resubmitted"
     else:
         raise HTTPException(
@@ -428,19 +608,9 @@ async def submit_loa(
     return loa
 
 
-# ── Helper for /validate permission resolution ──────────────────────────
+# ── Workflow validation / advance ───────────────────────────────────────
+
 def _check_workflow_permission(user: User, loa: LOA, db: Session) -> str:
-    """
-    For the /validate endpoint: determine which permission is required
-    based on the LOA's current status, and verify the user has it.
-
-    Returns the permission code that was required (for logging/notification).
-    Raises HTTPException 403 if the user does not have the required permission.
-
-    The dispatch logic:
-      - status in VALIDATION_STATUSES   -> 'validate' (explicit approval moment)
-      - status in ADVANCE_PHASE_STATUSES -> 'advance_phase' (orchestration)
-    """
     current_status = loa.status
 
     if current_status in VALIDATION_STATUSES:
@@ -457,7 +627,6 @@ def _check_workflow_permission(user: User, loa: LOA, db: Session) -> str:
     if not role:
         raise HTTPException(status_code=403, detail="No role assigned")
 
-    # Look up the actual permission from the matrix for (role, status)
     rp = (
         db.query(RolePermission, Permission)
         .join(Permission, RolePermission.permission_id == Permission.id)
@@ -493,17 +662,6 @@ async def validate_workflow_step(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Advance a LOA to the next step in the approval workflow.
-
-    The backend is the single source of truth for which transition applies.
-    The permission required depends on the current status:
-      - 'validate' for cmo_review, cfo_review, ceo_validation
-      - 'advance_phase' for local_prep, country_review, global_review,
-        corporate_review
-
-    The frontend just calls this endpoint; the backend dispatches.
-    """
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
@@ -522,11 +680,33 @@ async def validate_workflow_step(
                    f"Valid statuses: {list(WORKFLOW_TRANSITIONS.keys())}",
         )
 
-    # Permission check (raises 403 if denied)
     permission_used = _check_workflow_permission(user, loa, db)
 
-    new_status = WORKFLOW_TRANSITIONS[current_status]
-    loa.status = new_status
+    # Double validation for CMO/CFO step
+    if current_status == "cmo_cfo_review":
+        role = user.role_obj
+        role_code = role.code if role else ""
+
+        if role_code == "regional_cmo":
+            loa.cmo_approved = True
+        elif role_code == "regional_cfo":
+            loa.cfo_approved = True
+        else:
+            loa.cmo_approved = True
+            loa.cfo_approved = True
+
+        if loa.cmo_approved and loa.cfo_approved:
+            new_status = WORKFLOW_TRANSITIONS[current_status]
+            skipped = []
+            loa.status = new_status
+        else:
+            db.commit()
+            db.refresh(loa)
+            return loa
+    else:
+        new_status = WORKFLOW_TRANSITIONS[current_status]
+        skipped = []
+        loa.status = new_status
 
     if new_status == "approved":
         loa.approved_at = datetime.utcnow()
@@ -539,6 +719,7 @@ async def validate_workflow_step(
         "loa_draft_id": loa.loa_draft_id,
         "from_status": current_status,
         "to_status": new_status,
+        "skipped_steps": skipped,
         "validated_by": user.email,
         "permission_used": permission_used,
         "activity_type": loa.activity_type,
@@ -546,23 +727,33 @@ async def validate_workflow_step(
         "fy_total": loa.fy_2026_total,
     })
 
+    # When approved, fire a separate event for n8n to regenerate Excel
+    if new_status == "approved":
+        await notify_n8n("loa_approved", str(loa_id), {
+            "requestor_email": loa.requestor_email,
+            "loa_draft_id": loa.loa_draft_id,
+            "loa_number": loa.loa_number or loa.loa_draft_id,
+            "activity_type": loa.activity_type,
+            "country": loa.country,
+            "cluster": loa.cluster,
+            "brand": loa.brand,
+            "fy_total": loa.fy_2026_total,
+        })
+
     return loa
 
 
-# ── Keep /approve as alias for /validate (backward compatibility) ──
 @router.post("/{loa_id}/approve")
 async def approve_loa(
     loa_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Backward-compatible alias for POST /validate.
-    The frontend currently calls /approve in some places; we redirect
-    to the same logic. Eventually remove this once frontend is updated.
-    """
+    """Backward-compatible alias for POST /validate."""
     return await validate_workflow_step(loa_id, db, user)
 
+
+# ── Reject ──────────────────────────────────────────────────────────────
 
 @router.post("/{loa_id}/reject")
 async def reject_loa(
@@ -571,17 +762,6 @@ async def reject_loa(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Reject a LOA at any workflow step (except draft).
-
-    Rejection requires either 'validate' OR 'advance_phase' permission on
-    the current status — anyone who can move the workflow forward can also
-    halt it with a rejection.
-
-    The reason is mandatory and stored on the LOA so the author can read
-    it on Revise & Resubmit. After rejection, the LOA stays in 'rejected'
-    until resubmitted.
-    """
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
@@ -609,12 +789,13 @@ async def reject_loa(
             detail=f"Cannot reject a LOA already in status '{loa.status}'.",
         )
 
-    # Permission check: same logic as validate (whoever can advance can reject)
     _check_workflow_permission(user, loa, db)
 
     previous_status = loa.status
     loa.status = "rejected"
     loa.rejection_reason = reason.strip()
+    loa.cmo_approved = False
+    loa.cfo_approved = False
     db.commit()
     db.refresh(loa)
 
@@ -629,19 +810,68 @@ async def reject_loa(
     return loa
 
 
+# ── Comment ─────────────────────────────────────────────────────────────
+
+class CommentRequest(BaseModel):
+    comment: str
+
+
+@router.post("/{loa_id}/comment")
+async def add_comment(
+    loa_id: str,
+    body: CommentRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    loa = db.query(LOA).filter(LOA.id == loa_id).first()
+    if not loa:
+        raise HTTPException(status_code=404, detail="LOA not found")
+
+    if not body.comment or not body.comment.strip():
+        raise HTTPException(status_code=422, detail="Comment cannot be empty.")
+
+    role = user.role_obj
+    if not role:
+        raise HTTPException(status_code=403, detail="No role assigned")
+
+    rp = (
+        db.query(RolePermission, Permission)
+        .join(Permission, RolePermission.permission_id == Permission.id)
+        .filter(
+            RolePermission.role_id == role.id,
+            RolePermission.loa_status == loa.status,
+        )
+        .first()
+    )
+
+    if not rp:
+        raise HTTPException(status_code=403, detail="No access at this stage.")
+
+    perm_code = rp[1].code
+    if perm_code not in ('comment', 'validate', 'edit', 'advance_phase'):
+        raise HTTPException(status_code=403, detail="You need at least comment permission.")
+
+    timestamp = datetime.utcnow().strftime("%d %b %Y %H:%M")
+    entry = f"[{timestamp}] {user.email}:\n{body.comment.strip()}"
+
+    if loa.cmo_comment:
+        loa.cmo_comment = f"{loa.cmo_comment}\n\n---\n\n{entry}"
+    else:
+        loa.cmo_comment = entry
+
+    db.commit()
+    db.refresh(loa)
+    return {"status": "ok", "comment_added": entry}
+
+
+# ── Lock / Unlock ───────────────────────────────────────────────────────
+
 @router.post("/{loa_id}/lock")
 async def lock_loa(
     loa_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Lock a LOA against any editing.
-
-    Only super-admins (users with can_override_lock = true) can lock or
-    unlock a LOA. The LOA keeps its workflow status so it can resume
-    normally once unlocked.
-    """
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
@@ -654,7 +884,7 @@ async def lock_loa(
         )
 
     if loa.is_locked:
-        return loa  # idempotent
+        return loa
 
     loa.is_locked = True
     db.commit()
@@ -675,7 +905,6 @@ async def unlock_loa(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Unlock a LOA. Super-admins only."""
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
@@ -688,7 +917,7 @@ async def unlock_loa(
         )
 
     if not loa.is_locked:
-        return loa  # idempotent
+        return loa
 
     loa.is_locked = False
     db.commit()
@@ -703,10 +932,10 @@ async def unlock_loa(
     return loa
 
 
-# ── Field validation endpoint (kept as GET, different from POST /validate) ──
+# ── Field validation (GET — different from POST /validate) ──────────────
+
 @router.get("/{loa_id}/validate")
 async def validate_loa(loa_id: str, db: Session = Depends(get_db)):
-    """Validate that a LOA's fields are complete (form-level validation)."""
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
@@ -717,16 +946,15 @@ async def validate_loa(loa_id: str, db: Session = Depends(get_db)):
         "issues": issues,
     }
 
+
+# ── Delete ──────────────────────────────────────────────────────────────
+
 @router.delete("/{loa_id}")
 async def delete_loa(
     loa_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Delete a LOA. Only allowed when status is draft or local_prep,
-    and only by the author or a super-admin.
-    """
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
@@ -738,16 +966,18 @@ async def delete_loa(
     if not is_author and not is_admin:
         raise HTTPException(status_code=403, detail="Only the author or a super-admin can delete a LOA.")
 
-    if loa.status not in ("draft", "local_prep"):
+    if loa.status != "draft":
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot delete a LOA in status '{loa.status}'. Only draft and local_prep LOAs can be deleted.",
+            detail=f"Cannot delete a LOA in status '{loa.status}'. Only drafts can be deleted — submitted LOAs must be rejected instead.",
         )
 
     db.delete(loa)
     db.commit()
     return {"deleted": True, "loa_id": loa_id}
 
+
+# ── PPT download ────────────────────────────────────────────────────────
 
 @router.get("/{loa_id}/pptx")
 async def download_loa_pptx(loa_id: str, db: Session = Depends(get_db)):
@@ -765,6 +995,8 @@ async def download_loa_pptx(loa_id: str, db: Session = Depends(get_db)):
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+
+# ── AI endpoints ────────────────────────────────────────────────────────
 
 @router.post("/ai/validate-description")
 async def validate_description(body: DescriptionValidateRequest):
@@ -787,6 +1019,7 @@ async def suggest_content(body: SuggestRequest):
 
 
 # ── Photo upload ────────────────────────────────────────────────────────
+
 UPLOAD_DIR = "uploads/loa_photos"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -803,7 +1036,10 @@ async def upload_photo(
 
     existing = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(loa_id)]
     if len(existing) >= 2:
-        raise HTTPException(status_code=400, detail="Maximum 2 photos per LOA")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum 2 photos per LOA. {len(existing)} already exist: {', '.join(existing)}. Delete existing photos first via DELETE /loa/{loa_id}/photos/1 or /2."
+        )
 
     ext = file.filename.split(".")[-1].lower()
     if ext not in ["jpg", "jpeg", "png"]:
@@ -823,7 +1059,11 @@ async def upload_photo(
 async def get_photo(loa_id: str, index: int):
     for f in os.listdir(UPLOAD_DIR):
         if f.startswith(f"{loa_id}_photo{index}"):
-            return FileResponse(os.path.join(UPLOAD_DIR, f))
+            ext = f.rsplit(".", 1)[-1].lower()
+            media_type = {
+                "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+            }.get(ext, "application/octet-stream")
+            return FileResponse(os.path.join(UPLOAD_DIR, f), media_type=media_type)
     raise HTTPException(status_code=404, detail="Photo not found")
 
 

@@ -1,0 +1,122 @@
+/* ────────────────────────────────────────────────────────────────
+ * LAURA — Theme variables (Essilor-grade B&W luxe + Champagne)
+ * Pure white light / Pure black dark. No more cream.
+ * ──────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Surfaces — pure white, no cream */
+  --laura-bg-canvas:        #FFFFFF;
+  --laura-bg-surface:       #FFFFFF;
+  --laura-bg-warm:          #F7F7F7;
+  --laura-bg-subtle:        #FAFAFA;
+  --laura-bg-tint:          #FAF5EA;
+  --laura-bg-laura-mist:    #FAF5EA;
+  --laura-bg-elevated:      #FFFFFF;
+
+  /* Text — near-black, soft on eyes */
+  --laura-text-primary:     #0A0A0A;
+  --laura-text-secondary:   #5A554F;
+  --laura-text-tertiary:    #9B9690;
+  --laura-text-on-primary:  #FFFFFF;
+
+  /* Borders — very subtle */
+  --laura-border-soft:      #EAEAEA;
+  --laura-border-strong:    #D4D4D4;
+
+  /* Action — pure black */
+  --laura-action:           #0A0A0A;
+  --laura-action-hover:     #2A2A2A;
+
+  /* Champagne — stays the same on both themes */
+  --laura-champagne:        #C9A678;
+  --laura-champagne-deep:   #8A6A3F;
+  --laura-champagne-mist:   #FAF5EA;
+  --laura-champagne-border: #E8D9B8;
+
+  /* Semi-semantic statuses */
+  --laura-success:          #0A0A0A;
+  --laura-success-bg:       #FAFAFA;
+  --laura-success-border:   #EAEAEA;
+  --laura-warning:          #B26A20;
+  --laura-warning-bg:       #FFF8F0;
+  --laura-warning-border:   #E8D0B2;
+  --laura-danger:           #8A2E27;
+  --laura-danger-bg:        #FFF1EF;
+  --laura-danger-border:    #E6C1BD;
+  --laura-info:             #3F3A33;
+  --laura-info-bg:          #F2F0EC;
+  --laura-info-border:      #D9D2C8;
+
+  /* Legacy aliases (kept for old globals.css references) */
+  --bg-base:                #FFFFFF;
+  --bg-surface:             #FFFFFF;
+  --bg-elevated:            #FAFAFA;
+  --text-primary:           #0A0A0A;
+  --text-secondary:         #5A554F;
+  --text-muted:             #9B9690;
+  --border:                 #EAEAEA;
+}
+
+:root.dark {
+  /* Surfaces — pure black */
+  --laura-bg-canvas:        #000000;
+  --laura-bg-surface:       #0A0A0A;
+  --laura-bg-warm:          #141414;
+  --laura-bg-subtle:        #0A0A0A;
+  --laura-bg-tint:          #2A2620;
+  --laura-bg-laura-mist:    #2A2620;
+  --laura-bg-elevated:      #141414;
+
+  /* Text — pure white */
+  --laura-text-primary:     #FFFFFF;
+  --laura-text-secondary:   #A8A199;
+  --laura-text-tertiary:    #6B665F;
+  --laura-text-on-primary:  #0A0A0A;
+
+  /* Borders very subtle on black */
+  --laura-border-soft:      #1F1F1F;
+  --laura-border-strong:    #2F2F2F;
+
+  /* Action — pure white */
+  --laura-action:           #FFFFFF;
+  --laura-action-hover:     #E0E0E0;
+
+  /* Champagne */
+  --laura-champagne:        #C9A678;
+  --laura-champagne-deep:   #C9A678;
+  --laura-champagne-mist:   #2A2620;
+  --laura-champagne-border: #4A3F2A;
+
+  /* Statuses adapted to dark */
+  --laura-success:          #FFFFFF;
+  --laura-success-bg:       #141414;
+  --laura-success-border:   #2A2A2A;
+  --laura-warning:          #D89740;
+  --laura-warning-bg:       #2A1F12;
+  --laura-warning-border:   #4A3520;
+  --laura-danger:           #C77A75;
+  --laura-danger-bg:        #2A1818;
+  --laura-danger-border:    #4A2A26;
+  --laura-info:             #C0BAB1;
+  --laura-info-bg:          #141414;
+  --laura-info-border:      #2A2A2A;
+
+  /* Legacy aliases */
+  --bg-base:                #000000;
+  --bg-surface:             #0A0A0A;
+  --bg-elevated:            #141414;
+  --text-primary:           #FFFFFF;
+  --text-secondary:         #A8A199;
+  --text-muted:             #6B665F;
+  --border:                 #1F1F1F;
+}
+
+/* Smooth theme transitions */
+html {
+  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+body {
+  background: var(--laura-bg-canvas);
+  color: var(--laura-text-primary);
+  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1), color 160ms cubic-bezier(0.2, 0, 0, 1);
+}

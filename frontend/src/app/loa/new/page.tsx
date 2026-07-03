@@ -29,6 +29,39 @@ function formatEuros(n: number) {
   return `€${n}`
 }
 
+function inferTiming(quarters: { year: number; q: number; val: number }[]): string {
+  const active = quarters.filter(x => x.val > 0).sort((a, b) => a.year - b.year || a.q - b.q)
+  if (active.length === 0) return ''
+
+  const q2026 = active.filter(x => x.year === 2026)
+  if (q2026.length === 4) return 'FY 2026'
+
+  if (active.length === 1) {
+    const x = active[0]
+    return `Q${x.q} ${x.year}`
+  }
+
+  const sameYear = active.every(x => x.year === active[0].year)
+  if (sameYear) {
+    const year = active[0].year
+    const qs = active.map(x => x.q)
+    const min = Math.min(...qs)
+    const max = Math.max(...qs)
+    const consecutive = max - min + 1 === qs.length
+
+    if (consecutive) {
+      if (min === 1 && max === 2) return `H1 ${year} (Q1\u2013Q2)`
+      if (min === 3 && max === 4) return `H2 ${year} (Q3\u2013Q4)`
+      return `Q${min}\u2013Q${max} ${year}`
+    }
+    return qs.map(q => `Q${q}`).join(', ') + ` ${year}`
+  }
+
+  const first = active[0]
+  const last = active[active.length - 1]
+  return `Q${first.q} ${first.year} \u2013 Q${last.q} ${last.year}`
+}
+
 function KEurosInput({ value, onChange, placeholder = '0' }: {
   value: number; onChange: (newValueInEuros: number) => void; placeholder?: string
 }) {
@@ -224,6 +257,8 @@ export default function NewLOAPage() {
   const [tools, setTools]               = useState('')
   const [kpi, setKpi]                   = useState('')
   const [timing, setTiming]             = useState('')
+  const [lastAutoTiming, setLastAutoTiming] = useState('')
+  const [showQ4_2025, setShowQ4_2025] = useState(false)
   const [costDrillDown, setCostDrillDown] = useState('')
   const [costJustification, setCostJustification] = useState('')
   const [startDate, setStartDate]       = useState('')
@@ -288,7 +323,7 @@ export default function NewLOAPage() {
   const avgPerDoor  = numDoors > 0 ? fyTotal / numDoors : 0
   const pptRequired = fyTotal > 50_000
   const isEvent       = EVENT_ACTIVITY_TYPES.includes(activityType as ActivityType)
-  const isPermanent   = activityType === 'Permanent Visibility' || activityType === 'Tailor Made Permanent'
+  const isPermanent   = activityType === 'Permanent Visibility'
   const isSponsorship = activityType === 'Sponsorship'
   const hasDoors      = !isSponsorship && DOOR_ACTIVITY_TYPES.includes(activityType as ActivityType)
   const showCostSplit = activityType === 'Events'
@@ -299,6 +334,21 @@ export default function NewLOAPage() {
 
   const [clusterInitialized, setClusterInitialized] = useState(false)
   useEffect(() => { if (!clusterInitialized) { setClusterInitialized(true); return }; if (!isEditMode) { setCountry(''); setLegalEntity('') } }, [cluster])
+  useEffect(() => {
+  const quarters = [
+    { year: 2025, q: 4, val: q4_2025 },
+    { year: 2026, q: 1, val: q1 },
+    { year: 2026, q: 2, val: q2 },
+    { year: 2026, q: 3, val: q3 },
+    { year: 2026, q: 4, val: q4 },
+  ]
+  const inferred = inferTiming(quarters)
+  if (!inferred) return
+  if (timing === '' || timing === lastAutoTiming) {
+    setTiming(inferred)
+    setLastAutoTiming(inferred)
+  }
+}, [q4_2025, q1, q2, q3, q4])
   const [categoryInitialized, setCategoryInitialized] = useState(false)
   useEffect(() => { if (!categoryInitialized) { setCategoryInitialized(true); return }; if (!isEditMode) setBrand('') }, [category])
   const markDirty = () => setIsDirty(true)
@@ -550,10 +600,45 @@ export default function NewLOAPage() {
             {errors.q1 && <p className="text-xs mb-3" style={{ color: 'var(--red-text)' }}>{errors.q1}</p>}
             <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Enter amounts in thousands of euros. Example: type 45 for €45,000.</p>
             <div className="grid grid-cols-3 gap-4" data-field="q1">
-              {[{ label:'Q4 2025 (k€)', val:q4_2025, set:setQ4_2025 },{ label:'Q1 2026 (k€)', val:q1, set:setQ1 },{ label:'Q2 2026 (k€)', val:q2, set:setQ2 },{ label:'Q3 2026 (k€)', val:q3, set:setQ3 },{ label:'Q4 2026 (k€)', val:q4, set:setQ4 }].map(({ label, val, set }) => (
+              {[{ label:'Q1 2026 (k€)', val:q1, set:setQ1 },{ label:'Q2 2026 (k€)', val:q2, set:setQ2 },{ label:'Q3 2026 (k€)', val:q3, set:setQ3 },{ label:'Q4 2026 (k€)', val:q4, set:setQ4 }].map(({ label, val, set }) => (
                 <Field key={label} label={label}><KEurosInput value={val} onChange={n => { set(n); markDirty() }} placeholder="0" /></Field>
               ))}
             </div>
+
+            {!showQ4_2025 && q4_2025 === 0 && (
+              <button
+                type="button"
+                onClick={() => setShowQ4_2025(true)}
+                className="mt-3 text-xs"
+                style={{ color: 'var(--text-muted)', textDecoration: 'underline', textUnderlineOffset: '3px' }}
+              >
+                + Add Q4 2025 (post-event or carryover)
+              </button>
+            )}
+
+            {(showQ4_2025 || q4_2025 > 0) && (
+              <div className="mt-4 p-4 rounded-xl" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="section-heading" style={{ margin: 0 }}>Q4 2025 (post-event or carryover)</p>
+                  {q4_2025 === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowQ4_2025(false)}
+                      className="text-xs"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      Hide
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+                  Only fill if this LOA covers an event that already happened in Q4 2025 (Oct–Dec) or a carryover from a previous session.
+                </p>
+                <Field label="Q4 2025 (k€)">
+                  <KEurosInput value={q4_2025} onChange={n => { setQ4_2025(n); markDirty() }} placeholder="0" />
+                </Field>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-4 mt-4">
               <CalcField label="FY 2025 Total" value={formatEuros(fy2025Total)} />
               <CalcField label="FY 2026 Total" value={formatEuros(fyTotal)} highlight={pptRequired} />

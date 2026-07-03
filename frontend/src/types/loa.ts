@@ -4,18 +4,17 @@
 // Source of truth: LAURA_Dropdown_Rules_CLIENT_v2.pdf
 // ============================================================
 
-// Aligned with backend/api/loa.py WORKFLOW_TRANSITIONS
+
+// aligné sur backend WORKFLOW_TRANSITIONS (8 statuts) ────────
 export type LOAStatus =
-  | 'draft'             // not yet submitted
-  | 'local_prep'        // submitted → EMEA phases begin
-  | 'country_review'    // advance_phase
-  | 'global_review'     // advance_phase
-  | 'cmo_review'        // validate (named approver)
-  | 'cfo_review'        // validate (named approver)
-  | 'corporate_review'  // advance_phase
-  | 'ceo_validation'    // validate (named approver — final gate)
-  | 'approved'          // terminal ✓
-  | 'rejected'          // terminal ✗ (resubmittable)
+  | 'draft'                    // author creates the LOA
+  | 'emea_review'              // EMEA PS reviews XLS & PPT (advance_phase)
+  | 'global_review'            // Global Brands pre-validate (advance_phase)
+  | 'cmo_cfo_review'           // Alexandra OR Giulia validates (validate)
+  | 'global_functions_review'  // PR/Medical/Trade comment, EMEA PS advances
+  | 'corporate_review'         // Paola/Diana — final gate (validate)
+  | 'approved'                 // terminal ✓ — Teams notif fires
+  | 'rejected'                 // terminal ✗ (resubmittable)
 
 export type ActivityType =
   | 'Permanent Visibility'
@@ -293,17 +292,16 @@ export const BRAND_OPTIONS = Array.from(
 
 // Status badge config — single source of truth for all pages.
 // Badge CSS classes are defined in globals.css.
+// ── APRÈS — 8 statuts, classes badge alignées sur globals.css ──────────
 export const STATUS_CONFIG: Record<LOAStatus, { label: string; cls: string }> = {
-  draft:            { label: 'Draft',             cls: 'badge-draft' },
-  local_prep:       { label: 'Local prep',        cls: 'badge-local-prep' },
-  country_review:   { label: 'Country review',    cls: 'badge-country-review' },
-  global_review:    { label: 'Global review',     cls: 'badge-global-review' },
-  cmo_review:       { label: 'CMO review',        cls: 'badge-cmo-review' },
-  cfo_review:       { label: 'CFO review',        cls: 'badge-cfo-review' },
-  corporate_review: { label: 'Corporate review',  cls: 'badge-corporate-review' },
-  ceo_validation:   { label: 'CEO validation',    cls: 'badge-ceo-validation' },
-  approved:         { label: 'Approved',          cls: 'badge-approved' },
-  rejected:         { label: 'Rejected',          cls: 'badge-rejected' },
+  draft:                    { label: 'Draft',              cls: 'badge-draft' },
+  emea_review:              { label: 'EMEA review',        cls: 'badge-emea-review' },
+  global_review:            { label: 'Global review',      cls: 'badge-global-review' },
+  cmo_cfo_review:           { label: 'CMO / CFO review',   cls: 'badge-cmo-cfo-review' },
+  global_functions_review:  { label: 'Global functions',   cls: 'badge-global-functions-review' },
+  corporate_review:         { label: 'Corporate review',   cls: 'badge-corporate-review' },
+  approved:                 { label: 'Approved',           cls: 'badge-approved' },
+  rejected:                 { label: 'Rejected',           cls: 'badge-rejected' },
 }
 
 export const EVENT_ACTIVITY_TYPES: ActivityType[] = ['Events', 'Medical Affairs']

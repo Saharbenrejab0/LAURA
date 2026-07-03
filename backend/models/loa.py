@@ -15,14 +15,18 @@ from backend.models.database import Base
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
 
+# ── APRÈS — workflow client 8 statuts ──────────────────────────────────
+# Single source of truth, aligné sur backend/api/loa.py WORKFLOW_TRANSITIONS
+# et frontend/src/types/loa.ts LOAStatus.
 class LOAStatus(str, enum.Enum):
-    DRAFT        = "draft"
-    SUBMITTED    = "submitted"
-    BRAND_REVIEW = "brand_review"   # Global brands commenting (5-day window)
-    CMO_REVIEW   = "cmo_review"     # Regional CMO reviewing
-    CFO_REVIEW   = "cfo_review"     # CFO reviewing Excel
-    APPROVED     = "approved"
-    REJECTED     = "rejected"
+    DRAFT                   = "draft"                    # author creates the LOA
+    EMEA_REVIEW             = "emea_review"              # EMEA PS reviews XLS & PPT
+    GLOBAL_REVIEW           = "global_review"            # Global Brands pre-validate (comment)
+    CMO_CFO_REVIEW          = "cmo_cfo_review"           # Alexandra OR Giulia validates
+    GLOBAL_FUNCTIONS_REVIEW = "global_functions_review"  # PR/Medical/Trade comment, EMEA PS advances
+    CORPORATE_REVIEW        = "corporate_review"         # Paola + Diana — final gate
+    APPROVED                = "approved"                 # terminal ✓ — Teams notif fires here
+    REJECTED                = "rejected"                 # terminal ✗ — back to author via /submit
 
 
 class ActivityType(str, enum.Enum):
@@ -269,8 +273,26 @@ class LOA(Base):
     updated_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
     submitted_at = Column(DateTime, nullable=True)
     approved_at  = Column(DateTime, nullable=True)
-
+    cmo_approved = Column(Boolean, default=False)
+    cfo_approved = Column(Boolean, default=False)
     # ── Business rules (enforced server-side, never trusted from frontend) ─────
+
+     # Near q4_2025, q1_2026, etc.
+    q1_2025 = Column(Float, nullable=True)
+    q2_2025 = Column(Float, nullable=True)
+    q3_2025 = Column(Float, nullable=True)
+    q4_2024 = Column(Float, nullable=True)
+    fy_2024_total = Column(Float, nullable=True)
+    h2_2025 = Column(Float, nullable=True)
+
+    # Metadata
+    prioritization = Column(String(50), nullable=True)
+    source_file = Column(String(255), nullable=True)
+
+    # RAG
+    embedding_text = Column(Text, nullable=True)
+    embedded_at = Column(DateTime, nullable=True)
+    # embedding vector(1024) — handled by raw SQL in migration, not in ORM
 
     def calculate_totals(self):
         """

@@ -51,6 +51,7 @@ interface ReviewProps {
   kpi: string
   timing: string
   costDrillDown: string
+  costJustification?: string
   startDate: string
   endDate: string
   isPermanent: boolean

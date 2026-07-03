@@ -1,61 +1,61 @@
-/* ═══════════════════════════════════════════════════════════════════════
-   LAURA — globals.css
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   LAURA â€” globals.css
    Premium soft theme: warm neutrals, editorial typography, generous breathing.
 
    Structure:
      1. Font imports (DM Sans for body, Cormorant Garamond for editorial titles)
      2. Tailwind base layers
-     3. CSS variables — light & dark themes
+     3. CSS variables â€” light & dark themes
      4. Base typography & body styles
      5. Component classes (input, button, badge, card, etc.)
      6. Animation utilities
 
    Philosophy:
-     - Never pure black or pure white — always warm, never harsh
+     - Never pure black or pure white â€” always warm, never harsh
      - Generous spacing, soft shadows, refined letterforms
      - Editorial serif (italic) for hero headings, sans-serif for everything else
-   ═══════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-/* ── Fonts ───────────────────────────────────────────────────────────── */
-/* DM Sans — body & UI text (already in use across the app) */
-/* DM Mono — monospace identifiers (LOA numbers, dates) */
-/* Cormorant Garamond — editorial italic for hero headings and group cards */
+/* â”€â”€ Fonts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* DM Sans â€” body & UI text (already in use across the app) */
+/* DM Mono â€” monospace identifiers (LOA numbers, dates) */
+/* Cormorant Garamond â€” editorial italic for hero headings and group cards */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS Variables — Light theme (premium soft) ─────────────────────── */
+/* â”€â”€ CSS Variables â€” Light theme (premium soft) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 :root {
-  /* Backgrounds — soft warm neutrals */
-  --bg-base:       #ffffff;   /* page background — pure white */
+  /* Backgrounds â€” soft warm neutrals */
+  --bg-base:       #ffffff;   /* page background â€” pure white */
   --bg-surface:    #ffffff;   /* cards, modals */
-  --bg-elevated:   #f8f6f3;   /* elevated surfaces, hover states — warm off-white */
-  --bg-input:      #fafafa;   /* inputs — barely-there warmth */
+  --bg-elevated:   #f8f6f3;   /* elevated surfaces, hover states â€” warm off-white */
+  --bg-input:      #fafafa;   /* inputs â€” barely-there warmth */
 
-  /* Borders — warm gray, never pure black */
+  /* Borders â€” warm gray, never pure black */
   --border:        rgba(26,22,18,0.07);
   --border-strong: rgba(26,22,18,0.12);
 
-  /* Text — soft black, never aggressive */
+  /* Text â€” soft black, never aggressive */
   --text-primary:  #1a1a1a;   /* primary text (was #18181b, slightly warmer) */
-  --text-secondary:#4d4944;   /* secondary text — warm */
+  --text-secondary:#4d4944;   /* secondary text â€” warm */
   --text-muted:    #8a857e;   /* muted gray, warm undertone */
   --text-inverse:  #fcfaf7;   /* warm off-white on dark surfaces */
 
-  /* Accent — same soft black */
+  /* Accent â€” same soft black */
   --accent:        #1a1a1a;
   --accent-hover:  #2a2a2a;
   --accent-text:   #fcfaf7;
 
-  /* Status colors — slightly desaturated for softness */
+  /* Status colors â€” slightly desaturated for softness */
   --green:         #16a34a;
   --green-bg:      #f0fdf4;
   --green-border:  #bbf7d0;
   --green-text:    #15803d;
 
-  --amber:         #c2860a;   /* softer than #d97706 — less neon */
+  --amber:         #c2860a;   /* softer than #d97706 â€” less neon */
   --amber-bg:      #fdf8eb;
   --amber-border:  #f3e3a8;
   --amber-text:    #8a5a08;
@@ -75,19 +75,29 @@
   --indigo-border: #c7d2fe;
   --indigo-text:   #3730a3;
 
+  /* Purple — CMO/CFO review */
+  --purple-bg:     #F3EBFF;
+  --purple-text:   #6D28D9;
+  --purple-border: #DDD6FE;
+
+  /* Teal — Global functions review */
+  --teal-bg:       #E6FFFA;
+  --teal-text:     #0D9488;
+  --teal-border:   #99F6E4;
+
   --pink:          #be185d;
   --pink-bg:       #fdf2f8;
   --pink-border:   #f9d1e3;
   --pink-text:     #9d174d;
 
-  /* Shadows — warm undertone, softer than pure black */
+  /* Shadows â€” warm undertone, softer than pure black */
   --shadow-sm:     0 1px 2px rgba(26,22,18,0.04);
   --shadow-md:     0 4px 12px rgba(26,22,18,0.06), 0 1px 3px rgba(26,22,18,0.04);
   --shadow-lg:     0 12px 32px rgba(26,22,18,0.10), 0 2px 6px rgba(26,22,18,0.05);
   --shadow-input:  0 0 0 3px rgba(26,26,26,0.06);
 }
 
-/* ── Dark theme (premium soft, low contrast, easy on the eyes) ──────── */
+/* â”€â”€ Dark theme (premium soft, low contrast, easy on the eyes) â”€â”€â”€â”€â”€â”€â”€â”€ */
 .dark {
   --bg-base:       #131210;   /* warm near-black */
   --bg-surface:    #1e1c1a;
@@ -131,6 +141,16 @@
   --indigo-border: rgba(129, 140, 248, 0.20);
   --indigo-text:   #a5b4fc;
 
+  /* Purple — dark */
+  --purple-bg:     rgba(109, 40, 217, 0.10);
+  --purple-text:   #C4B5FD;
+  --purple-border: rgba(109, 40, 217, 0.25);
+
+  /* Teal — dark */
+  --teal-bg:       rgba(13, 148, 136, 0.10);
+  --teal-text:     #5EEAD4;
+  --teal-border:   rgba(13, 148, 136, 0.25);
+
   --pink:          #f472b6;
   --pink-bg:       rgba(244, 114, 182, 0.08);
   --pink-border:   rgba(244, 114, 182, 0.20);
@@ -142,7 +162,7 @@
   --shadow-input:  0 0 0 3px rgba(252,250,247,0.08);
 }
 
-/* ── Base ───────────────────────────────────────────────────────────── */
+/* â”€â”€ Base â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @layer base {
   * { box-sizing: border-box; }
 
@@ -171,20 +191,20 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
 
-  /* Editorial headings — refined letterforms, generous spacing */
+  /* Editorial headings â€” refined letterforms, generous spacing */
   h1, h2, h3, h4 {
     letter-spacing: -0.025em;
     font-weight: 500;
   }
 
   /* Hero headings (large titles on each page) use editorial serif italic.
-     Applied via .heading-editorial class — opt-in, not automatic. */
+     Applied via .heading-editorial class â€” opt-in, not automatic. */
 }
 
-/* ── Components ─────────────────────────────────────────────────────── */
+/* â”€â”€ Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @layer components {
 
-  /* ── Editorial heading (the premium serif italic) ────────────────
+  /* â”€â”€ Editorial heading (the premium serif italic) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
      Use on hero titles: tracker page intro, modal titles, etc.
      Example: <h2 className="heading-editorial">Welcome back.</h2>      */
   .heading-editorial {
@@ -203,7 +223,7 @@
     line-height: 1.15;
   }
 
-  /* ── Input ──────────────────────────────────────────────────────── */
+  /* â”€â”€ Input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .input {
     width: 100%;
     background: var(--bg-input);
@@ -228,7 +248,7 @@
   select.input { cursor: pointer; }
   textarea.input { resize: vertical; min-height: 80px; }
 
-  /* ── Label ──────────────────────────────────────────────────────── */
+  /* â”€â”€ Label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .label {
     display: block;
     font-size: 11px;
@@ -239,7 +259,7 @@
     margin-bottom: 8px;
   }
 
-  /* ── Buttons ────────────────────────────────────────────────────── */
+  /* â”€â”€ Buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .btn-primary {
     display: inline-flex;
     align-items: center;
@@ -311,7 +331,7 @@
   }
   .btn-ghost:hover { background: var(--bg-elevated); color: var(--text-primary); }
 
-  /* ── Card ───────────────────────────────────────────────────────── */
+  /* â”€â”€ Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .card {
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -321,7 +341,7 @@
   }
   .card:hover { box-shadow: var(--shadow-md); }
 
-  /* ── Badge ──────────────────────────────────────────────────────── */
+  /* â”€â”€ Badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .badge {
     display: inline-flex;
     align-items: center;
@@ -332,27 +352,22 @@
     letter-spacing: 0.3px;
   }
 
-  /* Status badges — soft palette, aligned with backend LOAStatus enum */
-  .badge-draft          { background: var(--bg-elevated); color: var(--text-muted);    border: 1px solid var(--border); }
-  .badge-local-prep     { background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border-strong); }
-  .badge-country-review { background: var(--blue-bg);     color: var(--blue-text);      border: 1px solid var(--blue-border); }
-  .badge-global-review  { background: var(--blue-bg);     color: var(--blue-text);      border: 1px solid var(--blue-border); }
-  .badge-cmo-review     { background: var(--amber-bg);    color: var(--amber-text);     border: 1px solid var(--amber-border); }
-  .badge-cfo-review     { background: var(--amber-bg);    color: var(--amber-text);     border: 1px solid var(--amber-border); }
-  .badge-corporate-review { background: var(--indigo-bg); color: var(--indigo-text);    border: 1px solid var(--indigo-border); }
-  .badge-ceo-validation { background: var(--amber-bg);    color: var(--amber-text);     border: 1px solid var(--amber-border); }
-  .badge-approved       { background: var(--green-bg);    color: var(--green-text);     border: 1px solid var(--green-border); }
-  .badge-rejected       { background: var(--red-bg);      color: var(--red-text);       border: 1px solid var(--red-border); }
+  /* â”€â”€ APRÃˆS â€” workflow v2, 8 statuts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* Status badges â€” aligned with backend LOAStatus enum (workflow v2) */
+  .badge-draft                    { background: var(--bg-elevated); color: var(--text-muted);    border: 1px solid var(--border); }
+  .badge-emea-review              { background: var(--blue-bg);     color: var(--blue-text);     border: 1px solid var(--blue-border); }
+  .badge-global-review            { background: var(--indigo-bg);   color: var(--indigo-text);   border: 1px solid var(--indigo-border); }
+  .badge-cmo-cfo-review           { background: var(--purple-bg);   color: var(--purple-text);   border: 1px solid var(--purple-border); }
+  .badge-global-functions-review  { background: var(--teal-bg);     color: var(--teal-text);     border: 1px solid var(--teal-border); }
+  .badge-corporate-review         { background: var(--amber-bg);    color: var(--amber-text);    border: 1px solid var(--amber-border); }
+  .badge-approved                 { background: var(--green-bg);    color: var(--green-text);    border: 1px solid var(--green-border); }
+  .badge-rejected                 { background: var(--red-bg);      color: var(--red-text);      border: 1px solid var(--red-border); }
 
-  /* Legacy badges — kept for backward compat, no longer mapped to any status */
-  .badge-submitted      { background: var(--blue-bg);     color: var(--blue-text);      border: 1px solid var(--blue-border); }
-  .badge-brand-review   { background: var(--amber-bg);    color: var(--amber-text);     border: 1px solid var(--amber-border); }
-
-  /* Duplicate indicator — soft rose, premium feel */
+  /* Duplicate indicator â€” soft rose, premium feel */
   .badge-duplicate      { background: var(--pink-bg);     color: var(--pink-text);      border: 1px solid var(--pink-border);
                           font-size: 10px; font-weight: 500; letter-spacing: 0.4px; }
 
-  /* ── Section heading ────────────────────────────────────────────── */
+  /* â”€â”€ Section heading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .section-heading {
     font-size: 10.5px;
     font-weight: 600;
@@ -364,10 +379,10 @@
     margin-bottom: 18px;
   }
 
-  /* ── Divider ────────────────────────────────────────────────────── */
+  /* â”€â”€ Divider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .divider { border: none; border-top: 1px solid var(--border); margin: 0; }
 
-  /* ── Mono ───────────────────────────────────────────────────────── */
+  /* â”€â”€ Mono â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .mono {
     font-family: 'DM Mono', monospace;
     font-size: 12px;
@@ -375,7 +390,7 @@
   }
 }
 
-/* ── Page transitions ───────────────────────────────────────────────── */
+/* â”€â”€ Page transitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes pageIn {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -385,7 +400,7 @@
   animation: pageIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* ── Error shake animation ──────────────────────────────────────────── */
+/* â”€â”€ Error shake animation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes errorShake {
   0%, 100% { transform: translateX(0); }
   20%       { transform: translateX(-6px); }
@@ -398,13 +413,13 @@
   animation: errorShake 0.5s ease;
 }
 
-/* ── Input error state ──────────────────────────────────────────────── */
+/* â”€â”€ Input error state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .input-error {
   border-color: var(--red) !important;
   box-shadow: 0 0 0 3px rgba(201, 51, 51, 0.10) !important;
 }
 
-/* ── Searchable select ──────────────────────────────────────────────── */
+/* â”€â”€ Searchable select â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .select-search-wrapper {
   position: relative;
 }
@@ -448,7 +463,7 @@
   font-weight: 500;
 }
 
-/* ── Timeline ───────────────────────────────────────────────────────── */
+/* â”€â”€ Timeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .timeline-item {
   position: relative;
   padding-left: 26px;
@@ -481,7 +496,7 @@
   background: var(--bg-elevated);
 }
 
-/* ── Auto-save indicator ────────────────────────────────────────────── */
+/* â”€â”€ Auto-save indicator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes savePulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
@@ -491,19 +506,19 @@
   animation: savePulse 1.5s ease infinite;
 }
 
-/* ── Duplicate LOA button hover ─────────────────────────────────────── */
+/* â”€â”€ Duplicate LOA button hover â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .duplicate-btn:hover {
   background: var(--bg-elevated) !important;
   color: var(--text-primary) !important;
 }
 
-/* ── Read-only field ────────────────────────────────────────────────── */
+/* â”€â”€ Read-only field â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .field-readonly {
   opacity: 0.7;
   pointer-events: none;
 }
 
-/* ── Pagination ─────────────────────────────────────────────────────── */
+/* â”€â”€ Pagination â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .pagination-btn {
   width: 34px;
   height: 34px;
@@ -536,7 +551,7 @@
   cursor: not-allowed;
 }
 
-/* ── Modal animations ───────────────────────────────────────────────── */
+/* â”€â”€ Modal animations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes fadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
@@ -547,7 +562,7 @@
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* ── Voice recording pulse ──────────────────────────────────────────── */
+/* â”€â”€ Voice recording pulse â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes recordPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(201, 51, 51, 0.4); }
   50%       { box-shadow: 0 0 0 6px rgba(201, 51, 51, 0); }

@@ -1,0 +1,217 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   LAURA Admin — Scoped design tokens
+   
+   Tous les tokens et utilities sont scopés à [data-admin-scope].
+   Le reste de l'app ne voit JAMAIS ces variables.
+   
+   Light = annual report.  Dark = operating terminal.
+   Champagne #C9A678 est l'unique accent dans les deux modes.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Color tokens (light) ─────────────────────────────────────────── */
+[data-admin-scope] {
+  --admin-bg:              #FFFFFF;
+  --admin-surface:         #FFFFFF;
+  --admin-surface-subtle:  #F5F5F3;
+  --admin-text:            #0A0A0A;
+  --admin-text-muted:      #66615A;
+  --admin-text-faint:      #9A948C;
+  --admin-border:          #DAD6CE;
+  --admin-border-strong:   #AFA79B;
+  --admin-accent:          #C9A678;
+  --admin-accent-deep:     #8A6A3F;
+
+  /* Type stacks */
+  --admin-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                     "Helvetica Neue", Arial, sans-serif;
+  --admin-font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  /* Apply base font and bg to anything inside the admin scope */
+  font-family: var(--admin-font-sans);
+  color: var(--admin-text);
+  background: var(--admin-bg);
+}
+
+/* ── Color tokens (dark) — strict inversion ───────────────────────── */
+.dark [data-admin-scope] {
+  --admin-bg:              #0A0A0A;
+  --admin-surface:         #0A0A0A;
+  --admin-surface-subtle:  #141414;
+  --admin-text:            #FFFFFF;
+  --admin-text-muted:      #B8B2AA;
+  --admin-text-faint:      #7F7A73;
+  --admin-border:          #2A2A2A;
+  --admin-border-strong:   #4A4540;
+  --admin-accent:          #C9A678;
+  --admin-accent-deep:     #C9A678;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TYPOGRAPHY SCALE
+   IBM Plex Mono → numbers, IDs, financial values.
+   System sans  → labels, titles, body.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-admin-scope] .type-hero {
+  font-family: var(--admin-font-mono);
+  font-weight: 600;
+  font-size: 56px;
+  line-height: 60px;
+  letter-spacing: -0.04em;
+  color: var(--admin-text);
+}
+
+[data-admin-scope] .type-kpi {
+  font-family: var(--admin-font-mono);
+  font-weight: 500;
+  font-size: 28px;
+  line-height: 34px;
+  letter-spacing: -0.03em;
+  color: var(--admin-text);
+}
+
+[data-admin-scope] .type-table-num {
+  font-family: var(--admin-font-mono);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--admin-text);
+}
+
+[data-admin-scope] .type-loa-id {
+  font-family: var(--admin-font-mono);
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: -0.01em;
+  color: var(--admin-text-muted);
+}
+
+[data-admin-scope] .type-page-title {
+  font-family: var(--admin-font-sans);
+  font-weight: 600;
+  font-size: 32px;
+  line-height: 38px;
+  letter-spacing: -0.035em;
+  color: var(--admin-text);
+}
+
+[data-admin-scope] .type-section-title {
+  font-family: var(--admin-font-sans);
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 22px;
+  color: var(--admin-text);
+}
+
+[data-admin-scope] .type-body {
+  font-family: var(--admin-font-sans);
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--admin-text);
+}
+
+[data-admin-scope] .type-th {
+  font-family: var(--admin-font-sans);
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--admin-text-muted);
+}
+
+[data-admin-scope] .type-micro {
+  font-family: var(--admin-font-sans);
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--admin-text-muted);
+}
+
+[data-admin-scope] .type-caption {
+  font-family: var(--admin-font-sans);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--admin-text-muted);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SURFACES & UTILITIES
+   Sharp Essilor rectangles (border-radius: 2px), warm neutral borders.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-admin-scope] .admin-surface {
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: 2px;
+}
+
+[data-admin-scope] .admin-surface-subtle {
+  background: var(--admin-surface-subtle);
+  border-radius: 2px;
+}
+
+[data-admin-scope] .admin-divider {
+  border: none;
+  border-top: 1px solid var(--admin-border);
+  margin: 0;
+}
+
+[data-admin-scope] .admin-sharp { border-radius: 2px; }
+[data-admin-scope] .tabular { font-variant-numeric: tabular-nums; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STATUS PILLS — outline + text only.
+   No filled colored backgrounds inside /admin.
+   The semantic workflow colors stay alive elsewhere in the app (tracker, LOA list).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-admin-scope] .admin-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 2px;
+  border: 1px solid var(--admin-border-strong);
+  background: transparent;
+  color: var(--admin-text);
+  font-family: var(--admin-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+[data-admin-scope] .admin-status-pill--accent { border-color: var(--admin-accent); }
+[data-admin-scope] .admin-status-pill--muted  { color: var(--admin-text-muted); border-color: var(--admin-border); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PERMISSION CODES — A V E C R — for the matrix.
+   No color fills. Typography carries the meaning.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-admin-scope] .admin-perm {
+  font-family: var(--admin-font-mono);
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--admin-text);
+  padding: 0 4px;
+  display: inline-block;
+}
+[data-admin-scope] .admin-perm--advance  { border-left: 2px solid var(--admin-accent); padding-left: 6px; }
+[data-admin-scope] .admin-perm--validate { color: var(--admin-text); }
+[data-admin-scope] .admin-perm--edit     { color: var(--admin-text); }
+[data-admin-scope] .admin-perm--comment  { text-decoration: underline dotted; text-underline-offset: 3px; }
+[data-admin-scope] .admin-perm--view     { color: var(--admin-text-muted); }
+[data-admin-scope] .admin-perm--none     { color: var(--admin-text-faint); }
+
+/* Edited cell marker — champagne 1px outline on the cell wrapper */
+[data-admin-scope] .admin-cell-edited {
+  outline: 1px solid var(--admin-accent);
+  outline-offset: -1px;
+}

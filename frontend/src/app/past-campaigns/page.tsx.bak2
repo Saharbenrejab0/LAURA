@@ -1,0 +1,417 @@
+﻿'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+import api from '@/lib/api';
+import StatusBadge from '@/components/StatusBadge';
+import { color, font, layout, motion, radius, space, type } from '@/styles/tokens';
+
+interface Template {
+  id: string;
+  loa_draft_id: string;
+  title: string;
+  status: string;
+  cluster: string | null;
+  country: string | null;
+  brand: string | null;
+  activity_type: string | null;
+  budget_total: number;
+  fy_2025_total: number | null;
+  fy_2026_total: number | null;
+}
+
+interface ScopeInfo { type: string | null; value: string | null; is_admin: boolean }
+type SortKey = 'most_reusable' | 'recently_approved' | 'highest_budget' | 'fy_desc';
+
+export default function PastCampaignsPage() {
+  const router = useRouter();
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [total, setTotal] = useState(0);
+  const [scope, setScope] = useState<ScopeInfo>({ type: null, value: null, is_admin: false });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [duplicating, setDuplicating] = useState(false);
+
+  const [search, setSearch] = useState('');
+  const [brand, setBrand] = useState<string | null>(null);
+  const [country, setCountry] = useState<string | null>(null);
+  const [activityType, setActivityType] = useState<string | null>(null);
+  const [status, setStatus] = useState<'approved' | 'closed' | null>('approved');
+  const [sort, setSort] = useState<SortKey>('most_reusable');
+
+  const [entered, setEntered] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setEntered(true), 20); return () => clearTimeout(t); }, []);
+
+  useEffect(() => {
+    let cancelled = false; setLoading(true);
+    const p = new URLSearchParams();
+    if (search) p.set('search', search);
+    if (brand) p.set('brand', brand);
+    if (country) p.set('country', country);
+    if (activityType) p.set('activity_type', activityType);
+    if (status) p.set('status', status);
+    p.set('sort', sort); p.set('limit', '100');
+    api.get(`/templates?${p.toString()}`)
+      .then((res) => { if (cancelled) return;
+        setTemplates(res.data.templates || []); setTotal(res.data.total || 0);
+        setScope(res.data.viewer_scope || { type: null, value: null, is_admin: false });
+        setError(null); })
+      .catch((e) => { if (!cancelled) setError(e?.response?.data?.detail || e?.message || 'Failed to load'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [search, brand, country, activityType, status, sort]);
+
+  // Esc closes the preview sheet
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedId(null); };
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const selected = useMemo(() => templates.find((t) => t.id === selectedId) || null, [templates, selectedId]);
+  const distinctBrands = useMemo(() => unique(templates.map(t => t.brand)), [templates]);
+  const distinctCountries = useMemo(() => unique(templates.map(t => t.country)), [templates]);
+  const distinctActivities = useMemo(() => unique(templates.map(t => t.activity_type)), [templates]);
+
+  const useTemplate = async (id: string) => {
+    setDuplicating(true);
+    try { const { data } = await api.post(`/loa/${id}/duplicate`); router.push(`/loa/${data.id}`); }
+    catch (e: any) { setError(e?.response?.data?.detail || e?.message || 'Could not duplicate'); setDuplicating(false); }
+  };
+
+  const pageStyle: React.CSSProperties = {
+    background: color.bg.canvas, minHeight: '100vh',
+    fontFamily: font.sans, color: color.text.primary,
+    opacity: entered ? 1 : 0,
+    transform: entered ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.995)',
+    filter: entered ? 'saturate(1)' : 'saturate(0.96)',
+    transition: `opacity ${motion.duration.base}ms ${motion.easing}, transform ${motion.duration.base}ms ${motion.easing}, filter ${motion.duration.base}ms ${motion.easing}`,
+  };
+
+  return (
+    <div style={pageStyle}>
+      <div style={{ maxWidth: layout.contentMax, margin: '0 auto', padding: `${space[8]}px ${space[6]}px` }}>
+
+        <header style={{ marginBottom: space[6] }}>
+          <h1 style={{ fontSize: type.h1.size, lineHeight: `${type.h1.line}px`, fontWeight: type.h1.weight, margin: 0 }}>
+            Past Campaigns
+          </h1>
+          <p style={{ fontSize: 13, color: color.text.secondary, margin: `${space[2]}px 0 0` }}>
+            {scope.is_admin ? `All clusters · ${total} campaigns` : `${scope.value || 'Your cluster'} archive · ${total} campaigns`}
+          </p>
+        </header>
+
+        <div style={{
+          background: color.bg.surface, border: `1px solid ${color.border.soft}`,
+          borderRadius: radius.field, padding: `${space[2]}px ${space[3]}px`,
+          marginBottom: space[4], display: 'flex', alignItems: 'center', gap: space[2],
+        }}>
+          <span style={{ color: color.text.tertiary, fontSize: 14 }}>⌕</span>
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search title, LOA ID, brand, country..."
+            style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent',
+              fontFamily: font.sans, fontSize: 14, color: color.text.primary, padding: '6px 0' }} />
+          {search && <button onClick={() => setSearch('')} style={subtleButtonStyle}>Clear</button>}
+        </div>
+
+        {/* Two-column shell: filter rail + results grid */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '240px minmax(0, 1fr)',
+          gap: space[4], alignItems: 'flex-start',
+        }}>
+
+          {/* Filter rail */}
+          <aside style={{
+            background: color.bg.surface, border: `1px solid ${color.border.soft}`,
+            borderRadius: radius.card, padding: space[4], position: 'sticky', top: space[4],
+            maxHeight: 'calc(100vh - 200px)', overflowY: 'auto',
+          }}>
+            <FilterGroup label="Brand">
+              {distinctBrands.length === 0 ? <FilterEmpty /> :
+                distinctBrands.slice(0, 8).map((b) => (
+                  <FilterCheckbox key={b} label={b} checked={brand === b}
+                    onChange={() => setBrand(brand === b ? null : b)} />))}
+            </FilterGroup>
+            <FilterGroup label="Country">
+              {distinctCountries.length === 0 ? <FilterEmpty /> :
+                distinctCountries.slice(0, 8).map((c) => (
+                  <FilterCheckbox key={c} label={c} checked={country === c}
+                    onChange={() => setCountry(country === c ? null : c)} />))}
+            </FilterGroup>
+            <FilterGroup label="Activity">
+              {distinctActivities.length === 0 ? <FilterEmpty /> :
+                distinctActivities.slice(0, 8).map((a) => (
+                  <FilterCheckbox key={a} label={a} checked={activityType === a}
+                    onChange={() => setActivityType(activityType === a ? null : a)} />))}
+            </FilterGroup>
+            <FilterGroup label="Status">
+              <FilterCheckbox label="Approved only" checked={status === 'approved'} onChange={() => setStatus(status === 'approved' ? null : 'approved')} />
+              <FilterCheckbox label="Closed only" checked={status === 'closed'} onChange={() => setStatus(status === 'closed' ? null : 'closed')} />
+            </FilterGroup>
+          </aside>
+
+          {/* Results area */}
+          <section>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: space[3], padding: `0 ${space[1]}px`,
+            }}>
+              <p style={{ margin: 0, fontSize: 12, color: color.text.secondary, fontWeight: 500 }}>
+                {loading ? 'Loading...' : `${templates.length} of ${total}`}
+              </p>
+              <SortSelect value={sort} onChange={setSort} />
+            </div>
+
+            {error && (
+              <div style={{ padding: space[3], borderRadius: radius.field,
+                background: color.status.dangerBg, color: color.status.danger,
+                fontSize: 12, marginBottom: space[3] }}>{error}</div>
+            )}
+
+            {/* Adaptive grid - cards reflow based on available width */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+              gap: space[3],
+            }}>
+              {templates.map((t) => (
+                <CampaignCard key={t.id} template={t}
+                  selected={t.id === selectedId}
+                  onSelect={() => setSelectedId(t.id)}
+                  onUse={() => useTemplate(t.id)}
+                  disabled={duplicating} />
+              ))}
+              {templates.length === 0 && !loading && (
+                <div style={{ gridColumn: '1 / -1', padding: space[8], textAlign: 'center',
+                  background: color.bg.surface, border: `1px solid ${color.border.soft}`,
+                  borderRadius: radius.card, color: color.text.secondary, fontSize: 14 }}>
+                  No campaigns match your filters.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {/* Preview sheet - slides in from right when a card is selected */}
+      {selected && (
+        <>
+          <div onClick={() => setSelectedId(null)} style={{
+            position: 'fixed', inset: 0, background: 'rgba(22,20,18,0.32)',
+            backdropFilter: 'blur(4px)', zIndex: 200,
+            animation: `fadeIn ${motion.duration.base}ms ${motion.easing}`,
+          }} />
+          <aside style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0,
+            width: 'min(440px, calc(100vw - 64px))',
+            background: color.bg.surface, borderLeft: `1px solid ${color.border.soft}`,
+            zIndex: 201, padding: space[6], overflowY: 'auto',
+            animation: `slideIn ${motion.duration.base}ms ${motion.easing}`,
+          }}>
+            <PreviewContent template={selected} onUse={() => useTemplate(selected.id)}
+              onClose={() => setSelectedId(null)} disabled={duplicating} />
+          </aside>
+          <style>{`
+            @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+            @keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+          `}</style>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------ Card ------ */
+
+function CampaignCard({ template, selected, onSelect, onUse, disabled }: {
+  template: Template; selected: boolean; onSelect: () => void; onUse: () => void; disabled: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div onClick={onSelect}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        background: color.bg.surface,
+        border: `1px solid ${selected ? color.action.primary : color.border.soft}`,
+        borderRadius: radius.card,
+        padding: space[4],
+        cursor: 'pointer',
+        transform: hover ? 'translateY(-1px)' : 'translateY(0)',
+        boxShadow: hover ? '0 4px 12px rgba(22,20,18,0.06)' : 'none',
+        transition: `transform ${motion.duration.quick}ms ${motion.easing}, border-color ${motion.duration.quick}ms ${motion.easing}, box-shadow ${motion.duration.quick}ms ${motion.easing}`,
+        display: 'flex', flexDirection: 'column', gap: space[2], minHeight: 160,
+      }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: space[2] }}>
+        <span style={{ fontFamily: font.mono, fontSize: 11, fontWeight: 500, color: color.text.tertiary,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+          {template.loa_draft_id}
+        </span>
+        <StatusBadge status={template.status} size="sm" />
+      </div>
+      <p style={{ margin: 0, fontSize: 14, fontWeight: 560, lineHeight: '20px',
+        color: color.text.primary,
+        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+        overflow: 'hidden', minHeight: 40,
+      }}>{template.title}</p>
+      <p style={{ margin: 0, fontSize: 12, color: color.text.secondary, lineHeight: '18px',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {[template.country, template.brand, template.activity_type].filter(Boolean).join(' · ')}
+      </p>
+      <div style={{ flex: 1 }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        paddingTop: space[2], borderTop: `1px solid ${color.border.soft}` }}>
+        <span style={{ fontFamily: font.mono, fontSize: 13, fontWeight: 500, color: color.text.primary }}>
+          {formatMoney(template.budget_total)}
+        </span>
+        <button onClick={(e) => { e.stopPropagation(); onUse(); }} disabled={disabled}
+          style={smallPrimaryButtonStyle(disabled)}>Use as template</button>
+      </div>
+    </div>
+  );
+}
+
+/* ------ Preview sheet ------ */
+
+function PreviewContent({ template, onUse, onClose, disabled }: {
+  template: Template; onUse: () => void; onClose: () => void; disabled: boolean;
+}) {
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+        marginBottom: space[4] }}>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ margin: 0, fontFamily: font.mono, fontSize: 12, fontWeight: 500,
+            color: color.text.secondary }}>{template.loa_draft_id}</p>
+          <h2 style={{ margin: `${space[1]}px 0 ${space[3]}px`,
+            fontSize: type.h2.size, lineHeight: `${type.h2.line}px`,
+            fontWeight: type.h2.weight, color: color.text.primary }}>{template.title}</h2>
+          <StatusBadge status={template.status} />
+        </div>
+        <button onClick={onClose} aria-label="Close" style={{
+          background: 'transparent', border: 'none', fontSize: 20,
+          color: color.text.tertiary, cursor: 'pointer', padding: 0, lineHeight: 1,
+        }}>×</button>
+      </div>
+
+      <PreviewSection label="Where">
+        <PreviewRow label="Country" value={template.country} />
+        <PreviewRow label="Cluster" value={template.cluster} />
+      </PreviewSection>
+      <PreviewSection label="Classification">
+        <PreviewRow label="Brand" value={template.brand} />
+        <PreviewRow label="Activity" value={template.activity_type} />
+      </PreviewSection>
+      <PreviewSection label="Financials">
+        <PreviewRow label="Budget total" value={formatMoney(template.budget_total)} mono />
+        <PreviewRow label="FY 2025" value={template.fy_2025_total ? formatMoney(template.fy_2025_total) : '—'} mono />
+        <PreviewRow label="FY 2026" value={template.fy_2026_total ? formatMoney(template.fy_2026_total) : '—'} mono />
+      </PreviewSection>
+
+      <button onClick={onUse} disabled={disabled}
+        style={{ ...primaryButtonStyle(disabled), width: '100%', marginTop: space[4] }}>
+        Use as template
+      </button>
+    </div>
+  );
+}
+
+function PreviewSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: space[4] }}>
+      <p style={{ margin: `0 0 ${space[2]}px`, fontSize: 11, letterSpacing: '0.04em',
+        textTransform: 'uppercase', fontWeight: 500, color: color.text.tertiary }}>{label}</p>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function PreviewRow({ label, value, mono }: { label: string; value: string | null | undefined; mono?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      padding: `${space[1]}px 0`, fontSize: 13 }}>
+      <span style={{ color: color.text.secondary }}>{label}</span>
+      <span style={{ color: color.text.primary, fontFamily: mono ? font.mono : font.sans,
+        fontWeight: mono ? 500 : 400, textAlign: 'right' }}>{value || '—'}</span>
+    </div>
+  );
+}
+
+/* ------ Filter UI ------ */
+
+function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: space[4] }}>
+      <p style={{ margin: `0 0 ${space[2]}px`, fontSize: 11, letterSpacing: '0.04em',
+        textTransform: 'uppercase', fontWeight: 500, color: color.text.tertiary }}>{label}</p>
+      {children}
+    </div>
+  );
+}
+
+function FilterCheckbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <label onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{ display: 'flex', alignItems: 'center', gap: space[2],
+        padding: `4px 6px`, borderRadius: 6,
+        background: hover ? color.bg.canvas : 'transparent',
+        cursor: 'pointer', fontSize: 13,
+        color: checked ? color.text.primary : color.text.secondary,
+        fontWeight: checked ? 500 : 400 }}>
+      <input type="checkbox" checked={checked} onChange={onChange}
+        style={{ accentColor: color.action.primary, cursor: 'pointer' }} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    </label>
+  );
+}
+
+function FilterEmpty() {
+  return <p style={{ margin: 0, fontSize: 12, color: color.text.tertiary, fontStyle: 'italic' }}>None</p>;
+}
+
+function SortSelect({ value, onChange }: { value: SortKey; onChange: (v: SortKey) => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value as SortKey)}
+      style={{ background: color.bg.surface, border: `1px solid ${color.border.soft}`,
+        borderRadius: 8, padding: '4px 8px', fontSize: 12,
+        fontFamily: font.sans, color: color.text.primary, cursor: 'pointer' }}>
+      <option value="most_reusable">Sort: Most reusable</option>
+      <option value="recently_approved">Sort: Recently approved</option>
+      <option value="highest_budget">Sort: Highest budget</option>
+      <option value="fy_desc">Sort: Most recent</option>
+    </select>
+  );
+}
+
+/* ------ Helpers ------ */
+
+function unique<T>(arr: (T | null | undefined)[]): T[] {
+  const seen = new Set<T>(); const out: T[] = [];
+  for (const v of arr) { if (v == null) continue; if (!seen.has(v)) { seen.add(v); out.push(v); } }
+  return out.sort() as T[];
+}
+function formatMoney(n: number | null | undefined): string {
+  if (!n) return '—';
+  if (n >= 1_000_000) return `€${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `€${Math.round(n / 1_000)}k`;
+  return `€${n}`;
+}
+
+const subtleButtonStyle: React.CSSProperties = {
+  background: 'transparent', border: 'none', color: color.text.tertiary,
+  fontSize: 12, cursor: 'pointer', padding: '4px 8px',
+};
+function primaryButtonStyle(disabled: boolean): React.CSSProperties {
+  return { background: disabled ? color.border.strong : color.action.primary,
+    color: color.text.onPrimary, border: 'none', borderRadius: radius.field,
+    padding: '10px 16px', fontSize: 14, fontWeight: 560,
+    fontFamily: font.sans, cursor: disabled ? 'not-allowed' : 'pointer' };
+}
+function smallPrimaryButtonStyle(disabled: boolean): React.CSSProperties {
+  return { background: disabled ? color.border.strong : color.action.primary,
+    color: color.text.onPrimary, border: 'none', borderRadius: 8,
+    padding: '4px 12px', fontSize: 12, fontWeight: 500,
+    fontFamily: font.sans, cursor: disabled ? 'not-allowed' : 'pointer' };
+}

@@ -143,7 +143,7 @@ export const deleteLOA = async (id: string) => {
 export const getAISuggestion = async (params: {
   activity_type: string
   cluster: string
-  category: string
+  category: string[]
   brand: string
   fy_total: number
   num_doors: number
@@ -183,15 +183,21 @@ export const downloadPPT = async (id: string) => {
   link.remove()
 }
 
-export const downloadExcel = async (id: string) => {
-  const response = await api.get(`/loa/${id}/excel`, { responseType: 'blob' })
-  const url = window.URL.createObjectURL(new Blob([response.data]))
-  const link = document.createElement('a')
-  link.href = url
-  link.setAttribute('download', `LOA_${id}.xlsx`)
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
+
+
+export async function downloadExcel(loaId: string) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null
+  const res = await fetch(`${API_BASE}/loa/${loaId}/excel`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error('Excel download failed')
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `LOA_${loaId}.xlsx`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 // ---- Photos ----
@@ -230,3 +236,77 @@ export async function getMyRole() {
   const response = await api.get('/permissions/my-role')
   return response.data
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// SPRINT 5 — Comments API
+// ═══════════════════════════════════════════════════════════════════════
+
+export interface CommentItem {
+  id: string
+  loa_id: string
+  author_email: string
+  author_name: string
+  author_role: string
+  section: string
+  content: string
+  written_at_status: string
+  resolved: boolean
+  resolved_at: string | null
+  resolved_by: string | null
+  created_at: string
+}
+
+export interface MyCommentsSummary {
+  total_comments: number
+  loas: {
+    loa_id: string
+    count: number
+    last_section: string
+    last_content: string
+    last_at: string
+  }[]
+}
+
+/**
+ * Create a comment on a specific section of a LOA.
+ */
+export async function createComment(
+  loaId: string,
+  section: string,
+  content: string,
+): Promise<CommentItem> {
+  const { data } = await api.post(`/loa/${loaId}/comments`, { section, content })
+  return data
+}
+
+/**
+ * List all comments on a LOA. Optionally filter by section.
+ */
+export async function listComments(
+  loaId: string,
+  section?: string,
+): Promise<CommentItem[]> {
+  const { data } = await api.get(`/loa/${loaId}/comments`, {
+    params: section ? { section } : {},
+  })
+  return data
+}
+
+/**
+ * Mark a comment as resolved. Only the current step's reviewer can do this.
+ */
+export async function resolveComment(commentId: string): Promise<CommentItem> {
+  const { data } = await api.patch(`/comments/${commentId}/resolve`)
+  return data
+}
+
+/**
+ * Get a summary of all comments authored by the current user — used
+ * to power the "My comments" filter on the tracker.
+ */
+export async function getMyComments(): Promise<MyCommentsSummary> {
+  const { data } = await api.get('/comments/mine')
+  return data
+}
+
+export default api

@@ -1,0 +1,966 @@
+'use client';
+
+/**
+ * LAURA — Tracker (Essilor-style B&W refonte)
+ *
+ * Style: black rectangular buttons everywhere (like Essilor's "Subscribe").
+ * Light mode: black buttons, white text. Dark mode: white buttons, black text.
+ * IOSToggle added to header for theme switching.
+ */
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
+import api from '@/lib/api';
+import { getLOAs, getMyComments } from '@/lib/api';
+import type { MyCommentsSummary } from '@/lib/api';
+import { useMyRole } from '@/hooks/usePermissions';
+import type { LOA } from '@/types/loa';
+import { CLUSTERS, STATUS_CONFIG } from '@/types/loa';
+import NavHeader from '@/components/NavHeader';
+import StatusBadge from '@/components/StatusBadge';
+import IOSToggle from '@/components/IOSToggle';
+import { color, font, motion, radius, space } from '@/styles/tokens';
+
+const PAGE_SIZE = 50;
+const REVIEW_STATUSES = [
+  'emea_review', 'global_review', 'cmo_cfo_review',
+  'global_functions_review', 'corporate_review',
+];
+
+// ── Helpers ─────────────────────────────────────────────────────
+
+function formatEuros(n: number): string {
+  if (!n) return '€0';
+  if (n >= 1_000_000) return `€${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `€${Math.round(n / 1_000)}k`;
+  return `€${n}`;
+}
+
+function formatCategory(cat: string | string[] | undefined | null): string | null {
+  if (!cat) return null;
+  if (Array.isArray(cat)) return cat.length ? cat.join(' + ') : null;
+  return String(cat);
+}
+
+function timeAgo(iso: string | undefined | null): string {
+  if (!iso) return '—';
+  const then = new Date(iso).getTime();
+  if (!then) return '—';
+  const diff = Date.now() - then;
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
+  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function hoursSince(iso: string | undefined | null): number {
+  if (!iso) return 0;
+  return (Date.now() - new Date(iso).getTime()) / 3_600_000;
+}
+
+interface LoaCommentSummary {
+  total_unresolved: number;
+  total_blocking: number;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Page
+// ═════════════════════════════════════════════════════════════════
+
+export default function TrackerPage() {
+  const router = useRouter();
+  const { role } = useMyRole();
+
+  const [loas, setLOAs] = useState<LOA[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [showHistorical, setShowHistorical] = useState(false);
+  const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
+  const [entered, setEntered] = useState(false);
+
+  // Filters
+  const [search, setSearch] = useState('');
+  const [statusFilters, setStatusFilters] = useState<Set<string>>(new Set());
+  const [clusterFilters, setClusterFilters] = useState<Set<string>>(new Set());
+  const [quarterFilter, setQuarterFilter] = useState<string | null>(null);
+  const [ownerFilters, setOwnerFilters] = useState<Set<string>>(new Set());
+
+  // Pill toggles
+  const [needsAttention, setNeedsAttention] = useState(false);
+  const [pptIssuesOnly, setPptIssuesOnly] = useState(false);
+  const [showMyCommentsOnly, setShowMyCommentsOnly] = useState(false);
+
+  // Comments
+  const [myComments, setMyComments] = useState<MyCommentsSummary | null>(null);
+  const [summaryByLoa, setSummaryByLoa] = useState<Map<string, LoaCommentSummary>>(new Map());
+
+  // Page enter animation
+  useEffect(() => {
+    const t = setTimeout(() => setEntered(true), 20);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Visited rows from sessionStorage
+  useEffect(() => {
+    try {
+      const v = sessionStorage.getItem('laura.visitedLOAs');
+      if (v) setVisitedIds(new Set(JSON.parse(v)));
+    } catch {/* ignore */}
+  }, []);
+
+  function markVisited(id: string) {
+    setVisitedIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev); next.add(id);
+      try { sessionStorage.setItem('laura.visitedLOAs', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }
+
+  // Load LOAs
+  useEffect(() => {
+    setLoading(true);
+    getLOAs({ include_historical: showHistorical })
+      .then(setLOAs)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [showHistorical]);
+
+  // Reset pagination on filter change
+  useEffect(() => { setPage(1); }, [
+    search, statusFilters, clusterFilters, quarterFilter, ownerFilters,
+    needsAttention, pptIssuesOnly, showMyCommentsOnly, showHistorical,
+  ]);
+
+  // Load my comments
+  useEffect(() => {
+    getMyComments().then(setMyComments).catch(() => {});
+  }, []);
+
+  // Fetch per-LOA comment summaries
+  useEffect(() => {
+    if (loas.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const map = new Map<string, LoaCommentSummary>();
+      const batchSize = 10;
+      for (let i = 0; i < loas.length; i += batchSize) {
+        if (cancelled) return;
+        const batch = loas.slice(i, i + batchSize).filter(l => l && l.id);
+        const results = await Promise.allSettled(
+          batch.map(l => api.get(`/loa/${l.id}/comments/summary`).then(r => r.data))
+        );
+        results.forEach((res, idx) => {
+          if (res.status === 'fulfilled' && res.value) {
+            map.set(batch[idx].id, {
+              total_unresolved: res.value.total_unresolved || 0,
+              total_blocking: res.value.total_blocking || 0,
+            });
+          }
+        });
+      }
+      if (!cancelled) setSummaryByLoa(map);
+    })();
+    return () => { cancelled = true; };
+  }, [loas]);
+
+  // ── Derived ──────────────────────────────────────────────────
+
+  const myCommentsByLoa = useMemo(() => {
+    const m = new Map<string, MyCommentsSummary['loas'][0]>();
+    if (myComments) myComments.loas.forEach(item => m.set(item.loa_id, item));
+    return m;
+  }, [myComments]);
+
+  const uniqueOwners = useMemo(() => {
+    const set = new Set<string>();
+    loas.forEach(l => { if (l.requestor_email) set.add(l.requestor_email); });
+    return Array.from(set).sort();
+  }, [loas]);
+
+  function isNeedsAttention(l: LOA): boolean {
+    const sum = summaryByLoa.get(l.id);
+    const hasBlocker = (sum?.total_blocking || 0) > 0;
+    const isRejected = l.status === 'rejected';
+    const isStaleReview = REVIEW_STATUSES.includes(l.status) && hoursSince(l.updated_at) > 48;
+    return hasBlocker || isRejected || isStaleReview;
+  }
+
+  const filtered = useMemo(() => loas.filter((l) => {
+    if (!l || !l.id) return false;
+    if (showMyCommentsOnly && !myCommentsByLoa.has(l.id)) return false;
+    if (statusFilters.size > 0 && !statusFilters.has(l.status)) return false;
+    if (clusterFilters.size > 0 && !clusterFilters.has(l.cluster || '')) return false;
+    if (ownerFilters.size > 0 && !ownerFilters.has(l.requestor_email || '')) return false;
+    if (quarterFilter) {
+      const field = `q${quarterFilter.slice(1)}_2026` as keyof LOA;
+      const v = Number((l as any)[field] ?? 0);
+      if (!v || v <= 0) return false;
+    }
+    if (needsAttention && !isNeedsAttention(l)) return false;
+    if (pptIssuesOnly && l.ppt_slide_required !== false) return false;
+
+    if (search) {
+      const q = search.toLowerCase();
+      const match = (
+        l.activity_type?.toLowerCase().includes(q) ||
+        l.country?.toLowerCase().includes(q) ||
+        l.brand?.toLowerCase().includes(q) ||
+        l.loa_draft_id?.toLowerCase().includes(q) ||
+        l.loa_number?.toLowerCase().includes(q) ||
+        l.customer?.toLowerCase().includes(q) ||
+        l.description?.toLowerCase().includes(q) ||
+        l.detail?.toLowerCase().includes(q) ||
+        (formatCategory(l.category)?.toLowerCase().includes(q))
+      );
+      if (!match) return false;
+    }
+    return true;
+  }), [loas, statusFilters, clusterFilters, quarterFilter, ownerFilters,
+       search, showMyCommentsOnly, needsAttention, pptIssuesOnly,
+       myCommentsByLoa, summaryByLoa]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalBudget = filtered.reduce((s, l) => s + (l.fy_2026_total || 0), 0);
+
+  const counts = useMemo(() => {
+    const needsAttn = loas.filter(l => l && l.id && isNeedsAttention(l)).length;
+    const rejected = loas.filter(l => l?.status === 'rejected').length;
+    const review = loas.filter(l => REVIEW_STATUSES.includes(l?.status || '')).length;
+    const pptIssues = loas.filter(l => l && l.ppt_slide_required === false).length;
+    return { needsAttn, rejected, review, pptIssues };
+  }, [loas, summaryByLoa]);
+
+  const canSeeHistorical = role?.can_override_lock === true;
+  const activeFilters =
+    statusFilters.size + clusterFilters.size + ownerFilters.size +
+    (quarterFilter ? 1 : 0) + (search ? 1 : 0) +
+    (needsAttention ? 1 : 0) + (pptIssuesOnly ? 1 : 0) + (showMyCommentsOnly ? 1 : 0);
+
+  const clearAll = () => {
+    setStatusFilters(new Set()); setClusterFilters(new Set());
+    setOwnerFilters(new Set()); setQuarterFilter(null);
+    setSearch(''); setNeedsAttention(false);
+    setPptIssuesOnly(false); setShowMyCommentsOnly(false);
+  };
+
+  // ── Render ───────────────────────────────────────────────────
+
+  return (
+    <div style={{ minHeight: '100vh', background: color.bg.canvas }}>
+      <NavHeader />
+
+      <main style={{
+        maxWidth: 1280, margin: '0 auto',
+        padding: `${space[6]}px ${space[6]}px ${space[8]}px`,
+        opacity: entered ? 1 : 0,
+        transform: entered ? 'translateY(0)' : 'translateY(6px)',
+        transition: `opacity ${motion.duration.base}ms ${motion.easing}, transform ${motion.duration.base}ms ${motion.easing}`,
+      }}>
+
+        {/* ─── Header ─── */}
+        <header style={{
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+          gap: space[3], marginBottom: space[5], flexWrap: 'wrap',
+        }}>
+          <div>
+            <h1 style={{
+              margin: 0, fontSize: 26, lineHeight: '32px', fontWeight: 600,
+              color: color.text.primary, letterSpacing: '-0.01em',
+            }}>Tracker</h1>
+            <p style={{
+              margin: `${space[1]}px 0 0`, fontSize: 13, color: color.text.secondary,
+            }}>
+              {loading ? 'Loading…' : (
+                <>
+                  <span style={{ fontFamily: font.mono, color: color.text.primary, fontWeight: 500 }}>
+                    {filtered.length}
+                  </span>
+                  <span> LOA{filtered.length !== 1 ? 's' : ''}</span>
+                  {totalBudget > 0 && (
+                    <>
+                      <span> · </span>
+                      <span style={{ fontFamily: font.mono, color: color.text.primary, fontWeight: 500 }}>
+                        {formatEuros(totalBudget)}
+                      </span>
+                      <span> tracked</span>
+                    </>
+                  )}
+                </>
+              )}
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: space[2], alignItems: 'center' }}>
+            <IOSToggle />
+
+            <EssilorButton
+              onClick={() => setShowMyCommentsOnly(v => !v)}
+              active={showMyCommentsOnly}
+              title={!myComments ? 'No comments yet' : 'Filter to LOAs you commented on'}
+            >
+              💬 My comments
+              {myComments && myComments.total_comments > 0 && (
+                <span style={{ marginLeft: 4, fontFamily: font.mono, fontWeight: 600 }}>
+                  {myComments.total_comments}
+                </span>
+              )}
+            </EssilorButton>
+
+            <EssilorButton
+              onClick={() => exportExcel(statusFilters, clusterFilters)}
+              disabled={loading || filtered.length === 0}
+            >
+              ↓ Export Excel
+            </EssilorButton>
+          </div>
+        </header>
+
+        {/* ─── Summary pills (Essilor-style) ─── */}
+        <div style={{
+          display: 'flex', gap: space[2], flexWrap: 'wrap', marginBottom: space[4],
+        }}>
+          <SummaryPill
+            label="Needs attention"
+            count={counts.needsAttn}
+            active={needsAttention}
+            onClick={() => setNeedsAttention(v => !v)}
+          />
+          <SummaryPill
+            label="Rejected"
+            count={counts.rejected}
+            active={statusFilters.size === 1 && statusFilters.has('rejected')}
+            onClick={() => {
+              const next = new Set<string>();
+              if (!(statusFilters.size === 1 && statusFilters.has('rejected'))) next.add('rejected');
+              setStatusFilters(next);
+            }}
+          />
+          <SummaryPill
+            label="Under review"
+            count={counts.review}
+            active={REVIEW_STATUSES.every(s => statusFilters.has(s)) && statusFilters.size === REVIEW_STATUSES.length}
+            onClick={() => {
+              const isAll = REVIEW_STATUSES.every(s => statusFilters.has(s)) && statusFilters.size === REVIEW_STATUSES.length;
+              setStatusFilters(isAll ? new Set() : new Set(REVIEW_STATUSES));
+            }}
+          />
+          <SummaryPill
+            label="PPT issues"
+            count={counts.pptIssues}
+            active={pptIssuesOnly}
+            onClick={() => setPptIssuesOnly(v => !v)}
+          />
+        </div>
+
+        {/* ─── Search ─── */}
+        <div style={{ marginBottom: space[3] }}>
+          <SearchInput value={search} onChange={setSearch} />
+        </div>
+
+        {/* ─── Filter chips (Essilor-style) ─── */}
+        <div style={{
+          display: 'flex', gap: space[2], marginBottom: space[5],
+          flexWrap: 'wrap', alignItems: 'center',
+        }}>
+          <FilterChip
+            label="Status"
+            summary={chipSummary(statusFilters, Object.keys(STATUS_CONFIG).length, (s) => (STATUS_CONFIG as any)[s]?.label || s)}
+          >
+            {Object.entries(STATUS_CONFIG).map(([key, val]: [string, any]) => (
+              <ChipOption key={key} label={val.label}
+                checked={statusFilters.has(key)}
+                onChange={() => toggleSet(statusFilters, key, setStatusFilters)} />
+            ))}
+          </FilterChip>
+
+          <FilterChip
+            label="Cluster"
+            summary={chipSummary(clusterFilters, CLUSTERS.length)}
+          >
+            {CLUSTERS.map(c => (
+              <ChipOption key={c} label={c}
+                checked={clusterFilters.has(c)}
+                onChange={() => toggleSet(clusterFilters, c, setClusterFilters)} />
+            ))}
+          </FilterChip>
+
+          <FilterChip
+            label="Quarter"
+            summary={quarterFilter ? `${quarterFilter} 2026` : 'All'}
+          >
+            {['Q1', 'Q2', 'Q3', 'Q4'].map(q => (
+              <ChipOption key={q} label={`${q} 2026`}
+                checked={quarterFilter === q}
+                onChange={() => setQuarterFilter(quarterFilter === q ? null : q)} />
+            ))}
+          </FilterChip>
+
+          {uniqueOwners.length > 0 && (
+            <FilterChip
+              label="Owner"
+              summary={chipSummary(ownerFilters, uniqueOwners.length, (e) => e.split('@')[0])}
+            >
+              <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+                {uniqueOwners.map(o => (
+                  <ChipOption key={o} label={o.split('@')[0]}
+                    checked={ownerFilters.has(o)}
+                    onChange={() => toggleSet(ownerFilters, o, setOwnerFilters)} />
+                ))}
+              </div>
+            </FilterChip>
+          )}
+
+          {canSeeHistorical && (
+            <EssilorButton
+              onClick={() => setShowHistorical(v => !v)}
+              active={showHistorical}
+              title="Admin: include historical LOAs"
+              compact
+            >
+              {showHistorical ? '✓ ' : ''}Historical
+            </EssilorButton>
+          )}
+
+          {activeFilters > 0 && (
+            <button onClick={clearAll} style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              fontSize: 12, color: color.text.tertiary,
+              textDecoration: 'underline', fontFamily: font.sans,
+              padding: '4px 8px',
+            }}>Clear all ({activeFilters})</button>
+          )}
+        </div>
+
+        {/* ─── Table ─── */}
+        {!loading && paginated.length === 0 ? (
+          <EmptyState />
+        ) : paginated.length > 0 ? (
+          <div style={{
+            background: color.bg.surface,
+            borderWidth: '1px', borderStyle: 'solid', borderColor: color.border.soft,
+            borderRadius: 0,  /* sharp rectangles, Essilor-style */
+            overflow: 'hidden',
+          }}>
+            {/* Table header */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '14px 130px minmax(0, 1fr) 180px 110px',
+              gap: space[3], padding: `${space[2]}px ${space[4]}px`,
+              fontSize: 11, fontWeight: 500,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+              color: color.text.tertiary,
+              borderBottom: `1px solid ${color.border.soft}`,
+              background: color.bg.subtle,
+            }}>
+              <span></span>
+              <span>LOA</span>
+              <span>Activity</span>
+              <span>Status / Owner</span>
+              <span style={{ textAlign: 'right' }}>FY26</span>
+            </div>
+
+            {/* Rows */}
+            {paginated.map(loa => (
+              <TrackerRow
+                key={loa.id}
+                loa={loa}
+                visited={visitedIds.has(loa.id)}
+                onClick={() => markVisited(loa.id)}
+                summary={summaryByLoa.get(loa.id)}
+              />
+            ))}
+          </div>
+        ) : null}
+
+        {/* ─── Pagination ─── */}
+        {totalPages > 1 && (
+          <Pagination page={page} totalPages={totalPages} setPage={setPage} />
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// EssilorButton — the core "Subscribe ›" style button
+// ═════════════════════════════════════════════════════════════════
+
+function EssilorButton({ children, onClick, active, disabled, title, compact }: {
+  children: React.ReactNode;
+  onClick: () => void;
+  active?: boolean;
+  disabled?: boolean;
+  title?: string;
+  compact?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+
+  // Always black/inverted unless disabled
+  // In light mode: black bg, white text
+  // In dark mode: white bg, black text (via CSS vars)
+  // Active state: stays inverted, no special color (already black/white)
+  // Hover: subtle graphite shift
+
+  const bg = disabled
+    ? 'transparent'
+    : hover
+      ? 'var(--laura-action-hover)'
+      : 'var(--laura-action)';
+
+  const fg = disabled
+    ? 'var(--laura-text-tertiary)'
+    : 'var(--laura-text-on-primary)';
+
+  const border = disabled
+    ? `1px solid var(--laura-border-soft)`
+    : 'none';
+
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      disabled={disabled}
+      title={title}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        height: compact ? 30 : 34,
+        padding: compact ? '0 12px' : '0 16px',
+        borderRadius: 2,  /* near-sharp, Essilor */
+        background: bg,
+        color: fg,
+        border,
+        fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        transition: 'background-color 140ms cubic-bezier(0.2, 0, 0, 1)',
+        whiteSpace: 'nowrap',
+        letterSpacing: '0.01em',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Row
+// ═════════════════════════════════════════════════════════════════
+
+function TrackerRow({ loa, visited, onClick, summary }: {
+  loa: LOA;
+  visited: boolean;
+  onClick: () => void;
+  summary?: LoaCommentSummary;
+}) {
+  const [hover, setHover] = useState(false);
+
+  const title = loa.detail || loa.description || loa.activity_type || '—';
+  const country = loa.country || '—';
+  const category = formatCategory(loa.category);
+  const activity = loa.activity_type;
+  const meta = [country, category, activity].filter(Boolean).join(' · ');
+  const owner = loa.requestor_email?.split('@')[0] || '—';
+  const updated = timeAgo(loa.updated_at);
+
+  const blocking = summary?.total_blocking || 0;
+  const unresolved = summary?.total_unresolved || 0;
+  const pptMissing = loa.ppt_slide_required === false;
+
+  return (
+    <Link
+      href={`/loa/${loa.id}`}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '14px 130px minmax(0, 1fr) 180px 110px',
+        gap: space[3],
+        padding: `${space[3]}px ${space[4]}px`,
+        alignItems: 'center',
+        borderBottom: `1px solid ${color.border.soft}`,
+        background: hover ? 'var(--laura-bg-warm)' : color.bg.surface,
+        textDecoration: 'none',
+        cursor: 'pointer',
+        transition: `background-color ${motion.duration.quick}ms ${motion.easing}`,
+        minHeight: 72,
+      }}
+    >
+      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {!visited && (
+          <span style={{
+            display: 'inline-block', width: 6, height: 6, borderRadius: 999,
+            background: 'var(--laura-action)',
+          }} title="Not yet viewed" />
+        )}
+      </span>
+
+      <span style={{
+        fontFamily: font.mono, fontSize: 11, fontWeight: 500,
+        color: color.text.secondary,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {loa.loa_number || loa.loa_draft_id}
+      </span>
+
+      <div style={{ minWidth: 0 }}>
+        <p style={{
+          margin: 0, fontSize: 14, fontWeight: 500, lineHeight: '20px',
+          color: color.text.primary,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{title}</p>
+        <p style={{
+          margin: '3px 0 0', fontSize: 12, lineHeight: '18px',
+          color: color.text.tertiary,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{meta || '—'}</p>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+        <StatusBadge status={loa.status} size="sm" />
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          fontSize: 11, color: color.text.tertiary,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          <span>{owner} · {updated}</span>
+          {unresolved > 0 && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              fontSize: 10, padding: '1px 6px',
+              background: blocking > 0 ? 'var(--laura-danger-bg)' : 'var(--laura-champagne-mist)',
+              borderWidth: '1px', borderStyle: 'solid',
+              borderColor: blocking > 0 ? 'var(--laura-danger-border)' : 'var(--laura-champagne-border)',
+              color: blocking > 0 ? 'var(--laura-danger)' : 'var(--laura-champagne-deep)',
+              fontWeight: 600,
+              borderRadius: 2,
+            }}>💬 {unresolved}</span>
+          )}
+        </div>
+      </div>
+
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4,
+      }}>
+        <span style={{
+          fontFamily: font.mono, fontSize: 14, fontWeight: 500,
+          color: color.text.primary,
+        }}>{formatEuros(loa.fy_2026_total)}</span>
+        {pptMissing && (
+          <span style={{
+            fontSize: 10, padding: '1px 6px',
+            background: 'var(--laura-warning-bg)', color: 'var(--laura-warning)',
+            borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--laura-warning-border)',
+            fontWeight: 600,
+            borderRadius: 2,
+          }}>Missing PPT</span>
+        )}
+      </div>
+    </Link>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// SummaryPill (Essilor-style, black rectangle)
+// ═════════════════════════════════════════════════════════════════
+
+function SummaryPill({ label, count, active, onClick }: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const disabled = count === 0;
+
+  // Essilor style: always black/inverted
+  // Active: filled (default state), white border outline subtly indicates active
+  // Inactive: outline only (transparent bg + black border + black text)
+
+  const bg = disabled
+    ? 'transparent'
+    : active
+      ? (hover ? 'var(--laura-action-hover)' : 'var(--laura-action)')
+      : (hover ? 'var(--laura-action)' : 'transparent');
+
+  const fg = disabled
+    ? 'var(--laura-text-tertiary)'
+    : active
+      ? 'var(--laura-text-on-primary)'
+      : (hover ? 'var(--laura-text-on-primary)' : 'var(--laura-text-primary)');
+
+  const borderColor = disabled
+    ? 'var(--laura-border-soft)'
+    : 'var(--laura-action)';
+
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      disabled={disabled}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 8,
+        height: 34, padding: '0 14px',
+        borderRadius: 2,
+        background: bg,
+        color: fg,
+        borderWidth: '1px', borderStyle: 'solid', borderColor: borderColor,
+        fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        transition: 'background-color 140ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0, 1)',
+        whiteSpace: 'nowrap',
+        letterSpacing: '0.01em',
+      }}
+    >
+      <span>{label}</span>
+      <span style={{
+        fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+        fontSize: 12, fontWeight: 600,
+      }}>{count}</span>
+    </button>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// SearchInput
+// ═════════════════════════════════════════════════════════════════
+
+function SearchInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      height: 48,
+      background: color.bg.surface,
+      borderWidth: '1px', borderStyle: 'solid',
+      borderColor: focused ? 'var(--laura-action)' : color.border.soft,
+      borderRadius: 2,
+      padding: '0 16px',
+      transition: 'border-color 140ms cubic-bezier(0.2, 0, 0, 1)',
+    }}>
+      <span style={{ fontSize: 16, color: color.text.tertiary }}>⌕</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder="Search LOA, country, activity, brand, owner…"
+        style={{
+          flex: 1, border: 'none', outline: 'none', background: 'transparent',
+          fontFamily: font.sans, fontSize: 14, color: color.text.primary,
+        }}
+      />
+      {value && (
+        <button onClick={() => onChange('')} style={{
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          fontSize: 12, color: color.text.tertiary, padding: '4px 8px',
+        }}>Clear</button>
+      )}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// FilterChip (Essilor-style outlined rectangle)
+// ═════════════════════════════════════════════════════════════════
+
+function FilterChip({ label, summary, children }: {
+  label: string;
+  summary: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hover, setHover] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [open]);
+
+  const active = summary !== 'All' && summary !== '';
+
+  // Same Essilor style: outline → fills on hover/open
+  const bg = active || hover || open
+    ? 'var(--laura-action)'
+    : 'transparent';
+  const fg = active || hover || open
+    ? 'var(--laura-text-on-primary)'
+    : 'var(--laura-text-primary)';
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={() => setOpen(!open)}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          height: 32, padding: '0 14px',
+          borderRadius: 2,
+          background: bg,
+          color: fg,
+          borderWidth: '1px', borderStyle: 'solid',
+          borderColor: 'var(--laura-action)',
+          fontSize: 12, fontWeight: 500, fontFamily: 'inherit',
+          cursor: 'pointer',
+          transition: 'background-color 140ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0, 1)',
+          whiteSpace: 'nowrap',
+          letterSpacing: '0.01em',
+        }}
+      >
+        {label}: <span style={{ fontWeight: 600 }}>{summary}</span>
+        <span style={{ marginLeft: 4, fontSize: 9 }}>▾</span>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+          background: color.bg.surface,
+          borderWidth: '1px', borderStyle: 'solid', borderColor: color.border.strong,
+          borderRadius: 2, padding: space[2],
+          minWidth: 200,
+          boxShadow: '0 8px 24px rgba(10, 10, 10, 0.10)',
+          zIndex: 50,
+          animation: `chipFadeIn 140ms ${motion.easing}`,
+        }}>
+          {children}
+        </div>
+      )}
+
+      <style>{`@keyframes chipFadeIn {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }`}</style>
+    </div>
+  );
+}
+
+function ChipOption({ label, checked, onChange }: {
+  label: string; checked: boolean; onChange: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <label
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '6px 8px',
+        background: hover ? color.bg.warm : 'transparent',
+        cursor: 'pointer', fontSize: 13,
+        color: checked ? color.text.primary : color.text.secondary,
+        fontWeight: checked ? 500 : 400,
+      }}
+    >
+      <input type="checkbox" checked={checked} onChange={onChange}
+        style={{ accentColor: 'var(--laura-action)', cursor: 'pointer' }} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Pagination
+// ═════════════════════════════════════════════════════════════════
+
+function Pagination({ page, totalPages, setPage }: {
+  page: number; totalPages: number; setPage: (p: number) => void;
+}) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      gap: 4, marginTop: space[5],
+    }}>
+      <PageBtn label="‹‹" onClick={() => setPage(1)} disabled={page === 1} />
+      <PageBtn label="‹" onClick={() => setPage(page - 1)} disabled={page === 1} />
+      {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
+        const p = page <= 4 ? i + 1 : page - 3 + i;
+        if (p < 1 || p > totalPages) return null;
+        return <PageBtn key={p} label={String(p)} onClick={() => setPage(p)} active={p === page} />;
+      })}
+      <PageBtn label="›" onClick={() => setPage(page + 1)} disabled={page === totalPages} />
+      <PageBtn label="››" onClick={() => setPage(totalPages)} disabled={page === totalPages} />
+    </div>
+  );
+}
+
+function PageBtn({ label, onClick, disabled, active }: {
+  label: string; onClick: () => void; disabled?: boolean; active?: boolean;
+}) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      background: active ? 'var(--laura-action)' : 'transparent',
+      color: active ? 'var(--laura-text-on-primary)' : color.text.secondary,
+      borderWidth: '1px', borderStyle: 'solid',
+      borderColor: active ? 'var(--laura-action)' : color.border.soft,
+      borderRadius: 2, padding: '4px 10px',
+      fontSize: 12, fontFamily: font.mono,
+      cursor: disabled ? 'not-allowed' : 'pointer',
+      opacity: disabled ? 0.4 : 1, minWidth: 28,
+    }}>{label}</button>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Misc helpers
+// ═════════════════════════════════════════════════════════════════
+
+function EmptyState() {
+  return (
+    <div style={{
+      textAlign: 'center', padding: `${space[8]}px ${space[4]}px`,
+      borderRadius: 2,
+      borderWidth: '1px', borderStyle: 'dashed', borderColor: color.border.soft,
+      background: color.bg.surface,
+      color: color.text.tertiary, fontSize: 13,
+    }}>
+      <p style={{ margin: 0 }}>No LOAs match your filters. Try clearing some, or adjusting search.</p>
+    </div>
+  );
+}
+
+function toggleSet<T>(set: Set<T>, val: T, setter: (s: Set<T>) => void) {
+  const next = new Set(set);
+  next.has(val) ? next.delete(val) : next.add(val);
+  setter(next);
+}
+
+function chipSummary(set: Set<string>, total: number, formatter?: (s: string) => string): string {
+  if (set.size === 0) return 'All';
+  if (set.size === 1) return formatter ? formatter([...set][0]) : [...set][0];
+  if (set.size === total) return 'All';
+  return `${set.size} selected`;
+}
+
+async function exportExcel(statusFilters: Set<string>, clusterFilters: Set<string>) {
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null;
+    const qs = new URLSearchParams();
+    if (statusFilters.size > 0) qs.set('status', [...statusFilters].join(','));
+    if (clusterFilters.size > 0) qs.set('cluster', [...clusterFilters].join(','));
+    const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/loa/export/excel${qs.toString() ? '?' + qs : ''}`;
+    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const dl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = dl; a.download = 'LAURA_LOA_Export.xlsx';
+    a.click();
+    URL.revokeObjectURL(dl);
+  } catch {
+    alert('Excel export failed');
+  }
+}

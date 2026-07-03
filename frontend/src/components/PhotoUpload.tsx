@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react'
 import { deletePhoto as apiDeletePhoto } from '@/lib/api'
 
 interface PhotoUploadProps {
@@ -10,18 +10,23 @@ interface PhotoUploadProps {
 
 interface Photo {
   index: number
-  url: string
+  url: string        // server URL (for passing to parent / preview)
   name: string
-  preview: string
+  blobUrl: string    // local blob URL for display (avoids CORS issues)
   isServer: boolean
-  file?: File  // kept for pending uploads (loaId not yet available)
+  file?: File        // kept for pending uploads (loaId not yet available)
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-// Exposed via ref so the parent can trigger upload of pending photos
 export interface PhotoUploadRef {
   uploadPending: (newLoaId: string) => Promise<void>
+}
+
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  const token = localStorage.getItem('laura_token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 const PhotoUpload = forwardRef<PhotoUploadRef, PhotoUploadProps>(function PhotoUpload(
@@ -34,76 +39,98 @@ const PhotoUpload = forwardRef<PhotoUploadRef, PhotoUploadProps>(function PhotoU
   const [loaded, setLoaded]       = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // ── Load existing photos from backend on mount / when loaId changes ──
+  // Keep a stable ref to onPhotosChange so the effect doesn't re-fire
+  const onChangeRef = useRef(onPhotosChange)
+  onChangeRef.current = onPhotosChange
+
+  // Notify parent whenever photos change
+  const notifyParent = useCallback((updated: Photo[]) => {
+    onChangeRef.current?.(updated.map(p => ({ index: p.index, url: p.url })))
+  }, [])
+
+  // ── Cleanup blob URLs on unmount ──────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      photos.forEach(p => {
+        if (p.blobUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(p.blobUrl)
+        }
+      })
+    }
+  }, []) // intentionally empty — runs only on unmount
+
+  // ── Load existing photos from backend ─────────────────────────────────
   useEffect(() => {
     if (!loaId) {
       setLoaded(true)
       return
     }
 
+    let cancelled = false
+
     async function loadExisting() {
-      const token = localStorage.getItem('laura_token')
-      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
       const found: Photo[] = []
 
-      // Try to fetch photo 1 and photo 2 (max 2 per LOA)
-      for (const idx of [1, 2]) {
-        try {
-          const url = `${API_BASE}/loa/${loaId}/photos/${idx}`
-          const res = await fetch(url, { headers })
-          if (res.ok) {
-            // Convert to blob URL so the image displays reliably
-            const blob = await res.blob()
-            const blobUrl = URL.createObjectURL(blob)
-            found.push({
-              index: idx,
-              url,
-              name: `Photo ${idx}`,
-              preview: blobUrl,
-              isServer: true,
-            })
-          }
-        } catch {
-          // Photo doesn't exist — skip
+      // Probe each slot with an <img> load — no fetch, no CORS preflight.
+      await Promise.all([1, 2].map(idx => new Promise<void>(resolve => {
+        const url = `${API_BASE}/loa/${loaId}/photos/${idx}?t=${Date.now()}`
+        const img = new Image()
+        img.onload = () => {
+          found.push({
+            index: idx,
+            url,
+            name: `Photo ${idx}`,
+            blobUrl: url,   // direct server URL works in <img>
+            isServer: true,
+          })
+          resolve()
         }
-      }
+        img.onerror = () => resolve()   // 404 = slot empty, fine
+        img.src = url
+      })))
 
+      if (cancelled) return
+
+      found.sort((a, b) => a.index - b.index)
       setPhotos(found)
       setLoaded(true)
-      onPhotosChange?.(found.map(p => ({ index: p.index, url: p.url })))
+      notifyParent(found)
     }
 
+    setLoaded(false)
     loadExisting()
-  }, [loaId])
 
-  // ── Expose uploadPending to parent via ref ────────────────────────────
-  // Parent calls this in handleSubmit AFTER createLOA returns an ID,
-  // BEFORE router.push(). No race condition.
+    return () => { cancelled = true }
+  }, [loaId, notifyParent])
+
+  // ── Upload pending photos after LOA creation ──────────────────────────
   useImperativeHandle(ref, () => ({
     async uploadPending(newLoaId: string) {
       const pending = photos.filter(p => !p.isServer && p.file)
       if (pending.length === 0) return
 
-      const token = localStorage.getItem('laura_token')
-      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+      const headers = getAuthHeaders()
 
       for (const photo of pending) {
         try {
           const formData = new FormData()
           formData.append('file', photo.file!)
-          await fetch(`${API_BASE}/loa/${newLoaId}/photos`, {
+          const res = await fetch(`${API_BASE}/loa/${newLoaId}/photos`, {
             method: 'POST',
             headers,
             body: formData,
           })
-        } catch {
-          // Silent fail — photo will be missing but LOA is saved
+          if (!res.ok) {
+            console.warn(`[PhotoUpload] Upload photo ${photo.index} failed:`, res.status)
+          }
+        } catch (err) {
+          console.warn(`[PhotoUpload] Upload photo ${photo.index} error:`, err)
         }
       }
     },
   }), [photos])
 
-  // ── Upload handler ────────────────────────────────────────────────────
+  // ── File select handler ───────────────────────────────────────────────
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -115,48 +142,50 @@ const PhotoUpload = forwardRef<PhotoUploadRef, PhotoUploadProps>(function PhotoU
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      setError('Photo must be under 5MB')
+      setError('Photo must be under 5 MB')
       return
     }
 
     if (photos.length >= 2) {
-      setError('Maximum 2 photos allowed')
+      setError('Maximum 2 photos per LOA')
       return
     }
 
-    const preview = URL.createObjectURL(file)
+    const blobUrl = URL.createObjectURL(file)
     const nextIndex = photos.length + 1
 
     if (!loaId) {
-      // No LOA saved yet — preview only, will auto-upload when loaId becomes available
+      // No LOA saved yet — keep file in memory, upload later via uploadPending
       const newPhoto: Photo = {
         index: nextIndex,
-        url: preview,
+        url: blobUrl,
         name: file.name,
-        preview,
+        blobUrl,
         isServer: false,
-        file,  // keep the File for auto-upload later
+        file,
       }
       const updated = [...photos, newPhoto]
       setPhotos(updated)
-      onPhotosChange?.(updated.map(p => ({ index: p.index, url: p.url })))
+      notifyParent(updated)
       return
     }
 
-    // Upload to backend
+    // LOA exists — upload immediately
     setUploading(true)
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const token = localStorage.getItem('laura_token')
+      const headers = getAuthHeaders()
       const res = await fetch(`${API_BASE}/loa/${loaId}/photos`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers,
         body: formData,
       })
+
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({ detail: 'Upload failed' }))
         setError(err.detail || 'Upload failed')
+        URL.revokeObjectURL(blobUrl)
         return
       }
 
@@ -165,26 +194,28 @@ const PhotoUpload = forwardRef<PhotoUploadRef, PhotoUploadProps>(function PhotoU
         index: nextIndex,
         url: serverUrl,
         name: file.name,
-        preview: serverUrl,
+        blobUrl,    // keep the local blob for immediate display (no second fetch)
         isServer: true,
       }
       const updated = [...photos, uploaded]
       setPhotos(updated)
-      onPhotosChange?.(updated.map(p => ({ index: p.index, url: p.url })))
+      notifyParent(updated)
     } catch {
       setError('Upload failed — check backend is running')
+      URL.revokeObjectURL(blobUrl)
     } finally {
       setUploading(false)
       if (inputRef.current) inputRef.current.value = ''
     }
   }
 
-  // ── Remove handler — syncs with backend if photo is server-side ───────
+  // ── Remove handler ────────────────────────────────────────────────────
   async function removePhoto(index: number) {
     const photo = photos.find(p => p.index === index)
+    if (!photo) return
 
-    // Delete from backend if it's a server photo
-    if (photo?.isServer && loaId) {
+    // Delete from backend if server-side
+    if (photo.isServer && loaId) {
       try {
         await apiDeletePhoto(loaId, index)
       } catch {
@@ -193,16 +224,18 @@ const PhotoUpload = forwardRef<PhotoUploadRef, PhotoUploadProps>(function PhotoU
       }
     }
 
-    // Revoke local preview URL if it's a blob
-    if (photo?.preview?.startsWith('blob:')) {
-      URL.revokeObjectURL(photo.preview)
+    // Revoke blob URL
+    if (photo.blobUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(photo.blobUrl)
     }
 
+    // Re-index remaining photos (1-based, sequential)
     const updated = photos
       .filter(p => p.index !== index)
       .map((p, i) => ({ ...p, index: i + 1 }))
+
     setPhotos(updated)
-    onPhotosChange?.(updated.map(p => ({ index: p.index, url: p.url })))
+    notifyParent(updated)
     setError('')
   }
 
@@ -265,10 +298,9 @@ const PhotoUpload = forwardRef<PhotoUploadRef, PhotoUploadProps>(function PhotoU
             <div key={photo.index} className="relative group rounded-xl overflow-hidden"
               style={{ aspectRatio: '16/9', border: '1px solid var(--border)' }}>
               <img
-                src={photo.preview}
+                src={photo.blobUrl}
                 alt={`Photo ${photo.index}`}
                 className="w-full h-full object-cover"
-                crossOrigin="anonymous"
               />
               {/* Server badge */}
               {photo.isServer && (
@@ -277,16 +309,24 @@ const PhotoUpload = forwardRef<PhotoUploadRef, PhotoUploadProps>(function PhotoU
                   Saved
                 </div>
               )}
-              {/* Hover overlay */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center opacity-0
+              {/* Hover overlay with actions */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-0
                               group-hover:opacity-100 transition-opacity"
                 style={{ background: 'rgba(0,0,0,0.5)' }}>
-                <p className="text-white text-xs mb-2 px-2 text-center truncate w-full">{photo.name}</p>
-                <button type="button" onClick={() => removePhoto(photo.index)}
-                  className="text-xs px-3 py-1 rounded-lg"
-                  style={{ background: 'var(--red-bg)', color: 'var(--red-text)', border: '1px solid var(--red-border)' }}>
-                  Remove
-                </button>
+                <p className="text-white text-xs px-2 text-center truncate w-full">{photo.name}</p>
+                <div className="flex gap-2">
+                  <button type="button"
+                    onClick={() => { removePhoto(photo.index); setTimeout(() => inputRef.current?.click(), 100) }}
+                    className="text-xs px-3 py-1 rounded-lg"
+                    style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+                    Replace
+                  </button>
+                  <button type="button" onClick={() => removePhoto(photo.index)}
+                    className="text-xs px-3 py-1 rounded-lg"
+                    style={{ background: 'var(--red-bg)', color: 'var(--red-text)', border: '1px solid var(--red-border)' }}>
+                    Remove
+                  </button>
+                </div>
               </div>
               {/* Index badge */}
               <div className="absolute top-2 left-2 text-xs px-1.5 py-0.5 rounded"
@@ -298,7 +338,7 @@ const PhotoUpload = forwardRef<PhotoUploadRef, PhotoUploadProps>(function PhotoU
 
           {/* Empty slots */}
           {Array.from({ length: 2 - photos.length }).map((_, i) => (
-            <button key={i} type="button"
+            <button key={`empty-${i}`} type="button"
               onClick={() => inputRef.current?.click()}
               className="rounded-xl flex flex-col items-center justify-center gap-2 transition-colors"
               style={{

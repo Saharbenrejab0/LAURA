@@ -1,0 +1,3207 @@
+{
+  "timestamp": "2026-07-02_18-23-44",
+  "total": 50,
+  "passed": 50,
+  "pass_rate": 1.0,
+  "avg_scores": {
+    "filter_accuracy": 0.99334,
+    "source_relevance": 0.985,
+    "answer_quality": 0.9433400000000001,
+    "no_hallucination": 0.96,
+    "total": 0.9725000000000001
+  },
+  "results": [
+    {
+      "id": "struct_001",
+      "category": "structured",
+      "question": "How many LOAs per cluster?",
+      "expected_tool": "stats",
+      "answer": "Across all clusters, there are **2,712 LOAs** in total. The top five clusters by volume are **EAST** (570), **META** (480), **ITALY** (460), **DACH** (420), and **NORTH** (359). IBERIA and FRANCE follow with 220 and 182 LOAs respectively, while EMEA and South Europe have minimal activity at 20 and 1 LOA.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT cluster, COUNT(*) AS num_loas\nFROM loas\nGROUP BY cluster\nORDER BY num_loas DESC\nLIMIT 50",
+      "timing_ms": 8441,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "struct_002",
+      "category": "structured",
+      "question": "What is the total budget across all approved LOAs?",
+      "expected_tool": "stats",
+      "answer": "The total budget across all approved LOAs amounts to **€150,812,712.26**. This figure consolidates approved marketing investments across FY2024, FY2025, and FY2026.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT\n    ROUND(CAST(SUM(COALESCE(fy_2026_total, 0) + COALESCE(fy_2025_total, 0) + COALESCE(fy_2024_total, 0)) AS NUMERIC), 2) AS total_approved_budget\nFROM loas\nWHERE status = 'approved'",
+      "timing_ms": 7777,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 0.75,
+        "no_hallucination": 1.0,
+        "total": 0.925
+      },
+      "issues": [
+        "Answer missing keywords: ['EUR']"
+      ],
+      "passed": true
+    },
+    {
+      "id": "struct_003",
+      "category": "structured",
+      "question": "Top 5 brands by total spend",
+      "expected_tool": "stats",
+      "answer": "Here are the **top 5 brands by total FY2025 spend**:\n\n1. **All HB + All LB** — €11,116,282\n2. **Multibrand** — €10,003,450\n3. **Ray-Ban** — €9,116,550\n4. **Oakley** — €7,378,530\n5. **LB - Luxury** — €2,828,520\n\nRay-Ban and Oakley lead among individual brands, while the combined multi-brand groupings (\"All HB + All LB\" and \"Multibrand\") account for the highest allocations overall.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT\n    brand,\n    ROUND(CAST(SUM(COALESCE(fy_2025_total, 0)) AS NUMERIC), 2) AS total_spend\nFROM loas\nGROUP BY brand\nORDER BY total_spend DESC\nLIMIT 5",
+      "timing_ms": 7790,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 0.667,
+        "no_hallucination": 1.0,
+        "total": 0.9
+      },
+      "issues": [
+        "Answer missing keywords: ['budget', 'EUR']"
+      ],
+      "passed": true
+    },
+    {
+      "id": "struct_004",
+      "category": "structured",
+      "question": "Average budget for Events across EMEA",
+      "expected_tool": "stats",
+      "answer": "The average budget for **Events** LOAs across EMEA is **€30,115.95**. This reflects the typical marketing investment allocated per event activation request in the region.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT\n    ROUND(AVG(COALESCE(fy_2025_total, 0))::numeric, 2) AS avg_budget_eur\nFROM loas\nWHERE activity_type IN ('EVENTS', 'Events')\nLIMIT 50",
+      "timing_ms": 7404,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 0.833,
+        "no_hallucination": 1.0,
+        "total": 0.95
+      },
+      "issues": [
+        "Answer missing keywords: ['EUR']"
+      ],
+      "passed": true
+    },
+    {
+      "id": "struct_005",
+      "category": "structured",
+      "question": "How many LOAs are in draft status right now?",
+      "expected_tool": "stats",
+      "answer": "There are currently **31 LOAs** in draft status. These have not yet been submitted for approval and may still be under preparation or awaiting final review before entering the authorization workflow.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT COUNT(*) AS draft_loas_count\nFROM loas\nWHERE status = 'draft'",
+      "timing_ms": 8626,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "struct_006",
+      "category": "structured",
+      "question": "What is the total FY 2026 budget for Italy?",
+      "expected_tool": "stats",
+      "answer": "The total FY 2026 marketing budget for Italy amounts to **€3,790,036.00**. This figure consolidates all active Letters of Authorization submitted for the Italian market across all brands and campaigns.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT ROUND(CAST(SUM(COALESCE(fy_2026_total, 0)) AS NUMERIC), 2) AS total_fy2026_budget_italy\nFROM loas\nWHERE LOWER(country) = 'italy'\nLIMIT 50",
+      "timing_ms": 8493,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 0.75,
+        "no_hallucination": 1.0,
+        "total": 0.925
+      },
+      "issues": [
+        "Answer missing keywords: ['EUR']"
+      ],
+      "passed": true
+    },
+    {
+      "id": "struct_007",
+      "category": "structured",
+      "question": "Count of LOAs per activity type",
+      "expected_tool": "stats",
+      "answer": "Across 31 activity types, **TM_SEASONAL** leads with 912 LOAs, followed by **IN_STORE** (403) and **EVENTS** (317). **TM_PERMANENT** and **COOP_ADVERTISING/COOP_ADV** round out the top five with 259 and 278 combined LOAs respectively. Worth noting that the data contains duplicate categories with inconsistent naming (e.g. \"COOP_ADV\" vs \"COOP_ADVERTISING\", \"Events\" vs \"EVENTS\"), which suggests some consolidation of activity type labels would give a cleaner picture of the true distribution.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT\n    activity_type,\n    COUNT(*) AS loa_count\nFROM loas\nGROUP BY activity_type\nORDER BY loa_count DESC\nLIMIT 50",
+      "timing_ms": 10179,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "struct_008",
+      "category": "structured",
+      "question": "Average cost per door for TM_SEASONAL",
+      "expected_tool": "stats",
+      "answer": "The average cost per door for **TM\\_SEASONAL** (including Seasonal Visibility) activities is **€2,831.76**. This figure reflects the typical investment per retail location for seasonal marketing activations across the EMEA region.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT\n    ROUND(AVG(avg_investment_per_door)::NUMERIC, 2) AS avg_cost_per_door\nFROM loas\nWHERE activity_type IN ('TM_SEASONAL', 'Seasonal Visibility')\n  AND avg_investment_per_door IS NOT NULL\nLIMIT 50",
+      "timing_ms": 7868,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 0.667,
+        "no_hallucination": 1.0,
+        "total": 0.9
+      },
+      "issues": [
+        "Answer missing keywords: ['EUR', 'TM_SEASONAL']"
+      ],
+      "passed": true
+    },
+    {
+      "id": "struct_009",
+      "category": "structured",
+      "question": "How many LOAs are OpEx vs CapEx?",
+      "expected_tool": "stats",
+      "answer": "There are **2,525 OpEx LOAs** (combining 'OpEx', 'OPEX', and 'Opex' variants) and **180 CapEx LOAs** (combining all CapEx variants), out of a total of 2,712 LOAs. OpEx clearly dominates, representing approximately **93%** of all LOAs. A small number of LOAs (8) fall under other categories such as 'Deducted' or 'Other Selling', which may indicate data entry inconsistencies worth reviewing.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT\n    capex_opex,\n    COUNT(*) AS num_loas\nFROM loas\nGROUP BY capex_opex\nORDER BY num_loas DESC\nLIMIT 50",
+      "timing_ms": 11398,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "struct_010",
+      "category": "structured",
+      "question": "Total budget approved in DACH cluster",
+      "expected_tool": "stats",
+      "answer": "The total approved marketing budget for the **DACH cluster** amounts to **€17,477,223.00** for FY2026. This reflects the combined sum of all LOAs with an approved status across Germany, Austria, and Switzerland.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT\n    ROUND(CAST(SUM(COALESCE(fy_2026_total, 0)) AS NUMERIC), 2) AS total_approved_budget_eur\nFROM loas\nWHERE cluster = 'DACH'\n  AND status = 'approved'\nLIMIT 50",
+      "timing_ms": 8515,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 0.75,
+        "no_hallucination": 1.0,
+        "total": 0.925
+      },
+      "issues": [
+        "Answer missing keywords: ['EUR']"
+      ],
+      "passed": true
+    },
+    {
+      "id": "sem_001",
+      "category": "semantic",
+      "question": "Find campaigns similar to summer retail visibility",
+      "expected_tool": "deep_search",
+      "answer": "# 🌞 Summer Retail Visibility Campaigns — Top Matches\n\nHere are the most relevant LOAs retrieved for **seasonal/summer retail visibility**, spanning France and SEE markets:\n\n---\n\n## 📋 Retrieved LOAs (Sample — not exhaustive)\n\n| LOA | Brand | Country | Budget | Doors | Period | Relevance |\n|-----|-------|---------|--------|-------|--------|-----------|\n| Others Seasonal Visibility | Others (Instruments & Audio) | France | EUR 70,000 | 400 | Jun 2026 | 83.25% |\n| Essilor – Eyezen Seasonal | Eyezen | France | EUR 50,000 | 300 | Jun 2026 | 83.10% |\n| all LB TM_SEASONAL | EA, DG, VE, MU | SEE | EUR 65,000 | 500 | Jul–Dec 2025 | 83.01% |\n| Ray-Ban TM_SEASONAL | Ray-Ban | SEE | EUR 205,000 | 1,000 | Jul–Dec 2025 | 82.86% |\n| HB – Oakley Seasonal | Oakley | France | EUR 70,000 | 400 | Jun 2026 | 82.58% |\n| **LOA-2026-010** | Ray-Ban (Krys) | France | EUR 35,000 | 220 | Feb–Jun 2026 | 82.29% |\n| all HB + LB TM_SEASONAL | All HB + LB | SEE | EUR 54,000 | 500 | Jul–Dec 2025 | 82.23% |\n\n---\n\n## 🔍 Key Patterns Across This Sample\n\n### 📍 Geographic Split\n- **France** (4 LOAs): Focus on optical independents and buying groups (NBV, Krys Group), deploying POS kits through vendors like **LDF** and **Altavia**\n- **SEE / East** (3 LOAs): Broader multi-brand programs across LOC/TOP/DOM customers via local vendors (Reklam centar, Mind shop, etc.)\n\n### 🎯 Common Mechanics\n- **POS materials**: displays, window visuals, shelf-talkers, glorifiers, counter displays\n- **Monobrand windows** (SEE campaigns)\n- **Staff incentive mechanisms** (Eyezen campaign)\n- **Sell-out tracking** via retail audit and reporting\n\n### 📊 KPI Benchmarks (France LOAs)\n| Metric | Target Range |\n|--------|-------------|\n| Sell-out uplift | **+8% to +15%** |\n| Sell-through rate | **≥75%** within campaign window |\n| Brand visibility score | **+10%** via post-campaign audit |\n\n### 💰 Budget Range (this sample)\n- Smallest: **EUR 35,000** (Ray-Ban / Krys, LOA-2026-010)\n- Largest: **EUR 205,000** (Ray-Ban TM_SEASONAL in SEE)\n\n---\n\n## ⚠️ Note\nThis is a **sample of the 8 most semantically similar LOAs** — not the full dataset. For **dataset-wide totals or counts**, please use the 📊 **Stats tool**.\n\n> Want me to filter by a specific country, brand, or budget range?",
+      "filters": {},
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "Seasonal Visibility",
+          "country": "France",
+          "budget": "EUR 70,000",
+          "distance": 0.1675
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor - Eyezen",
+          "activity_type": "Seasonal Visibility",
+          "country": "France",
+          "budget": "EUR 50,000",
+          "distance": 0.169
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "SEE",
+          "budget": "EUR 65,000",
+          "distance": 0.1699
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "TM_SEASONAL",
+          "country": "SEE",
+          "budget": "EUR 205,000",
+          "distance": 0.1714
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "Seasonal Visibility",
+          "country": "France",
+          "budget": "EUR 70,000",
+          "distance": 0.1742
+        },
+        {
+          "loa_number": "LOA-2026-010",
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Seasonal Visibility",
+          "country": "France",
+          "budget": "EUR 35,000",
+          "distance": 0.1771
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Seasonal Visibility",
+          "country": "France",
+          "budget": "EUR 35,000",
+          "distance": 0.1771
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "SEE",
+          "budget": "EUR 54,000",
+          "distance": 0.1777
+        }
+      ],
+      "sql": null,
+      "timing_ms": 65111,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "sem_002",
+      "category": "semantic",
+      "question": "What are typical KPIs for events?",
+      "expected_tool": "deep_search",
+      "answer": "## Typical KPIs for Events — Based on Retrieved Sample\n\nLooking at the 8 Events LOAs retrieved, I have to be transparent: **KPI fields are not explicitly captured** in the structured data for these LOAs. However, I can infer the typical performance metrics based on the event types and parameters present:\n\n---\n\n### 📐 Most Common Measurable Dimensions Found\n\n| KPI Type | Examples from the Sample |\n|---|---|\n| **Door / Reach** | 100 doors (LOA-8, Instruments Showroom) → 200 (Transitions OPTI) → 1,000–1,500 (Stellest Medical, OPTI booth) → 12,000 (100% Optical UK) |\n| **Customer Segment Targeted** | ECPs, KA, Top Independents, All COT |\n| **Budget per Door** | e.g. EUR 500,000 / 1,500 doors ≈ **€333/door** (OPTI Germany) · EUR 135,956 / 1,000 doors ≈ **€136/door** (Stellest Poland) |\n| **Completion Rate** | Period completion % tracked (50%, 100%) |\n\n---\n\n### 🎯 Implied KPIs by Event Type\n\n- **Trade Fairs** (OPTI, 100% Optical): Visitor footfall, lead generation, brand visibility, door engagement count\n- **Medical Symposia** (Stellest): HCP attendance, clinical awareness lift, prescription intent\n- **Client Award Travel**: Loyalty reinforcement, top-customer retention\n- **ECP Trainings**: Attendee count, training completion rate, product knowledge score\n\n---\n\n### ⚠️ Caveat\nNone of these LOAs include an explicit KPI field in the retrieved data. For standardized KPI tracking across the full dataset, the **📊 Stats tool** would give a more complete picture.\n\nWould you like to drill into a specific event type or country?",
+      "filters": {
+        "activity_type": "Events"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "EVENTS",
+          "country": "META",
+          "budget": "EUR 75,000",
+          "distance": 0.1822
+        },
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 150,000",
+          "distance": 0.1859
+        },
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "EVENTS",
+          "country": "Poland & Baltics",
+          "budget": "EUR 155,000",
+          "distance": 0.1863
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor - Stellest",
+          "activity_type": "EVENTS",
+          "country": "Poland & Baltics",
+          "budget": "EUR 135,956",
+          "distance": 0.1864
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor",
+          "activity_type": "EVENTS",
+          "country": "GCC&Export",
+          "budget": "EUR 20,000",
+          "distance": 0.1873
+        },
+        {
+          "loa_number": null,
+          "brand": "Transitions",
+          "activity_type": "EVENTS",
+          "country": "Germany",
+          "budget": "EUR 10,000",
+          "distance": 0.1875
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "EVENTS",
+          "country": "Germany",
+          "budget": "EUR 500,000",
+          "distance": 0.1875
+        },
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "EVENTS",
+          "country": "Germany",
+          "budget": "EUR 1,000",
+          "distance": 0.1877
+        }
+      ],
+      "sql": null,
+      "timing_ms": 17424,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "sem_003",
+      "category": "semantic",
+      "question": "Find activations focused on window displays",
+      "expected_tool": "deep_search",
+      "answer": "## Window Display Activations — Retrieved Sample\n\nThe semantic search returned **8 LOAs** related to in-store/window display activations. Here's what stands out:\n\n> ⚠️ **This is a sample of the most semantically relevant LOAs**, not an exhaustive list. For dataset-wide totals, use the 📊 Stats tool.\n\n---\n\n### 🏪 Most Relevant LOAs\n\n| # | Brand | Country | Budget | Doors | Key Focus |\n|---|-------|---------|--------|-------|-----------|\n| 1 | All HB + All LB | Germany (DACH) | EUR 20,000 | 250 | Vista VM Packages — in-store visual merchandising |\n| 2 | Swarovski | Spain (IBERIA) | EUR 0 | 200 | H1 2026 GWP consumer activation, cross-channel |\n| 3 | Transitions | Czech Republic + Slovakia (EAST) | EUR 18,000 | 250 | In-store promo: GWP, open days |\n| 4 | Michael Kors | Spain (IBERIA) | EUR 20,000 | 750 | GWP consumer activation, all COT |\n| 5 | Ray-Ban | Portugal (IBERIA) | EUR 10,000 | 10 | RB Reverse in-store activation, 1–2 days/POS |\n| 6 | All LB | GCC & Export (META) | EUR 24,000 | — | Brand experience & in-store (BE, AR, MK, FZ) |\n| 7 | Prada | Spain (IBERIA) | EUR 0 | 200 | GWP trade incentive, sell-out push |\n| 8 | Transitions | Germany (DACH) | EUR 10,000 | 200 | OPTI fair activation + printed materials |\n\n---\n\n### 🔍 Key Observations\n\n- **Closest to classic window displays**: The **Germany VM Packages LOA** (All HB + All LB, EUR 20,000 / 250 doors) is the most directly linked to visual merchandising/window display materials.\n- **Most doors covered**: Michael Kors Spain with **750 doors** at EUR 20,000.\n- **Lenses segment**: Both Transitions LOAs (Czech Republic + Slovakia & Germany) cover lens-focused in-store activations.\n- **Zero-budget LOAs**: Swarovski Spain and Prada Spain show **EUR 0** — likely centrally managed GWP activations with brand-side funding.\n\n---\n\n💡 *Need to filter by specific country, brand, or channel? I can refine the search.*",
+      "filters": {},
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "IN_STORE",
+          "country": "Germany",
+          "budget": "EUR 20,000",
+          "distance": 0.1894
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Swarovski",
+          "activity_type": "IN_STORE",
+          "country": "Spain",
+          "budget": "EUR 0",
+          "distance": 0.192
+        },
+        {
+          "loa_number": null,
+          "brand": "Transitions",
+          "activity_type": "IN_STORE",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 18,000",
+          "distance": 0.1929
+        },
+        {
+          "loa_number": null,
+          "brand": "Michael Kors",
+          "activity_type": "IN_STORE",
+          "country": "Spain",
+          "budget": "EUR 20,000",
+          "distance": 0.1934
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "Portugal",
+          "budget": "EUR 10,000",
+          "distance": 0.1944
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "In-store/ consummer activation",
+          "country": "GCC&Export",
+          "budget": "EUR 24,000",
+          "distance": 0.1948
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Prada",
+          "activity_type": "TRADE_INCENTIVE",
+          "country": "Spain",
+          "budget": "EUR 0",
+          "distance": 0.1954
+        },
+        {
+          "loa_number": null,
+          "brand": "Transitions",
+          "activity_type": "EVENTS",
+          "country": "Germany",
+          "budget": "EUR 10,000",
+          "distance": 0.196
+        }
+      ],
+      "sql": null,
+      "timing_ms": 16678,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 0.75,
+        "no_hallucination": 1.0,
+        "total": 0.925
+      },
+      "issues": [
+        "Answer missing keywords: ['visibility']"
+      ],
+      "passed": true
+    },
+    {
+      "id": "sem_004",
+      "category": "semantic",
+      "question": "Campaigns targeting independent opticians",
+      "expected_tool": "deep_search",
+      "answer": "## Campaigns Targeting Independent Opticians\n\nHere are the most relevant LOAs from the retrieved sample. Note that **Independents** as a channel appears explicitly in 3 of the 8 results — the others target broader or chain channels but are semantically related.\n\n---\n\n### ✅ Directly targeting Independents\n\n| LOA | Brand | Country | Activity | Budget | Doors | Period |\n|-----|-------|---------|----------|--------|-------|--------|\n| Others COOP_ADVERTISING | Others (Lenses) | Poland & Baltics | Radio Campaign | **EUR 95,000** | 1,500 | Sep–Oct 2025 |\n| Multibrand IN_STORE | Multibrand (Lenses) | Netherlands | DM Buying Groups Campaigns | **EUR 90,000** | 130 | — |\n| Varilux IN_STORE | Varilux (Lenses) | SEE | Coop Advertising – Synergy Project | **EUR 6,000** | 70 | Jul–Dec 2025 |\n\n**Key highlights:**\n- 🎙️ **Poland & Baltics** runs a **radio campaign** via RMF FM/Neo Mindshare reaching **1,500 independent doors** — the largest door count in this sample\n- 🇳🇱 **Netherlands** focuses on **Direct Mail through buying groups** (Loyality Lab, Optitrade, OMP) across 130 doors\n- 🔬 **Varilux SEE** targets a curated list of **TOP 20 iECPs + selected LOC/TOP customers** (70 doors)\n\n---\n\n### ⚠️ Related but NOT Independents channel\n- **LOA-2026-001 / Oakley UK** (×3 duplicates) → **Chains** (Boots Opticians)\n- **Others SEE** (×2) → **All COT**, trade incentives for opticians & sales associates\n\n---\n\n### 💡 Note\nThis is a **sample of 8 LOAs** retrieved by semantic relevance, not the full dataset. For a complete count and total budget of all independent-channel campaigns, please use the **📊 Stats tool**.",
+      "filters": {},
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Poland & Baltics",
+          "budget": "EUR 95,000",
+          "distance": 0.1672
+        },
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "IN_STORE",
+          "country": "Netherlands",
+          "budget": "EUR 90,000",
+          "distance": 0.1678
+        },
+        {
+          "loa_number": "LOA-2026-001",
+          "brand": "HB - Oakley",
+          "activity_type": "Coop Advertising",
+          "country": "UK",
+          "budget": "EUR 65,000",
+          "distance": 0.1693
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "Coop Advertising",
+          "country": "UK",
+          "budget": "EUR 65,000",
+          "distance": 0.1693
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "Coop Advertising",
+          "country": "UK",
+          "budget": "EUR 65,000",
+          "distance": 0.1693
+        },
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "OTHER_ADV",
+          "country": "SEE",
+          "budget": "EUR 30,000",
+          "distance": 0.1747
+        },
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "OTHER_ADV",
+          "country": "SEE",
+          "budget": "EUR 45,000",
+          "distance": 0.1759
+        },
+        {
+          "loa_number": null,
+          "brand": "Varilux",
+          "activity_type": "IN_STORE",
+          "country": "SEE",
+          "budget": "EUR 6,000",
+          "distance": 0.1771
+        }
+      ],
+      "sql": null,
+      "timing_ms": 17033,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "sem_005",
+      "category": "semantic",
+      "question": "Trade fair and industry conference LOAs",
+      "expected_tool": "deep_search",
+      "answer": "## Trade Fair & Industry Conference LOAs\n\nHere's a summary of the **8 most relevant LOAs** retrieved for trade fairs and industry conferences. This is a **sample**, not the full dataset — for complete counts and totals, use the 📊 Stats tool.\n\n---\n\n### 📋 Overview by Event Type\n\n#### 🏛️ Trade Fairs (6 LOAs)\n\n| LOA / Reference | Brand | Country | Budget | Doors | Key Event |\n|---|---|---|---|---|---|\n| **2026N1ESFA001** | Nuance | Spain (Iberia) | EUR 0* | 3,250 | Expóptica — leading Iberian optics trade fair |\n| **all HB + all LB** | All HB + LB | Hungary (East) | EUR 20,000 | 80 | Trade show with partners |\n| **Others** | Others | Romania (East) | EUR 65,000 | 400 | MIDO fair & business room |\n| **Others** | Others | Czech Rep. + Slovakia | EUR 40,000 | 1,600 | MIDO Milan |\n| **2025N2DEFA009** | INFIELD Safety | Germany (DACH) | EUR 125,000 | 1,500 | A+A — Int'l Trade Fair & Congress for Safety & Health at Work |\n| **Essilor - Multibrand** | Essilor - Multibrand | Czech Rep. + Slovakia | EUR 29,600 | 1,200 | Local Trade Fair Opta |\n\n*Budget listed as EUR 0 — likely pending confirmation.\n\n---\n\n#### 🩺 Medical / Industry Conference (2 LOAs)\n\n| Reference | Brand | Country | Budget | Doors | Key Event |\n|---|---|---|---|---|---|\n| **Essilor - Multibrand** | Essilor - Multibrand | Romania (East) | EUR 12,000 | 350 | RAO Iași — Annual reunion of ophthalmologists |\n| **all LB** | All LB | GCC & Export (META) | EUR 40,000 | — | The Art of Luxury — World of Luxury Brands celebration |\n\n---\n\n### 🔍 Key Observations\n\n- **Largest budget in sample:** LOA **2025N2DEFA009** (INFIELD Safety, Germany) at **EUR 125,000** for the A+A trade fair — also the only one with a confirmed vendor pool and a defined period (Sep–Dec 2025).\n- **Widest reach:** Czech Rep. + Slovakia \"Others\" LOA targets **1,600 doors** for MIDO Milan.\n- **MIDO** appears in **two LOAs** — Romania (EUR 65,000) and Czech Rep. + Slovakia (EUR 40,000) — suggesting coordinated cross-market participation.\n- All LOAs are classified as **OpEx**.\n- Most target **All COT** channels; the exception is INFIELD Safety, which targets **PPE wholesalers and direct company contacts**.\n\n---\n\n> 💡 Want to drill down on a specific country, brand, or event? I can filter further — or use the 📊 Stats tool for dataset-wide totals.",
+      "filters": {},
+      "sources": [
+        {
+          "loa_number": "2026N1ESFA001",
+          "brand": "Nuance",
+          "activity_type": "EVENTS",
+          "country": "Spain",
+          "budget": "EUR 0",
+          "distance": 0.1713
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor - Multibrand",
+          "activity_type": "EVENTS",
+          "country": "Romania",
+          "budget": "EUR 12,000",
+          "distance": 0.1803
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "EVENTS",
+          "country": "GCC&Export",
+          "budget": "EUR 40,000",
+          "distance": 0.1823
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "EVENTS",
+          "country": "Hungary",
+          "budget": "EUR 20,000",
+          "distance": 0.1824
+        },
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "EVENTS",
+          "country": "Romania",
+          "budget": "EUR 65,000",
+          "distance": 0.183
+        },
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "EVENTS",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 40,000",
+          "distance": 0.184
+        },
+        {
+          "loa_number": "2025N2DEFA009",
+          "brand": "INFIELD Safety",
+          "activity_type": "EVENTS",
+          "country": "Germany",
+          "budget": "EUR 125,000",
+          "distance": 0.184
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor - Multibrand",
+          "activity_type": "EVENTS",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 29,600",
+          "distance": 0.1852
+        }
+      ],
+      "sql": null,
+      "timing_ms": 19456,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "sem_006",
+      "category": "semantic",
+      "question": "Campaigns using cost-per-door benchmarks",
+      "expected_tool": "deep_search",
+      "answer": "## Campaigns Using Cost-Per-Door Benchmarks\n\nBased on the retrieved sample, here's an analysis of **cost-per-door** across the 8 matching LOAs:\n\n| LOA | Country | Budget | Doors | Cost/Door |\n|-----|---------|--------|-------|-----------|\n| LB - PFF TM_SEASONAL | UK | EUR 36,000 | 12 | **EUR 3,000** |\n| all HB+LB TM_SEASONAL | DACH | EUR 67,500 | 30 | **EUR 2,250** |\n| all HB+LB TM_SEASONAL | Netherlands | EUR 207,505 | 250 | **EUR 830** |\n| LOA-43427 | Spain | EUR 85,000 | 2,000 | **EUR 42.50** |\n| all HB+LB TM_SEASONAL (Social Media) | DACH | EUR 40,000 | 2,000 | **EUR 20** |\n| all HB+LB TM_SEASONAL (Banners) | DACH | EUR 80,000 | 2,000 | **EUR 40** |\n| HC COOP_ADVERTISING | Germany | EUR 15,000 | 1 | EUR 15,000 |\n| LB - PFF COOP_ADVERTISING | Germany | EUR 273,500 | 1 | EUR 273,500 |\n\n---\n\n### 🔍 Key Observations\n\n- **Highest cost-per-door** (excluding single-door digital): **LB - PFF TM_SEASONAL in UK** at **EUR 3,000/door** — a focused 12-door Priority Window project via TPS.\n- **Mid-range**: DACH Monobrand Window Campaign SS26 at **EUR 2,250/door** (30 doors, Akzente).\n- **Most efficient** for physical retail: Spain EL360 cross-brand promotions at just **EUR 42.50/door** across 2,000 iECP doors (LOA-43427).\n- **E-wholesale campaigns** (Zalando, 1 door) are not comparable on a per-door basis — they reflect platform spend, not physical door activation.\n\n---\n\n### ⚠️ Note\nThis is a **sample of the most semantically relevant LOAs**, not the full dataset. For a complete cost-per-door analysis across all campaigns, use the **📊 Stats tool**.",
+      "filters": {},
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "LB - PFF",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 36,000",
+          "distance": 0.1581
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "DACH",
+          "budget": "EUR 67,500",
+          "distance": 0.1585
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "Netherlands",
+          "budget": "EUR 207,505",
+          "distance": 0.1589
+        },
+        {
+          "loa_number": "43427",
+          "brand": "all HB + all LB",
+          "activity_type": "Other ADV Expenses",
+          "country": "Spain",
+          "budget": "EUR 85,000",
+          "distance": 0.1594
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "DACH",
+          "budget": "EUR 40,000",
+          "distance": 0.1594
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "DACH",
+          "budget": "EUR 80,000",
+          "distance": 0.1599
+        },
+        {
+          "loa_number": null,
+          "brand": "HC",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 15,000",
+          "distance": 0.1607
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - PFF",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 273,500",
+          "distance": 0.1607
+        }
+      ],
+      "sql": null,
+      "timing_ms": 16278,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "sem_007",
+      "category": "semantic",
+      "question": "In-store activation campaigns with POS materials",
+      "expected_tool": "deep_search",
+      "answer": "## In-Store Activation Campaigns with POS Materials\n\nHere's a summary of the **8 most relevant IN_STORE LOAs** retrieved (this is a sample, not exhaustive — for full dataset totals, use the 📊 Stats tool).\n\n---\n\n### 📋 Overview by LOA\n\n| Brand | Country | Budget | Doors | Key POS Materials |\n|---|---|---|---|---|\n| Others | Romania | EUR 169,000 | 2,400 | Leaflets, brochures, window stickers, tablemats, catalogues |\n| Multibrand | Romania | EUR 149,000 | 2,200 | Leaflets, brochures, window stickers, tablemats, catalogues |\n| Ray-Ban | Portugal | EUR 30,000 | 350 | GWP (shoulder case), in-store materials |\n| Michael Kors | Spain | EUR 20,000 | 750 | GWP consumer activation |\n| All LB | GCC & Export | EUR 24,000 | — | Brand experience & in-store activation |\n| Ray-Ban | Portugal | EUR 10,000 | 10 | 1-2 day POS activations |\n| HB - Others | Spain | EUR 0 | 100 | Printed materials (bundle offers, cross-brand, incentives) |\n| Multibrand | SEE | EUR 6,000 | 500 | Leaflets, brochures, window stickers, tablemats |\n\n---\n\n### 🔍 Key Highlights\n\n- **Largest budgets** are in **Romania** — the two lenses-focused campaigns (Others + Multibrand) together account for **EUR 318,000** across ~4,600 doors, running H1 2025. Vendors: Altavia, Strategic Marketing, ActivAd.\n\n- **Ray-Ban Portugal** runs two complementary activations:\n  - A **GWP sell-out push** (EUR 30,000 / 350 doors) tied to brand momentum in May\n  - A **RB Reverse in-store activation** (EUR 10,000 / 10 doors) for 1-2 day POS events\n\n- **Michael Kors Spain** uses a **centrally managed GWP** to drive productivity across 750 doors (EUR 20,000), timed for August.\n\n- **HB - Others Spain** has **EUR 0 budget declared** but covers printed materials for promotions across 100 doors — worth checking if budget is allocated elsewhere.\n\n- **SEE Multibrand** is the smallest activation (EUR 6,000 / 500 doors), focusing on basic POS print materials.\n\n---\n\n### 📌 Common Patterns\n- ✅ All campaigns are **OpEx**\n- ✅ Dominant materials: **leaflets, brochures, window stickers, GWPs**\n- ✅ Most target **All COT** channels with selected customer lists\n- ✅ Concentrated in **H1 2025**\n\n> ⚠️ For a complete count or total budget across **all** in-store activation LOAs in the database, please use the **📊 Stats tool**.",
+      "filters": {
+        "activity_type": "IN_STORE"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "IN_STORE",
+          "country": "Romania",
+          "budget": "EUR 169,000",
+          "distance": 0.1547
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "Portugal",
+          "budget": "EUR 10,000",
+          "distance": 0.1577
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "Portugal",
+          "budget": "EUR 30,000",
+          "distance": 0.1593
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "In-store/ consummer activation",
+          "country": "GCC&Export",
+          "budget": "EUR 24,000",
+          "distance": 0.1594
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Others",
+          "activity_type": "IN_STORE",
+          "country": "Spain",
+          "budget": "EUR 0",
+          "distance": 0.1599
+        },
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "IN_STORE",
+          "country": "Romania",
+          "budget": "EUR 149,000",
+          "distance": 0.1626
+        },
+        {
+          "loa_number": null,
+          "brand": "Michael Kors",
+          "activity_type": "IN_STORE",
+          "country": "Spain",
+          "budget": "EUR 20,000",
+          "distance": 0.1633
+        },
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "IN_STORE",
+          "country": "SEE",
+          "budget": "EUR 6,000",
+          "distance": 0.1643
+        }
+      ],
+      "sql": null,
+      "timing_ms": 21829,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 0.875,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 0.963
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "sem_008",
+      "category": "semantic",
+      "question": "Coop advertising with local buying groups",
+      "expected_tool": "deep_search",
+      "answer": "# COOP Advertising with Local Buying Groups\n\nHere's a summary of the most relevant LOAs retrieved for cooperative advertising activities. This is a **sample of 8 LOAs**, not the full dataset.\n\n---\n\n## 📋 Overview by Market\n\n### 🇨🇿 Czech Republic + Slovakia (EAST)\n| LOA | Brand | Budget | Doors | Channel | Period |\n|-----|-------|--------|-------|---------|--------|\n| Others COOP | Others (Lenses) | EUR 9,000 | 90 | Independents | H1 2025 |\n| Transitions COOP | Transitions (Lenses) | EUR 30,000 | 150 | Independents | H1 2025 |\n| Transitions COOP | Transitions (Lenses) | EUR 40,000 | 90 | Independents | H1 2025 |\n\n> **Vendors:** Presscode, Wondericon — activities include advertising, partnerships, round tables & trade incentives.\n\n---\n\n### 🇨🇭 Switzerland & 🇩🇪 Germany (DACH)\n| LOA | Brand | Budget | Doors | Channel | Customer |\n|-----|-------|--------|-------|---------|----------|\n| All HB+LB – Switzerland | Frames | EUR 40,000 | 30 | Independents | All |\n| All HB+LB – Germany | Frames | EUR 40,000 | 30 | Independents | All |\n| All HB+LB – Germany | Frames | EUR 12,000 | 12 | Chains | Brillen Plaz |\n\n> **Vendor:** Akzente (Independents); Brillen Plaz for Social Media, Online & Window displays.\n\n---\n\n### 🌍 SEE Region\n- **Transitions COOP** — EUR 10,000 | 20 doors | Independents\n- Media mix: **Radio, OOH, Digital**\n- Partners: Optotim, Jo-Jo, Kobačić, Kraljević, Petra, etc.\n- Period: H2 2025\n\n---\n\n### 🇮🇹 Italy\n- **Ray-Ban COOP Advertising** — EUR 36 *(likely a placeholder/draft figure)*\n- Channel: All COT | Period: May–June 2026\n- Focus: Joint campaigns, co-funded digital marketing, in-store displays\n- KPIs: +7% order uplift, +3% Ray-Ban brand share, 85% campaign reach\n\n---\n\n## 💡 Key Patterns\n\n- **Independent opticians** are the dominant channel across all markets\n- **Lenses** (Transitions) and **Frames** (HB/LB) are the main categories\n- Budgets in this sample range from **EUR 9,000 to EUR 40,000** per LOA\n- Most activities are **OpEx**, half-year cycles (H1 or H2 2025)\n\n---\n\n> ⚠️ **Note:** This is a semantic sample, not exhaustive. For full counts, totals, or budget aggregates across all COOP Advertising LOAs, please use the **📊 Stats tool**.",
+      "filters": {
+        "activity_type": "COOP_ADVERTISING"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 9,000",
+          "distance": 0.1661
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Switzerland",
+          "budget": "EUR 40,000",
+          "distance": 0.1687
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 40,000",
+          "distance": 0.1707
+        },
+        {
+          "loa_number": null,
+          "brand": "Transitions",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "SEE",
+          "budget": "EUR 10,000",
+          "distance": 0.1718
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Coop Advertising",
+          "country": "Italy",
+          "budget": "EUR 36",
+          "distance": 0.1725
+        },
+        {
+          "loa_number": null,
+          "brand": "Transitions",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 30,000",
+          "distance": 0.1731
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 12,000",
+          "distance": 0.1732
+        },
+        {
+          "loa_number": null,
+          "brand": "Transitions",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 40,000",
+          "distance": 0.1733
+        }
+      ],
+      "sql": null,
+      "timing_ms": 23497,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "sem_009",
+      "category": "semantic",
+      "question": "Medical affairs and ophthalmology events",
+      "expected_tool": "deep_search",
+      "answer": "# Medical Affairs & Ophthalmology Events 🏥\n\nHere's a summary of the **5 most relevant LOAs** retrieved for Medical Affairs activities. This is a sample — for full dataset totals, use the 📊 Stats tool.\n\n---\n\n## Retrieved LOAs at a Glance\n\n| LOA | Brand | Country | Budget | Description |\n|-----|-------|---------|--------|-------------|\n| **#43465** | Multibrand | Italy | EUR 86,000 | Medical Screening for Refractive Errors |\n| **#43462** | Essilor | Italy | EUR 72,000 | Medical Meet The Experts Project |\n| **#40450** | Multibrand | Italy | EUR 72,000 | Medical Meet the Experts Project |\n| **#40439** | Multibrand | Italy | EUR 60,000 | Medical Info Packs / Prescription Drive |\n| **HB - Ray-Ban** | Ray-Ban | France | EUR 66,000 | Ray-Ban Medical Affairs – HCP Engagement |\n\n---\n\n## Key Observations\n\n### 🇮🇹 Italy (4 LOAs)\n- Dominant market in this sample, all targeting **All COT channels**, Lenses category\n- Activities range from **Medical Symposia** (#43465, #43462) to **practice visibility & prescription support** (#40439)\n- **#40439** has the broadest reach: **2,800 doors**; **#40450** targets **900 doors**\n- Vendors include ESASO, APMEETINGS, FGE, ACIBLUTEAM, ALTAVIA\n\n### 🇫🇷 France (1 LOA)\n- **HB - Ray-Ban Medical Affairs** (EUR 66,000) is distinctive for combining **Frames + Lenses** positioning\n- Targets **40 doors**, aiming to reach **120+ medical professionals** (optometrists & ophthalmologists)\n- Goal: **+15% co-prescription rate** for Ray-Ban Frames + Lenses\n- Period: **June 19–26, 2026**\n\n---\n\n## Common Patterns\n- ✅ All are **OpEx**\n- ✅ All use **All COT** channel\n- ✅ Focus on **HCP engagement** (ophthalmologists, optometrists)\n- ✅ Event type where specified: **Medical Symposium**\n\n---\n\n> 💡 *This is a top-5 sample by semantic relevance. For exhaustive counts, budgets, or country-level aggregates across all Medical Affairs LOAs, use the **📊 Stats tool**.*",
+      "filters": {
+        "activity_type": "MEDICAL_AFFAIRS"
+      },
+      "sources": [
+        {
+          "loa_number": "#43465",
+          "brand": "Multibrand",
+          "activity_type": "MEDICAL_AFFAIRS",
+          "country": "Italy",
+          "budget": "EUR 86,000",
+          "distance": 0.128
+        },
+        {
+          "loa_number": "#43462",
+          "brand": "Essilor",
+          "activity_type": "MEDICAL_AFFAIRS",
+          "country": "Italy",
+          "budget": "EUR 72,000",
+          "distance": 0.1425
+        },
+        {
+          "loa_number": "40450",
+          "brand": "Multibrand",
+          "activity_type": "MEDICAL_AFFAIRS",
+          "country": "Italy",
+          "budget": "EUR 72,000",
+          "distance": 0.1506
+        },
+        {
+          "loa_number": "40439",
+          "brand": "Multibrand",
+          "activity_type": "MEDICAL_AFFAIRS",
+          "country": "Italy",
+          "budget": "EUR 60,000",
+          "distance": 0.1525
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Medical Affairs",
+          "country": "France",
+          "budget": "EUR 66,000",
+          "distance": 0.1556
+        }
+      ],
+      "sql": null,
+      "timing_ms": 17537,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "sem_010",
+      "category": "semantic",
+      "question": "Roadshow campaigns for premium brands",
+      "expected_tool": "deep_search",
+      "answer": "# Roadshow Campaigns for Premium Brands\n\n*Filtering on: Activity = Events | Showing top 8 semantically matched LOAs (sample, not exhaustive)*\n\n---\n\nHere's an overview of the roadshow campaigns retrieved across the sample:\n\n## 🎯 Luxury / Premium Frame Roadshows\n\n### 1. Spain — Luxury Multi-Brand Roadshow\n- **LOA:** 2026N1ESRO001 | **Budget:** EUR 66,000\n- **Brands:** All HB + LB (SK, MK, VK, DX, BV, AR, DG, MU, PO, PR, PS, SH, TF, VE + new licenses: Swarovski, Brunello Cucinelli, Jimmy Choo...)\n- **Doors:** 552 | **Cities:** 13 | **Channel:** All COT\n- **Vendor:** Hatton / Odisea / Assai / New agency\n\n### 2. Spain — Luxury Multi-Brand Roadshow (larger scope)\n- **LOA:** all HB + all LB Events in Spain | **Budget:** EUR 270,000\n- Same luxury brand portfolio, 13 cities\n- **Doors:** 500 (Independents) | **Vendor:** Hatton / Odisea / Assai\n\n### 3. GCC & Export — \"The Art of Luxury\" Event\n- **LOA:** LB - Luxury Events in GCC&Export | **Budget:** EUR 80,000\n- **Market:** KSA | **Channel:** KA + DIS | **Vendor:** TBC\n\n---\n\n## 👓 Ray-Ban B2B Brand Roadshow\n- **LOA:** 2025N1ESAW003 | **Budget:** EUR 100,000\n- **Country:** Spain | **Doors:** 600 | **Period:** Jun–Dec 2025\n- Focus: Brand heritage, innovation, RBM & ASAP ROCKY collections\n- **Vendor:** ASSAI / ALGO BONITO\n\n---\n\n## 🌍 Multi-Market / Instruments Roadshows\n\n| LOA | Country | Brand | Budget | Doors | Focus |\n|-----|---------|-------|--------|-------|-------|\n| Essilor Multibrand – Poland & Baltics | Poland & Baltics | Essilor Multibrand | EUR 55,814 | 1,200 | PAL Academy – 6 cities |\n| Multibrand – CZ + SK | Czech Republic + Slovakia | Multibrand | EUR 40,000 | 150 | VX boost & Lens innovations (H1 2025) |\n| Essilor Multibrand – CZ + SK | Czech Republic + Slovakia | Essilor Multibrand | EUR 112,500 | 250 | VX/PAL Academy Roadshow |\n| All HB + LB – South Africa | South Africa | All HB + LB | EUR 3,000 | N/A | N1 Roadshow Branding |\n\n---\n\n## 💡 Key Observations\n\n- **Largest budget in sample:** EUR 270,000 (Spain luxury multi-brand roadshow)\n- **Widest door reach:** 1,200 doors (Poland & Baltics PAL Academy)\n- **Premium brand focus** is strongest in **Spain** and **GCC**, covering the full luxury HB/LB portfolio\n- All campaigns are **OpEx**\n\n> ⚠️ This is a **sample of the most relevant matches**, not the full dataset. For complete counts and total budgets across all roadshow LOAs, please use the **📊 Stats tool**.",
+      "filters": {
+        "activity_type": "Events"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "EVENTS",
+          "country": "South Africa",
+          "budget": "EUR 3,000",
+          "distance": 0.1732
+        },
+        {
+          "loa_number": "2026N1ESRO001",
+          "brand": "all HB + all LB",
+          "activity_type": "EVENTS",
+          "country": "Spain",
+          "budget": "EUR 66,000",
+          "distance": 0.1756
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "EVENTS",
+          "country": "Spain",
+          "budget": "EUR 270,000",
+          "distance": 0.1763
+        },
+        {
+          "loa_number": "2025N1ESAW003​",
+          "brand": "Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "Spain",
+          "budget": "EUR 100,000",
+          "distance": 0.1776
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Luxury",
+          "activity_type": "EVENTS",
+          "country": "GCC&Export",
+          "budget": "EUR 80,000",
+          "distance": 0.1785
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor - Multibrand",
+          "activity_type": "EVENTS",
+          "country": "Poland & Baltics",
+          "budget": "EUR 55,814",
+          "distance": 0.1793
+        },
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "EVENTS",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 40,000",
+          "distance": 0.1797
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor - Multibrand",
+          "activity_type": "EVENTS",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 112,500",
+          "distance": 0.1799
+        }
+      ],
+      "sql": null,
+      "timing_ms": 20179,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "hybrid_001",
+      "category": "hybrid",
+      "question": "Ray-Ban events in Italy around 100k",
+      "expected_tool": "deep_search",
+      "answer": "## Ray-Ban Events in Italy — Budget ~€100K\n\nSearching for Ray-Ban events in Italy around €100K, here's what the retrieved sample shows:\n\n---\n\n### 🎯 Closest Match\n\n**Ray-Ban TM_SEASONAL in Italy** *(LOA 2)*\n- **Budget:** €107,500 ✅ *(closest to your ~€100K target)*\n- **Category:** Frames | **Doors:** 230\n- **Period:** Jan–Jun 2025\n- **Activities:**\n  - *Box Be there* — €17,500\n  - *Be there project* — €90,000 (230 doors, Q1)\n- **Vendor:** Vin/Factory Group\n- **Note:** Activity type is TM_SEASONAL, not strictly \"Events\"\n\n---\n\n### ⚠️ Other Italy Results — Outside Budget Range\n\nThe only other Ray-Ban Italy LOA retrieved is significantly over budget:\n\n| LOA | Budget | Activity | Notes |\n|-----|--------|----------|-------|\n| HB - Ray-Ban Events Italy | **€330,000** | Roadshow (10 cities) | Frames N2 release, 240 customers |\n\n---\n\n### 💡 Key Takeaway\n\nWithin this sample, **no Ray-Ban Italy Events LOA sits precisely around €100K**. The TM_SEASONAL LOA at **€107,500** is the nearest match budget-wise.\n\nFor a complete view of all matching LOAs in the database, use the **📊 Stats tool** — this is only a top-K sample.",
+      "filters": {
+        "brand": "Ray-Ban",
+        "country": "Italy",
+        "activity_type": "Events",
+        "budget_min": 70000,
+        "budget_max": 130000,
+        "_relaxed": true
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Events",
+          "country": "Italy",
+          "budget": "EUR 330,000",
+          "distance": 0.1119
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 107,500",
+          "distance": 0.1285
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "Greece",
+          "budget": "EUR 15,000",
+          "distance": 0.1286
+        },
+        {
+          "loa_number": null,
+          "brand": "Transitions",
+          "activity_type": "EVENTS",
+          "country": "Italy",
+          "budget": "EUR 400,000",
+          "distance": 0.1289
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "Italy",
+          "budget": "EUR 7,000",
+          "distance": 0.1297
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "Greece",
+          "budget": "EUR 30,000",
+          "distance": 0.1308
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "Hungary",
+          "budget": "EUR 30,000",
+          "distance": 0.1311
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "Greece",
+          "budget": "EUR 9,000",
+          "distance": 0.1319
+        }
+      ],
+      "sql": null,
+      "timing_ms": 17322,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 0.375,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 0.812
+      },
+      "issues": [
+        "Only 3/8 sources matched expected criteria"
+      ],
+      "passed": true
+    },
+    {
+      "id": "hybrid_002",
+      "category": "hybrid",
+      "question": "Oakley seasonal campaigns in DACH under 50k",
+      "expected_tool": "deep_search",
+      "answer": "# Oakley Seasonal Campaigns in DACH — Budget ≤ EUR 50,000\n\nFocusing on **Oakley TM_SEASONAL in DACH with budget ≤ EUR 50,000** — here are the matching LOAs from the retrieved sample:\n\n| # | Brand | Country | Budget | Doors | Channel | Vendor | Description |\n|---|-------|---------|--------|-------|---------|--------|-------------|\n| 1 | Oakley | Germany | EUR 30,000 | 500 | All COT | Multiple | In-Store Tools, Give & Get Sell-Out Support |\n| 2 | Oakley | Germany | EUR 40,000 | 30 | Sport | Akzente | Tailormade Windows & POS Packages (2025) |\n| 3 | Oakley | Germany | EUR 25,000 | 80 | Independents | D'art | Fokus Vista Category |\n| 4 | Oakley | Switzerland | EUR 20,000 | 15 | Sport | Akzente | Tailormade Windows & POS Packages (2025) |\n| 5 | Oakley | Austria | EUR 40,000 | 30 | Sport | Akzente | Tailormade Windows & POS Packages (2025) |\n\n> ⚠️ **Note:** LOA 2 (HB - Oakley, EUR 50,000) and LOA 4 (HB - Oakley, EUR 60,000) were excluded — LOA 4 exceeds the budget cap, and the HB - Oakley variant is a separate brand line. LOA 2 is exactly at the EUR 50,000 limit — let me know if you'd like to include it.\n\n---\n\n### 📌 Key Observations\n\n- **Germany** dominates with 3 LOAs across different channels (mass COT, sport, independents)\n- **Akzente** is the go-to vendor for sport channel POS packages across Germany, Switzerland, and Austria (consistent format, EUR 20K–40K)\n- **D'art** handles the Independents / Vista-focused activation at EUR 25,000\n- Largest door reach: **500 doors** in Germany (All COT, EUR 30,000)\n- Smallest activation: **15 doors** in Switzerland (EUR 20,000)\n\n---\n\n> 📊 For dataset-wide totals or full counts, use the **Stats tool** — this is a sample of the most relevant matches.",
+      "filters": {
+        "brand": "Oakley",
+        "cluster": "DACH",
+        "activity_type": "TM_SEASONAL",
+        "budget_max": 50000
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "TM_SEASONAL",
+          "country": "Germany",
+          "budget": "EUR 30,000",
+          "distance": 0.1057
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "TM_SEASONAL",
+          "country": "Germany",
+          "budget": "EUR 50,000",
+          "distance": 0.1074
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "TM_SEASONAL",
+          "country": "Germany",
+          "budget": "EUR 40,000",
+          "distance": 0.1092
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "TM_SEASONAL",
+          "country": "Germany",
+          "budget": "EUR 60,000",
+          "distance": 0.1123
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "TM_SEASONAL",
+          "country": "Germany",
+          "budget": "EUR 25,000",
+          "distance": 0.1127
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "TM_SEASONAL",
+          "country": "Switzerland",
+          "budget": "EUR 20,000",
+          "distance": 0.1131
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "TM_SEASONAL",
+          "country": "Germany",
+          "budget": "EUR 25,000",
+          "distance": 0.1131
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "TM_SEASONAL",
+          "country": "Austria",
+          "budget": "EUR 40,000",
+          "distance": 0.1132
+        }
+      ],
+      "sql": null,
+      "timing_ms": 17945,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "hybrid_003",
+      "category": "hybrid",
+      "question": "Chanel visibility campaigns in France",
+      "expected_tool": "deep_search",
+      "answer": "## Chanel Visibility Campaigns in France\n\nHere are the **2 LOAs retrieved** (sample, not exhaustive) matching Chanel visibility activity in France:\n\n---\n\n### LOA 1 — Chanel TM_PERMANENT | France Frames\n| Field | Details |\n|---|---|\n| **Budget** | EUR 120,000 |\n| **Activity** | TM_PERMANENT (Fixture) |\n| **Channel** | Top |\n| **Customer** | T1/T2 + A |\n| **Doors** | 3 |\n| **Vendor** | Ideaform |\n| **CapEx/OpEx** | CapEx |\n\n---\n\n### LOA 2 — LB - Chanel TM_PERMANENT | France Frames\n| Field | Details |\n|---|---|\n| **Budget** | EUR 60,000 |\n| **Activity** | TM_PERMANENT (Fixture) |\n| **Channel** | Independents |\n| **Customer** | All |\n| **Doors** | 3 |\n| **Vendor** | Ideaform |\n| **CapEx/OpEx** | CapEx |\n\n---\n\n### Key Observations\n- Both LOAs focus on **permanent Chanel fixtures** (TM_PERMANENT), executed by **Ideaform**, classified as **CapEx**.\n- They target different channels: **Top tier** (LOA 1) vs. **Independents** (LOA 2), each covering **3 doors**.\n- Combined budget in this sample: **EUR 180,000** — but this covers only these 2 retrieved LOAs, not the full dataset.\n\n> 📊 For a complete picture of all Chanel France LOAs, use the **Stats tool**.",
+      "filters": {
+        "brand": "Chanel",
+        "country": "France"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Chanel",
+          "activity_type": "TM_PERMANENT",
+          "country": "France Frames",
+          "budget": "EUR 120,000",
+          "distance": 0.1591
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_PERMANENT",
+          "country": "France Frames",
+          "budget": "EUR 60,000",
+          "distance": 0.1648
+        }
+      ],
+      "sql": null,
+      "timing_ms": 12651,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "hybrid_004",
+      "category": "hybrid",
+      "question": "High budget events over 300k in UK",
+      "expected_tool": "deep_search",
+      "answer": "## High Budget Events in UK (>€300K) — Retrieved Sample\n\nHere are **2 LOAs** matching your filters (country: UK, activity: Events, budget ≥ €300,000). This is a sample of top matches, not an exhaustive list — for full dataset totals, use the 📊 Stats tool.\n\n---\n\n### 1. EL 'ENVISION' SUMMIT 2026\n| Field | Details |\n|-------|---------|\n| **Brand** | Multibrand |\n| **Region** | UK (North) |\n| **Budget** | **€500,000** |\n| **Event Type** | Sales Convention |\n| **Doors** | 300 |\n| **Channel** | Others (All Customers) |\n| **Vendor** | TBC (On-hold) |\n| **CapEx/OpEx** | OpEx |\n\n📌 *North Europe leadership summit — currently on hold, vendor TBC.*\n\n---\n\n### 2. Customer Incentive Trip\n| Field | Details |\n|-------|---------|\n| **Brand** | Multibrand |\n| **Region** | UK (North) |\n| **Budget** | **€340,000** |\n| **Event Type** | Client Award Travel |\n| **Doors** | 60 |\n| **Channel** | Independents |\n| **Vendor** | Event Exchange |\n| **CapEx/OpEx** | OpEx |\n\n📌 *Incentive travel program targeting independent customers — to be created in 2026.*\n\n---\n\n### Key Takeaways\n- Both LOAs are **Multibrand**, **OpEx**, based in **UK North**\n- Combined budget in this sample: **€840,000**\n- ⚠️ Neither has a formal LOA number yet — both appear to be in early/planning stages\n- For a complete picture of all UK events over €300K, use the **📊 Stats tool**",
+      "filters": {
+        "country": "UK",
+        "activity_type": "Events",
+        "budget_min": 300000
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 500,000",
+          "distance": 0.1452
+        },
+        {
+          "loa_number": "To be created in 26'",
+          "brand": "Multibrand",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 340,000",
+          "distance": 0.1473
+        }
+      ],
+      "sql": null,
+      "timing_ms": 15946,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "hybrid_005",
+      "category": "hybrid",
+      "question": "Transitions lens campaigns in Netherlands",
+      "expected_tool": "deep_search",
+      "answer": "## Transitions Lens Campaigns in Netherlands\n\nBased on the retrieved sample, I found **1 LOA** matching your search:\n\n---\n\n### LOA 45563 — Transitions OOH Visibility H1\n| Field | Details |\n|---|---|\n| **Brand** | Transitions |\n| **Country** | Netherlands (North) |\n| **Activity** | Seasonal Campaign (TM_SEASONAL) |\n| **Channel** | Independents |\n| **Budget** | EUR 0 *(recorded — may indicate pending approval or in-kind)* |\n| **Category** | Lenses |\n| **Vendor** | Embrosa |\n| **CapEx/OpEx** | OpEx |\n\n---\n\n### ⚠️ Things to Note:\n\n1. **EUR 0 budget** — This LOA shows no allocated budget. This could mean the budget is still pending, or it's a visibility/in-kind activity. Worth verifying with the responsible team.\n2. **This is a sample**, not the full dataset. There may be additional Transitions Netherlands LOAs not captured here.\n\n---\n\n> 📊 For a complete count and total budget across **all** Transitions Netherlands LOAs, please use the **Stats tool** to get dataset-wide figures.\n\nWould you like to dig deeper into this LOA or explore Transitions campaigns in other countries?",
+      "filters": {
+        "brand": "Transitions",
+        "country": "Netherlands",
+        "category": "Lenses"
+      },
+      "sources": [
+        {
+          "loa_number": "45563",
+          "brand": "Transitions",
+          "activity_type": "TM_SEASONAL",
+          "country": "Netherlands",
+          "budget": "EUR 0",
+          "distance": 0.1398
+        }
+      ],
+      "sql": null,
+      "timing_ms": 13016,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "hybrid_006",
+      "category": "hybrid",
+      "question": "Ray-Ban roadshow campaigns",
+      "expected_tool": "deep_search",
+      "answer": "# Ray-Ban Roadshow Campaigns\n\nHere's a summary of the **roadshow-focused LOAs** found in this sample:\n\n---\n\n## 🎯 Dedicated Roadshow Events (5 LOAs)\n\n| LOA | Country | Budget | Doors | Period |\n|-----|---------|--------|-------|--------|\n| Hungary Events | Hungary | EUR 30,000 | 100 | Jan–Mar 2025 |\n| 2025N1ESAW003 | Spain | EUR 100,000 | 600 | Jun–Dec 2025 |\n| 2025N2HURO002 | Czech Rep. + Slovakia | EUR 2,000 | 200 | Oct 2025 |\n| HB - Ray-Ban Events Italy | Italy | EUR 330,000 | — | Sep–Oct 2026 |\n| Ray-Ban Events UK | UK | EUR 200,000 | 250 | Feb–Mar 2025 |\n\n---\n\n## 🔍 Highlights by LOA\n\n- **Italy (HB – Ray-Ban)** — Largest roadshow in the sample at **EUR 330,000**. A 10-stop national tour across 10 cities / 14 days targeting Italian Independents for Frames N2 release. KPIs: **176K frames units**, **€10.9M forecasted sales**, **240 customers attended**. Vendor: FEN.\n\n- **Spain (2025N1ESAW003)** — EUR 100,000 B2B brand roadshow covering **600 doors**, focused on brand heritage & innovation (RBM, ASAP ROCKY collections). Vendors: ASSAI / ALGO BONITO.\n\n- **UK (Ray-Ban Events)** — EUR 200,000 across **250 independent doors**, Feb–Mar 2025. Note: description references *Varilux Masters Roadshows* — worth verifying the brand attribution.\n\n- **Hungary** — EUR 30,000, 100 doors, Q1 2025. Described as an \"RB party\" roadshow format. Vendor: LionGroup.\n\n- **Czech Rep. + Slovakia (2025N2HURO002)** — Smallest budget at **EUR 2,000**, 200 doors, Ostrava roadshow targeting selected TOP/DOM/KA customers.\n\n---\n\n## ℹ️ Note\nThe **3 COOP_ADVERTISING LOAs** (UK ×2, Poland & Baltics) retrieved are seasonal/campaign-type, **not roadshows**, so they're excluded above.\n\n> 📊 This is a **sample of the most relevant matches**, not the full dataset. For a complete count and total budget across all Ray-Ban roadshow LOAs, use the **Stats tool**.",
+      "filters": {
+        "brand": "Ray-Ban"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "Hungary",
+          "budget": "EUR 30,000",
+          "distance": 0.1477
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "UK",
+          "budget": "EUR 125,000",
+          "distance": 0.1481
+        },
+        {
+          "loa_number": "2025N1ESAW003​",
+          "brand": "Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "Spain",
+          "budget": "EUR 100,000",
+          "distance": 0.1489
+        },
+        {
+          "loa_number": "2025N2HURO002",
+          "brand": "Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 2,000",
+          "distance": 0.1496
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Events",
+          "country": "Italy",
+          "budget": "EUR 330,000",
+          "distance": 0.1504
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "UK",
+          "budget": "EUR 150,000",
+          "distance": 0.152
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 200,000",
+          "distance": 0.1523
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Poland & Baltics",
+          "budget": "EUR 45,000",
+          "distance": 0.1527
+        }
+      ],
+      "sql": null,
+      "timing_ms": 18577,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "hybrid_007",
+      "category": "hybrid",
+      "question": "Trade incentive programs in Iberia between 20k and 80k",
+      "expected_tool": "deep_search",
+      "answer": "## Trade Incentive Programs in Iberia (EUR 20K–80K)\n\nHere's a sample of the most relevant LOAs retrieved for this query. Note that **only one LOA is strictly a \"Trade Incentive\"** activity — the others are related programs (in-store, seasonal, sponsorship) that may involve incentive mechanics.\n\n---\n\n### 🎯 Direct Trade Incentive\n\n| LOA | Brand | Country | Budget | Doors | Timing |\n|-----|-------|---------|--------|-------|--------|\n| Ray-Ban Trade Incentive – Spain | Ray-Ban | Spain | **EUR 22,500** | 15 | Jul–Dec 2025 |\n\n**Key details:** Sales staff incentive linked to Ray-Ban Q2/Q3 performance. Top 10–15 performers rewarded with a **3-day brand experience in Agordo/Sedico** (Sep or Nov). Vendor: Viajes Tejedor. Channel: All COT.\n\n---\n\n### 📋 Adjacent Programs (In-Store / Seasonal / Sponsorship with incentive elements)\n\n| LOA | Brand | Country | Activity | Budget | Doors |\n|-----|-------|---------|----------|--------|-------|\n| All HB+LB – Spain | All brands | Spain | IN_STORE | EUR 63,000 | 664 |\n| All HB+LB – Spain H2 | All brands | Spain | TM_SEASONAL | EUR 75,000 | 350 |\n| All HB+LB – Spain | All brands | Spain | TM_SEASONAL | EUR 48,000 | 7 |\n| All HB+LB – Portugal H2 | All brands | Portugal | IN_STORE | EUR 40,000 | 250 |\n| Oakley Snow – Spain | Oakley | Spain | SPONSORSHIP | EUR 30,000 | — |\n| All HB+LB – Portugal | All brands | Portugal | IN_STORE | EUR 20,000 | 200 |\n| All HB+LB – Spain | All brands | Spain | TM_SEASONAL | EUR 20,000 | — |\n\n---\n\n### 💡 Key Observations\n\n- **Only 1 LOA** is explicitly categorized as a Trade Incentive (Ray-Ban Spain, EUR 22,500), focused on **sales staff motivation** with an experiential reward.\n- The remaining LOAs cover **in-store visibility, seasonal print materials, and sponsorship** — some may include incentive mechanics (e.g., bundle offers, cross-brand campaigns) but are not classified as Trade Incentives.\n- **Portugal** is represented with two IN_STORE programs under the EL360 program framework.\n\n> ⚠️ This is a **sample of top matches**, not the full Iberia dataset. For a complete count and total budget of trade incentive LOAs, use the **📊 Stats tool**.",
+      "filters": {
+        "cluster": "IBERIA",
+        "budget_min": 20000,
+        "budget_max": 80000
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "Trade Incentive",
+          "country": "Spain",
+          "budget": "EUR 22,500",
+          "distance": 0.1408
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "Spain",
+          "budget": "EUR 48,000",
+          "distance": 0.1672
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "IN_STORE",
+          "country": "Spain",
+          "budget": "EUR 63,000",
+          "distance": 0.1752
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "IN_STORE",
+          "country": "Portugal",
+          "budget": "EUR 20,000",
+          "distance": 0.1773
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "IN_STORE",
+          "country": "Portugal",
+          "budget": "EUR 40,000",
+          "distance": 0.1801
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "Spain",
+          "budget": "EUR 75,000",
+          "distance": 0.1831
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "Spain",
+          "budget": "EUR 20,000",
+          "distance": 0.1864
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "SPONSORSHIP",
+          "country": "Spain",
+          "budget": "EUR 30,000",
+          "distance": 0.1884
+        }
+      ],
+      "sql": null,
+      "timing_ms": 22192,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "hybrid_008",
+      "category": "hybrid",
+      "question": "Prada luxury events with over 100 doors",
+      "expected_tool": "deep_search",
+      "answer": "## Prada Luxury Events with 100+ Doors\n\nBased on the retrieved sample, here's what I found:\n\n---\n\n### 🎯 LOA Match: Prada Events — Germany (DACH)\n\n| Field | Details |\n|---|---|\n| **LOA** | LB - Prada EVENTS in Germany |\n| **Activity** | Events (\"Prada Clubs\") |\n| **Budget** | EUR 80,000 |\n| **Doors** | 100 |\n| **Category** | Frames |\n| **Channel** | All COT |\n| **Period** | Starting October |\n| **CapEx/OpEx** | OpEx |\n| **Vendor** | Corporate |\n\n---\n\n### ⚠️ A Few Notes:\n\n1. **Doors threshold**: This LOA sits at exactly **100 doors** — matching your filter but not strictly *over* 100. If you need **strictly >100**, this may not qualify.\n\n2. **Sample limitation**: Only **1 LOA** was retrieved. This is a semantic sample, not an exhaustive search. There may be other Prada Events LOAs with higher door counts in the full dataset.\n\n3. 📊 **For a complete picture**, use the **Stats tool** to query all Prada Events LOAs filtered by doors > 100 across the full database.\n\nWould you like me to refine the search or adjust the door count threshold?",
+      "filters": {
+        "brand": "Prada",
+        "activity_type": "Events"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "LB - Prada",
+          "activity_type": "EVENTS",
+          "country": "Germany",
+          "budget": "EUR 80,000",
+          "distance": 0.146
+        }
+      ],
+      "sql": null,
+      "timing_ms": 15395,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "hybrid_009",
+      "category": "hybrid",
+      "question": "Essilor lens campaigns in France FY 2025",
+      "expected_tool": "deep_search",
+      "answer": "# Essilor Lens Campaigns in France — FY 2025\n\nHere's a summary of the **8 LOAs retrieved** (sample, not exhaustive). For dataset-wide totals, please use the 📊 Stats tool.\n\n---\n\n## 📋 LOA Overview\n\n| LOA | Brand | Activity | Budget | Doors | Channel |\n|-----|-------|----------|--------|-------|---------|\n| Stellest Coop Advertising | Essilor - Stellest | Coop Advertising | EUR 59,900 | 2,000 | Buying Groups |\n| #45680 | Essilor - Multibrand | Other Advertising | EUR 80,000 | 5,000 | All COT |\n| #45679 | Essilor - Multibrand | Other Advertising | EUR 80,000 | 5,000 | All COT |\n| #45666 | Essilor - Stellest | Other Advertising | EUR 160,000 | 12,000 | All COT |\n| Essilor PR | Essilor | PR | EUR 150,000 | 13,000 | All COT |\n| #45670 | Essilor - Multibrand | Other Advertising | EUR 165,000 | 12,000 | All COT |\n| Multibrand COOP_ADV (COSPIRIT) | Essilor - Multibrand | Coop Advertising | EUR 1,662,500 | 3,600 | Others |\n| Multibrand COOP_ADV (LG2B) | Essilor - Multibrand | Coop Advertising | EUR 87,500 | 3,600 | Others |\n\n---\n\n## 🔍 Key Highlights\n\n### 🎯 Myopia Management Focus\nSeveral LOAs are dedicated to **myopia control**, a clear strategic priority:\n- **LOA #45666** — *National Myopia Control Awareness Campaign* (Stellest) · EUR 160,000 · 12,000 doors · Vendor: IEMP\n- **Essilor PR** — *Myopia Control Campaign* · EUR 150,000 · 13,000 doors · Vendor: IEMP / Myopia Association\n- **Stellest Coop Advertising** — Co-funded local activations targeting independent ECPs · EUR 59,900 · 2,000 doors · KPIs include **+7% order uplift** and min. 2,000 ECPs engaged\n\n### 📰 B2B Media Plans\n- **LOA #45680** — Annual plan with *Bien Vu / Acuité* · EUR 80,000 · 5,000 doors\n- **LOA #45679** — Annual plan with *PressOptic* · EUR 80,000 · 5,000 doors\n\n### 🤝 Co-op Advertising (Essilor Expert network)\n- **COSPIRIT** (LOA #45670-related) — EUR 1,662,500 · 3,600 doors — the **largest single LOA** in this sample\n- **LG2B** — EUR 87,500 · 3,600 doors\n- Both target the **Essilor Expert** customer segment via the *Others* channel\n\n### 🗂️ Digital Catalog / Graphics\n- **LOA #45670** — Digital catalog update & graphics customization · EUR 165,000 · Vendor: HO KADREO\n\n---\n\n## ⚠️ Notes\n- All LOAs are **OpEx**\n- Most periods reference **end 2026**, suggesting multi-year or rolling activations\n- Customers targeted: **ECPs** (independent opticians) and **Essilor Expert** network\n- This is a **sample of 8 LOAs** — use the 📊 Stats tool for full budget totals and counts across the entire dataset.",
+      "filters": {
+        "brand": "Essilor",
+        "country": "France",
+        "category": "Lenses"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Essilor - Stellest",
+          "activity_type": "Coop Advertising",
+          "country": "France",
+          "budget": "EUR 59,900",
+          "distance": 0.1263
+        },
+        {
+          "loa_number": "45680",
+          "brand": "Essilor - Multibrand",
+          "activity_type": "OTHER_ADV",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 80,000",
+          "distance": 0.1316
+        },
+        {
+          "loa_number": "45679",
+          "brand": "Essilor - Multibrand",
+          "activity_type": "OTHER_ADV",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 80,000",
+          "distance": 0.1328
+        },
+        {
+          "loa_number": "45666",
+          "brand": "Essilor - Stellest",
+          "activity_type": "OTHER_ADV",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 160,000",
+          "distance": 0.1352
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor",
+          "activity_type": "PR",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 150,000",
+          "distance": 0.1356
+        },
+        {
+          "loa_number": "45670",
+          "brand": "Essilor - Multibrand",
+          "activity_type": "OTHER_ADV",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 165,000",
+          "distance": 0.1357
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor - Multibrand",
+          "activity_type": "COOP_ADV",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 1,662,500",
+          "distance": 0.1376
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor - Multibrand",
+          "activity_type": "COOP_ADV",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 87,500",
+          "distance": 0.1378
+        }
+      ],
+      "sql": null,
+      "timing_ms": 21397,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "hybrid_010",
+      "category": "hybrid",
+      "question": "Sponsorship campaigns in EAST cluster",
+      "expected_tool": "deep_search",
+      "answer": "## Sponsorship Campaigns — EAST Cluster\n\nHere are **5 sponsorship LOAs** retrieved from the EAST cluster (sample, not exhaustive):\n\n| # | Brand | Country | Budget | Category | Period |\n|---|-------|---------|--------|----------|--------|\n| 1 | Varilux | SEE | EUR 25,000 | Lenses | Jan–Jun 2025 |\n| 2 | Essilor | Greece | EUR 4,800 | Lenses | Jul–Sep 2025 |\n| 3 | Oakley | Czech Republic + Slovakia | EUR 10,000 | Frames | Jan–Jun 2025 |\n| 4 | HB - Oakley | Hungary | EUR 24,000 | Frames | From Jul 2026 |\n| 5 | HB - Oakley | Czech Republic + Slovakia | EUR 15,000 | Frames | From Dec 2026 |\n\n---\n\n### Key Highlights\n\n- **Lenses sponsorships** focus on **professional/optometry conferences**:\n  - **Varilux in SEE** — Optometry Conference & Education, 40 doors, vendors include Veleučilište Velika Gorica (EUR 25,000)\n  - **Essilor in Greece** — Greek Optometry Academy conference, 40 doors, vendor TBD (EUR 4,800)\n\n- **Frames sponsorships** are sport-oriented (Oakley):\n  - **Czech Republic + Slovakia** — Bike & snow visibility at Dolni Morava Resort, sport channel, 15 doors (EUR 10,000 + EUR 15,000)\n  - **Hungary** — Sport events (Urban Bike, Tour de Hongrie), 2 doors, via RedSnow (EUR 24,000)\n\n---\n\n### 💡 Notes\n- All LOAs are **OpEx**.\n- The combined budget across **this sample** is **EUR 78,800** — but this is not a dataset-wide total.\n- For full dataset totals and counts, please use the 📊 **Stats tool**.",
+      "filters": {
+        "cluster": "EAST",
+        "activity_type": "SPONSORSHIP"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Varilux",
+          "activity_type": "SPONSORSHIP",
+          "country": "SEE",
+          "budget": "EUR 25,000",
+          "distance": 0.1831
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor",
+          "activity_type": "SPONSORSHIP",
+          "country": "Greece",
+          "budget": "EUR 4,800",
+          "distance": 0.1906
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "SPONSORSHIP",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 10,000",
+          "distance": 0.2105
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "SPONSORSHIP",
+          "country": "Hungary",
+          "budget": "EUR 24,000",
+          "distance": 0.2143
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "SPONSORSHIP",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 15,000",
+          "distance": 0.2175
+        }
+      ],
+      "sql": null,
+      "timing_ms": 15490,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "mem_001",
+      "category": "memory",
+      "question": "and for Italy?",
+      "expected_tool": "deep_search",
+      "answer": "Focusing on **Events in Italy** — here's a sample of the most relevant LOAs retrieved:\n\n| LOA | Brand | Event Type | Budget | Doors | Period |\n|-----|-------|------------|--------|-------|--------|\n| All HB + all LB | All HB + LB | Roadshow (Frames N1) | EUR 330,000 | 270 | Feb–Mar 2025 |\n| 2025N2ITRO007 | All HB + LB | Roadshow (Buying Days) | EUR 330,000 | 265 | Sep–Oct 2025 |\n| Others | Others | Sales Convention (Year-end) | EUR 240,000 | — | Dec 2025 |\n| 43448 / 2025XXITRO001 | Others | Roadshow (Med Tech Days) | EUR 150,000 | 600 | Jul–Dec 2025 |\n| Transitions | Transitions | Roadshow (Immersion Events) | EUR 160,000 | 320 | 2025 |\n| 40441 | Multibrand | Medical Symposium | EUR 178,000 | 2,800 | — |\n| LB - Chanel | LB - Chanel | Showroom (Showtrainings) | EUR 20,000 | 40 | — |\n| HB - BLIZ | HB - BLIZ | Trade Fair (Italian Bike Festival) | EUR 20,000 | — | Sep 2025 |\n\n**Key observations across this sample:**\n- 📌 **Largest budgets** go to multi-brand Roadshows (EUR 330,000 each)\n- 🏥 **Medical/Ophthalmic events** are well represented (LOA 40441, LOA 43448)\n- 💡 **Range is wide**: from EUR 20,000 (Chanel showtrainings, Bliz trade fair) to EUR 330,000 (frames roadshows)\n- All are **OpEx**\n\n> ⚠️ This is a **sample of 8 LOAs**, not the full Italy Events dataset. For complete totals and counts, please use the **📊 Stats tool**.",
+      "filters": {
+        "country": "Italy",
+        "activity_type": "Events"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "EVENTS",
+          "country": "Italy",
+          "budget": "EUR 330,000",
+          "distance": 0.1141
+        },
+        {
+          "loa_number": "2025N2ITRO007",
+          "brand": "all HB + all LB",
+          "activity_type": "EVENTS",
+          "country": "Italy",
+          "budget": "EUR 330,000",
+          "distance": 0.1179
+        },
+        {
+          "loa_number": null,
+          "brand": "Others",
+          "activity_type": "EVENTS",
+          "country": "Italy",
+          "budget": "EUR 240,000",
+          "distance": 0.118
+        },
+        {
+          "loa_number": "43448 / 2025XXITRO001",
+          "brand": "Others",
+          "activity_type": "EVENTS",
+          "country": "Italy",
+          "budget": "EUR 150,000",
+          "distance": 0.1258
+        },
+        {
+          "loa_number": null,
+          "brand": "Transitions",
+          "activity_type": "EVENTS",
+          "country": "Italy",
+          "budget": "EUR 160,000",
+          "distance": 0.1322
+        },
+        {
+          "loa_number": "40441",
+          "brand": "Multibrand",
+          "activity_type": "EVENTS",
+          "country": "Italy",
+          "budget": "EUR 178,000",
+          "distance": 0.1323
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "EVENTS",
+          "country": "Italy",
+          "budget": "EUR 20,000",
+          "distance": 0.1323
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - BLIZ",
+          "activity_type": "EVENTS",
+          "country": "Italy",
+          "budget": "EUR 20,000",
+          "distance": 0.1334
+        }
+      ],
+      "sql": null,
+      "timing_ms": 15903,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "mem_002",
+      "category": "memory",
+      "question": "What about seasonal ones?",
+      "expected_tool": "deep_search",
+      "answer": "## Seasonal Campaigns (TM_SEASONAL) — Retrieved Sample\n\nHere's what the top 8 matched seasonal LOAs look like:\n\n| # | Brand | Country | Budget | Doors | Channel | Detail |\n|---|-------|---------|--------|-------|---------|--------|\n| 1 | LB - Chanel | Austria | EUR 5,000 | 5 | Independents | Window FW Campaign |\n| 2 | All HB + LB | DACH | EUR 40,000 | 2,000 | Independents | Social Media Guidelines & Posting Calendar |\n| 3 | LB - Chanel | Germany | EUR 20,000 | 25 | Independents | Window FW Campaign |\n| 4 | All HB + LB | Germany | EUR 40,000 | 2,000 | Independents | Social Media Guidelines & Posting Calendar |\n| 5 | All HB | Nordics | EUR 27,000 | 300 | Sport channel | Tailormade seasonal executions |\n| 6 | All HB + LB | UK | EUR 1,210,000 | 5 | Others (KA) | Seasonal Visibility Windows / HV DEP |\n| 7 | LB - Chanel | UK | EUR 11,500 | 2 | E-Wholesale | OO EWH Seasonal Marketing Campaign |\n| 8 | All HB + LB | GCC&Export | EUR 23,000 | 400 | Independents | Visual updates / SS24 instore visibility |\n\n---\n\n### Key observations from this sample:\n\n- 📍 **Geographic spread**: DACH, Nordics, UK, GCC&Export\n- 💰 **Budget range**: EUR 5,000 → EUR 1,210,000 — very wide variance\n- 🏪 **Doors**: from 2 (UK e-wholesale) to 2,000 (DACH social media)\n- 🎯 **Typical activities**: window displays, social media calendars, instore visibility, tailormade executions\n- 🏷️ **Brands**: Mix of Chanel (LB) and broader HB/LB umbrella LOAs\n- ✅ **All OpEx**\n\n> ⚠️ **Note:** The UK LOA (EUR 1,210,000) is a significant outlier — likely a Key Account-driven national program. The DACH social media LOAs appear duplicated across two entries (DACH vs. Germany), which may reflect separate submissions.\n\nFor **dataset-wide totals or counts**, use the 📊 **Stats tool** — this is a semantic sample, not the full picture.",
+      "filters": {
+        "activity_type": "TM_SEASONAL"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_SEASONAL",
+          "country": "Austria",
+          "budget": "EUR 5,000",
+          "distance": 0.1533
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "DACH",
+          "budget": "EUR 40,000",
+          "distance": 0.1545
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_SEASONAL",
+          "country": "Germany",
+          "budget": "EUR 20,000",
+          "distance": 0.1555
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "Germany",
+          "budget": "EUR 40,000",
+          "distance": 0.1557
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB",
+          "activity_type": "TM_SEASONAL",
+          "country": "Nordics",
+          "budget": "EUR 27,000",
+          "distance": 0.1569
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 1,210,000",
+          "distance": 0.1573
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 11,500",
+          "distance": 0.1575
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "GCC&Export",
+          "budget": "EUR 23,000",
+          "distance": 0.1576
+        }
+      ],
+      "sql": null,
+      "timing_ms": 17609,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "mem_003",
+      "category": "memory",
+      "question": "And for Ray-Ban specifically?",
+      "expected_tool": "deep_search",
+      "answer": "Focusing on **Ray-Ban campaigns in Italy** — here's what the retrieved sample shows:\n\n---\n\n### 🕶️ Ray-Ban – Italy | LOA Sample Overview\n\n| LOA | Activity | Budget | Period | Category |\n|-----|----------|--------|--------|----------|\n| HB - Ray-Ban Coop Advertising (×2) | Coop Advertising | EUR 450,000 each | May 2026 | Frames |\n| HB - Ray-Ban Coop Advertising | Coop Advertising | EUR 36 | May 2026 | Frames |\n| Ray-Ban Other Advertising | Staff Incentive (Stars) | EUR 10,000 | H1 2025 | Frames |\n| **LOA-40418** | TM Seasonal | EUR 60,000 | — | Lenses |\n| HB - Ray-Ban Catalogues & Brochures (×2) | Catalogues & Brochures | EUR 450,000 each | May 2026 | Frames |\n| **LOA-44199** | TM Seasonal | EUR 150,000 | H2 2025 | Lenses |\n\n---\n\n### Key Highlights\n\n- **Coop Advertising** is the dominant activity type, with budgets of **EUR 450,000** per LOA targeting Italian optical retailers via joint ads, digital co-funding, and retailer training. KPIs include **+7% order uplift**, **+3% brand share**, and **85% campaign reach**.\n\n- **Seasonal campaigns (Lenses):**\n  - **LOA-40418**: EUR 60,000 for POP kits (brochures, window stickers, etc.) across **2,200 doors**\n  - **LOA-44199**: EUR 150,000 for Essilor MasterBrand H2 in-store kits across **2,250 doors**\n\n- **Staff Incentive**: EUR 10,000 for the \"Stars\" program across **180 doors** (H1 2025), via Elephase/Amazon.\n\n---\n\n> ⚠️ This is a **sample of the most relevant LOAs**, not the full Ray-Ban Italy dataset. For complete totals and counts, please use the **📊 Stats tool**.",
+      "filters": {
+        "brand": "Ray-Ban",
+        "country": "Italy"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Coop Advertising",
+          "country": "Italy",
+          "budget": "EUR 450,000",
+          "distance": 0.1203
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Coop Advertising",
+          "country": "Italy",
+          "budget": "EUR 450,000",
+          "distance": 0.1203
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Coop Advertising",
+          "country": "Italy",
+          "budget": "EUR 36",
+          "distance": 0.1213
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "OTHER_ADVERTISING",
+          "country": "Italy",
+          "budget": "EUR 10,000",
+          "distance": 0.1256
+        },
+        {
+          "loa_number": "40418",
+          "brand": "Ray-Ban",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 60,000",
+          "distance": 0.1289
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Catalogues & Brochures",
+          "country": "Italy",
+          "budget": "EUR 450,000",
+          "distance": 0.1294
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Catalogues & Brochures",
+          "country": "Italy",
+          "budget": "EUR 450,000",
+          "distance": 0.1294
+        },
+        {
+          "loa_number": "44199",
+          "brand": "Ray-Ban",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 150,000",
+          "distance": 0.1294
+        }
+      ],
+      "sql": null,
+      "timing_ms": 16244,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "mem_004",
+      "category": "memory",
+      "question": "top 3?",
+      "expected_tool": "deep_search",
+      "answer": "Here are the **top 3 Oakley campaigns in DACH** from the retrieved sample, ranked by budget:\n\n| Rank | LOA | Activity | Budget | Vendor/Channel |\n|------|-----|----------|--------|----------------|\n| 🥇 1 | Oakley COOP_ADVERTISING (Germany) | COOP_ADVERTISING | **EUR 104,000** | Multiple / Sport channel |\n| 🥈 2 | Oakley COOP_ADVERTISING (Germany) | COOP_ADVERTISING | **EUR 70,000** | ZALANDO / ZMS (E-Wholesale) |\n| 🥉 3 | HB - Oakley COOP_ADV (Germany) | COOP_ADV | **EUR 50,000** | ABOUTYOU.DE (E-Wholesale) |\n\n### Highlights:\n- **#1** — Coop ADV with Key Accounts across 16 doors, focused on sport channel activations (Jan–Dec 2025)\n- **#2** — Sell-Out Push on Performance & Branding with focus on **N1 + Snow** via Zalando/ZMS (1 door, E-Wholesale)\n- **#3** — Sell-Out Push across **25,000 doors** on ABOUTYOU.DE (period through end of 2026)\n\n> ⚠️ This is based on a **sample of 8 LOAs**, not the full DACH/Oakley dataset. For a complete ranking, use the 📊 **Stats tool**.",
+      "filters": {
+        "brand": "Oakley",
+        "cluster": "DACH"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 25,000",
+          "distance": 0.1177
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "SPONSORSHIP",
+          "country": "Germany",
+          "budget": "EUR 46,000",
+          "distance": 0.1222
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 30,000",
+          "distance": 0.1239
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 30,000",
+          "distance": 0.1241
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "COOP_ADV",
+          "country": "Germany",
+          "budget": "EUR 50,000",
+          "distance": 0.1246
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 45,000",
+          "distance": 0.1251
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 70,000",
+          "distance": 0.1255
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 104,000",
+          "distance": 0.1277
+        }
+      ],
+      "sql": null,
+      "timing_ms": 17851,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "mem_005",
+      "category": "memory",
+      "question": "which ones are over 100k?",
+      "expected_tool": "deep_search",
+      "answer": "Focusing on Chanel campaigns in the UK with a budget over €100,000...\n\n**None of the LOAs in this retrieved sample exceed €100,000.** The highest budget found is **EUR 60,000** (Chanel Priority Door Project Windows, TM_SEASONAL, 20 doors via Independents).\n\nHere's a quick breakdown of what was retrieved:\n\n| LOA | Activity | Budget |\n|-----|----------|--------|\n| Chanel Priority Door Project Windows | TM_SEASONAL | EUR 60,000 |\n| Chanel Harvey Nichols Edinburgh | TM_PERMANENT | EUR 58,000 |\n| Chanel Tailor Made Refresh | TM_SEASONAL | EUR 46,800 |\n| Chanel Events | TM_SEASONAL | EUR 40,000 |\n| CH H1 EWHS Campaigns | TM_SEASONAL | EUR 36,520 |\n| OO EWH Seasonal Marketing Campaign | TM_SEASONAL | EUR 11,500 |\n| Brand Experience + Buying Day | EVENTS | EUR 5,000 |\n| Brand Experience + Buying Day (Showroom) | EVENTS | EUR 1,000 |\n\n> ⚠️ This is a **sample** of the most semantically relevant LOAs, not the full dataset. There may be other Chanel UK LOAs not captured here.\n>\n> 👉 For a complete picture, please use the **📊 Stats tool** to filter by brand, country, and budget threshold across the entire dataset.",
+      "filters": {
+        "brand": "Chanel",
+        "country": "UK",
+        "budget_min": 100000,
+        "_relaxed": true
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 11,500",
+          "distance": 0.1432
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 46,800",
+          "distance": 0.1477
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 36,520",
+          "distance": 0.1483
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 5,000",
+          "distance": 0.149
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 1,000",
+          "distance": 0.1503
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 40,000",
+          "distance": 0.1511
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_PERMANENT",
+          "country": "UK",
+          "budget": "EUR 58,000",
+          "distance": 0.1541
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 60,000",
+          "distance": 0.1585
+        }
+      ],
+      "sql": null,
+      "timing_ms": 13388,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "mem_006",
+      "category": "memory",
+      "question": "in France?",
+      "expected_tool": "deep_search",
+      "answer": "Here are the **IN-STORE campaigns in France** from the retrieved sample (8 LOAs), focused on summer visibility:\n\n| # | Brand | Description | Budget | Doors |\n|---|-------|-------------|--------|-------|\n| 1 | **Multibrand** (Essilor) | Printing: Varilux, Stellest & Transitions in-store visibility | EUR 120,000 | 3,400 |\n| 2 | **Transitions** (LOA-45664) | In-store visibility & printed materials | EUR 80,000 | 5,000 |\n| 3 | **Ray-Ban** | Sell-out promoters during sunglasses peak season | EUR 250,000 | 100 |\n| 4 | **HB - Ray-Ban** | B2B Customer Engagement Program | EUR 780,000 | 1,000 |\n| 5 | **HB - Ray-Ban** | B2C Activation | EUR 550,000 | — |\n| 6 | **Nikon** | Local partner B2B2C material printing | EUR 90,000 | 1,000 |\n| 7 | **Nikon** | In & out of store animations | EUR 90,000 | 1,000 |\n| 8 | **HB - Oakley** | Culture activation (sport channel) | EUR 800,000 | 150 |\n\n**A few highlights:**\n- 🏆 **Largest budget** in this sample: HB - Oakley at **EUR 800,000** (sport channel, 150 doors)\n- 📍 **Widest reach**: Transitions with **5,000 doors**\n- ☀️ Most directly tied to **summer/seasonal visibility**: Ray-Ban promoters during sunglasses peak season\n\n> ⚠️ This is a **sample** of the most semantically relevant LOAs, not the full France IN-STORE dataset. For complete totals or counts, please use the **📊 Stats tool**.",
+      "filters": {
+        "country": "France",
+        "activity_type": "IN_STORE"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "IN_STORE",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 120,000",
+          "distance": 0.1982
+        },
+        {
+          "loa_number": "45664",
+          "brand": "Transitions",
+          "activity_type": "IN_STORE",
+          "country": "France",
+          "budget": "EUR 80,000",
+          "distance": 0.2097
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "France Frames",
+          "budget": "EUR 250,000",
+          "distance": 0.2104
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "France Frames",
+          "budget": "EUR 780,000",
+          "distance": 0.2125
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "France Frames",
+          "budget": "EUR 550,000",
+          "distance": 0.2142
+        },
+        {
+          "loa_number": null,
+          "brand": "Nikon",
+          "activity_type": "IN_STORE",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 90,000",
+          "distance": 0.215
+        },
+        {
+          "loa_number": null,
+          "brand": "Nikon",
+          "activity_type": "IN_STORE",
+          "country": "France Lenses ESSILOR",
+          "budget": "EUR 90,000",
+          "distance": 0.216
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "IN_STORE",
+          "country": "France Frames",
+          "budget": "EUR 800,000",
+          "distance": 0.2166
+        }
+      ],
+      "sql": null,
+      "timing_ms": 14017,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "mem_007",
+      "category": "memory",
+      "question": "and their KPIs?",
+      "expected_tool": "deep_search",
+      "answer": "Focusing on Ray-Ban Events in Italy, here are the KPIs for the retrieved LOA:\n\n---\n\n**HB - Ray-Ban Events in Italy** *(Frames N2 Roadshow)*\n\n| KPI | Target |\n|-----|--------|\n| 🛍️ Frames Units Sold | **176,000 units** |\n| 💶 Forecasted Sales | **€10.9M** |\n| 👥 Customers Attended | **240 customers** |\n\n---\n\n**Context:** These KPIs are tied to a 10-city, 14-day national roadshow (Sep–Oct 2026), targeting Italian Independents across Top Local, Domestic, and Stars accounts, with a budget of **€330,000**.\n\n> ⚠️ Only **1 LOA** was retrieved in this sample. There may be other Ray-Ban Events in Italy in the full dataset — use the 📊 **Stats tool** for a complete picture.",
+      "filters": {
+        "brand": "Ray-Ban",
+        "country": "Italy",
+        "activity_type": "Events"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Events",
+          "country": "Italy",
+          "budget": "EUR 330,000",
+          "distance": 0.1354
+        }
+      ],
+      "sql": null,
+      "timing_ms": 15183,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "mem_008",
+      "category": "memory",
+      "question": "compare to Italy",
+      "expected_tool": "deep_search",
+      "answer": "Focusing on seasonal campaigns in Italy — here's what the retrieved sample shows. However, I notice **no France LOAs were returned** in this sample, so a direct Italy vs. France comparison isn't possible with the current data.\n\n---\n\n## 🇮🇹 TM_SEASONAL — Italy (Retrieved Sample)\n\n| LOA | Brand | Budget | Doors | Category |\n|-----|-------|--------|-------|----------|\n| #43431 | Multibrand | EUR 160,000 | 300 | Lenses |\n| #43445 | Transitions | EUR 205,000 | 4,500 | Lenses |\n| #43430 | Multibrand | EUR 50,000 | 100 | Lenses |\n| #40418 | Ray-Ban | EUR 60,000 | 2,200 | Lenses |\n| #40417 | Essilor | EUR 40,000 | 1,200 | Lenses |\n| Essilor TM_SEASONAL | Essilor | EUR 30,000 | 2,250 | Lenses |\n| Nikon TM_SEASONAL | Nikon | EUR 20,000 | 400 | Lenses |\n| LB - Chanel TM_SEASONAL | Chanel | EUR 15,000 | 60 | Frames |\n\n**Across this sample:** EUR 580,000 total budget, up to 4,500 doors (Transitions).\n\n---\n\n## ⚠️ To Compare with France:\n\nTo get a proper Italy vs. France comparison, I'd suggest:\n1. **Use the 📊 Stats tool** for dataset-wide totals by country\n2. **Or ask me directly**: *\"Show me TM_SEASONAL campaigns in France\"* — I'll pull the French sample for a side-by-side view\n\nWould you like me to do that?",
+      "filters": {
+        "country": "Italy",
+        "activity_type": "TM_SEASONAL"
+      },
+      "sources": [
+        {
+          "loa_number": "43431",
+          "brand": "Multibrand",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 160,000",
+          "distance": 0.1672
+        },
+        {
+          "loa_number": null,
+          "brand": "Nikon",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 20,000",
+          "distance": 0.1697
+        },
+        {
+          "loa_number": "40418",
+          "brand": "Ray-Ban",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 60,000",
+          "distance": 0.1725
+        },
+        {
+          "loa_number": "43430",
+          "brand": "Multibrand",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 50,000",
+          "distance": 0.1726
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Chanel",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 15,000",
+          "distance": 0.1733
+        },
+        {
+          "loa_number": "43445",
+          "brand": "Transitions",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 205,000",
+          "distance": 0.1735
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 30,000",
+          "distance": 0.1744
+        },
+        {
+          "loa_number": "40417",
+          "brand": "Essilor",
+          "activity_type": "TM_SEASONAL",
+          "country": "Italy",
+          "budget": "EUR 40,000",
+          "distance": 0.1749
+        }
+      ],
+      "sql": null,
+      "timing_ms": 15020,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "mem_009",
+      "category": "memory",
+      "question": "any over 200k?",
+      "expected_tool": "deep_search",
+      "answer": "Focusing on UK LOAs with budget over EUR 200,000 — here are the matches from the retrieved sample:\n\n| # | Description | Brand | Activity | Budget | Channel |\n|---|-------------|-------|----------|--------|---------|\n| 1 | Altavia H1 2025 | Multibrand | OTHER | **EUR 300,000** | Independents |\n| 2 | Customer Incentive Trip | Multibrand | EVENTS | **EUR 340,000** | Independents |\n| 3 | EL 'ENVISION' SUMMIT 2026 | Multibrand | EVENTS | **EUR 500,000** | Others |\n| 4 | Essilor Brand Immersion Days | Multibrand | EVENTS | **EUR 235,000** | Others |\n| 5 | TRR Permanent Visibility RB+OO | all HB | TM_PERMANENT | **EUR 250,000** | Travel Retail |\n| 6 | TRR Seasonal Visibility | all HB + all LB | TM_SEASONAL | **EUR 510,000** | Travel Retail |\n\n> ⚠️ **Note:** LOA 7 (Ray-Ban Roadshow, EUR 200,000) is **at** 200k, not **over** it — excluded from the list above.\n\n**6 LOAs** in this sample exceed EUR 200,000, ranging from **EUR 235,000 to EUR 510,000**.\n\n📊 For a complete count across the full dataset, please use the **Stats tool**.",
+      "filters": {
+        "country": "UK",
+        "budget_min": 200000
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "OTHER",
+          "country": "UK",
+          "budget": "EUR 300,000",
+          "distance": 0.1494
+        },
+        {
+          "loa_number": "To be created in 26'",
+          "brand": "Multibrand",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 340,000",
+          "distance": 0.1591
+        },
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 500,000",
+          "distance": 0.1601
+        },
+        {
+          "loa_number": null,
+          "brand": "Multibrand",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 235,000",
+          "distance": 0.1609
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB",
+          "activity_type": "TM_PERMANENT",
+          "country": "UK",
+          "budget": "EUR 250,000",
+          "distance": 0.1718
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 510,000",
+          "distance": 0.172
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "EVENTS",
+          "country": "UK",
+          "budget": "EUR 200,000",
+          "distance": 0.1854
+        }
+      ],
+      "sql": null,
+      "timing_ms": 13246,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 0.667,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 0.9
+      },
+      "issues": [
+        "Filter brand: expected 'Multibrand', got None (filter missing)"
+      ],
+      "passed": true
+    },
+    {
+      "id": "mem_010",
+      "category": "memory",
+      "question": "and what about Nordics instead?",
+      "expected_tool": "deep_search",
+      "answer": "Switching focus to the **NORTH cluster** for Ray-Ban! Here's what the retrieved sample shows:\n\n---\n\n## 🕶️ Ray-Ban – Nordics/NORTH Cluster (Sample)\n\n| # | Activity | Country | Customer | Budget | Doors | Channel |\n|---|----------|---------|----------|--------|-------|---------|\n| 1 | COOP_ADVERTISING | Nordics | Synsam | EUR 47,700 | 510 | Chains |\n| 2 | TRADE_INCENTIVE | Nordics | All | EUR 55,000 | 7 | Independents |\n| 3 | IN_STORE | Nordics | Synsam | EUR 166,000 | 570 | Chains |\n| 4 | IN_STORE | Nordics | Synsam | EUR 135,000 | 150 | Chains |\n| 5 | IN_STORE | Nordics | Synsam | EUR 450,000 | 150 | Chains |\n| 6 | TM_SEASONAL | Netherlands | ALL | EUR 25,000 | 800 | Independents |\n| 7 | TM_SEASONAL | Nordics | Synsam | EUR 15,000 | 94 | Chains |\n| 8 | TM_SEASONAL | Netherlands | Oogwereld | EUR 40,000 | 100 | Independents |\n\n---\n\n### 🔑 Key observations:\n\n- **Synsam dominates** the Nordic activity — appearing in 5 out of 8 LOAs, covering in-store visibility, seasonal campaigns, and co-op advertising\n- **Largest single LOA**: EUR 450,000 for Ray-Ban new shelves & banners across **150 Synsam top stores** (LOA 5 — vendor: Billes, OMF, EDS)\n- **Trade Incentive**: EUR 55,000 for a **Ray-Ban B2B Agordo Trip** targeting 7 independent doors (Blue Team)\n- **Netherlands** appears with 2 seasonal LOAs (EUR 25,000 for independents + EUR 40,000 for Oogwereld)\n- The combined budget **in this sample** totals ~EUR 933,700 — but this is a partial view only\n\n> 📊 For complete Nordic Ray-Ban totals, use the **Stats tool** — this sample captures the most semantically relevant LOAs, not the full dataset.",
+      "filters": {
+        "brand": "Ray-Ban",
+        "cluster": "NORTH"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Nordics",
+          "budget": "EUR 47,700",
+          "distance": 0.1347
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "TRADE_INCENTIVE",
+          "country": "Nordics",
+          "budget": "EUR 55,000",
+          "distance": 0.1385
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "Nordics",
+          "budget": "EUR 166,000",
+          "distance": 0.1451
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "Nordics",
+          "budget": "EUR 135,000",
+          "distance": 0.1469
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "Nordics",
+          "budget": "EUR 450,000",
+          "distance": 0.1496
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "TM_SEASONAL",
+          "country": "Netherlands",
+          "budget": "EUR 25,000",
+          "distance": 0.1532
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "TM_SEASONAL",
+          "country": "Nordics",
+          "budget": "EUR 15,000",
+          "distance": 0.1546
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "TM_SEASONAL",
+          "country": "Netherlands",
+          "budget": "EUR 40,000",
+          "distance": 0.1558
+        }
+      ],
+      "sql": null,
+      "timing_ms": 17278,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "adv_001",
+      "category": "adversarial",
+      "question": "What is the LOA balance for John?",
+      "expected_tool": "deep_search",
+      "answer": "I wasn't able to find any LOA associated with a person named **\"John\"** in the retrieved results. The LOAs in our system are not indexed by individual user names — they are organized by **brand, activity, country, and customer/vendor**.\n\nHere are a few suggestions to help you find what you're looking for:\n\n1. **If \"John\" refers to a customer or vendor**, could you provide more details? For example, is it a company name like \"Jonen\" (which appears in two Germany LOAs)?\n\n2. **If you're looking for LOAs assigned to or managed by a specific person**, that information may not be directly searchable through this tool. You may need to check the **LAURA back-office or ERP system** directly.\n\n3. **For dataset-wide searches or totals**, please use the 📊 **Stats tool**, which covers the full dataset rather than a semantic sample.\n\nCould you clarify what you mean by \"LOA balance for John\"? I'm happy to help once I have a better understanding of your request! 😊",
+      "filters": {},
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "LB - Ralph",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Czech Republic+ Slovakia",
+          "budget": "EUR 9,500",
+          "distance": 0.1991
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TRAINING",
+          "country": "GCC&Export",
+          "budget": "EUR 3,000",
+          "distance": 0.2017
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Jimmy Choo",
+          "activity_type": "IN_STORE",
+          "country": "South Africa",
+          "budget": "EUR 5,000",
+          "distance": 0.2019
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "COOP_ADV",
+          "country": "Germany",
+          "budget": "EUR 9,000",
+          "distance": 0.2021
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB",
+          "activity_type": "TRAINING",
+          "country": "South Africa",
+          "budget": "EUR 2,000",
+          "distance": 0.2025
+        },
+        {
+          "loa_number": null,
+          "brand": "Essilor - Multibrand",
+          "activity_type": "COOP_ADV",
+          "country": "UK",
+          "budget": "EUR 45,000",
+          "distance": 0.2032
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB",
+          "activity_type": "TRAINING",
+          "country": "South Africa",
+          "budget": "EUR 0",
+          "distance": 0.2049
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 7,000",
+          "distance": 0.2051
+        }
+      ],
+      "sql": null,
+      "timing_ms": 11981,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "adv_002",
+      "category": "adversarial",
+      "question": "raybann events itali",
+      "expected_tool": "deep_search",
+      "answer": "## Ray-Ban Events in Italy 🇮🇹\n\nHere's the LOA I found in the retrieved sample:\n\n---\n\n### 📋 Ray-Ban – National Roadshow (Frames N2 Release)\n**Budget:** EUR 330,000\n**Period:** September 1 – October 31, 2026\n**Vendor:** FEN | **OpEx**\n\n**What it is:**\nA **10-stop national roadshow** across 10 Italian cities (14 days total) targeting Independent opticians. Includes local buying days, sample set shipments, plus hostess and DJ activation.\n\n**Target customers:** Top Local, Domestic & Stars accounts (All COT)\n\n**KPIs:**\n- 🎯 176,000 Frames units sold\n- 💰 €10.9M forecasted sales\n- 👥 240 customers attended\n\n---\n\n> ⚠️ **Note:** This is the only LOA returned in this sample. There may be additional Ray-Ban Events LOAs in Italy not captured here. For a complete count or total budget, use the 📊 **Stats tool**.",
+      "filters": {
+        "brand": "Ray-Ban",
+        "country": "Italy",
+        "activity_type": "Events"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "Events",
+          "country": "Italy",
+          "budget": "EUR 330,000",
+          "distance": 0.1149
+        }
+      ],
+      "sql": null,
+      "timing_ms": 11901,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "adv_003",
+      "category": "adversarial",
+      "question": "compare oakley vs raybon in dach",
+      "expected_tool": "deep_search",
+      "answer": "## Oakley vs Ray-Ban in DACH — Sample Comparison\n\n> ⚠️ **Note:** The retrieved sample contains **0 Ray-Ban LOAs** for DACH. All 8 results are **Oakley-related**. A meaningful head-to-head comparison isn't possible from this sample.\n\nFor a complete Ray-Ban vs Oakley breakdown, use the 📊 **Stats tool**.\n\n---\n\n### What the Sample Shows: Oakley in DACH\n\nAll retrieved LOAs are Germany-based, **Frames / COOP_ADVERTISING**, all **OpEx**.\n\n| LOA | Vendor/Customer | Channel | Budget |\n|-----|----------------|---------|--------|\n| Oakley COOP_ADV | ABOUTYOU.DE | E-Wholesale | EUR 25,000 |\n| Oakley COOP_ADV | BSTN | Independents | EUR 30,000 |\n| Oakley COOP_ADV | ZALANDO/ZMS | E-Wholesale | EUR 70,000 |\n| HB-Oakley COOP_ADV | ABOUTYOU.DE | E-Wholesale | EUR 50,000 |\n| HB-Oakley Coop Adv | Fielmann | Buying Groups | EUR 85,000 |\n| LOA-2026-008 | Fielmann | Buying Groups | EUR 85,000 |\n| HB-Oakley COOP_ADV | ZALANDO/ZMS | E-Wholesale | EUR 150,000 |\n| Oakley COOP_ADV | MISTER SPEX | E-Wholesale | EUR 45,000 |\n\n**Budget in this sample:** EUR 540,000 across 8 Oakley LOAs *(sample only, not exhaustive)*\n\n#### Key Oakley Themes in DACH:\n- **E-Wholesale dominant** (Zalando, AboutYou, Mister Spex) — sell-out push via performance & branding campaigns\n- **Fielmann partnership** (LOA-2026-008) — sports-active targeting, KPIs: +12% sell-out, 2M impressions, 0.8% CTR\n- **BSTN** — culture activation + FW25 Latitude collection content\n\n---\n\n### ❌ Ray-Ban: No Data Retrieved\nThe semantic search returned no Ray-Ban LOAs for DACH in this sample.\n\n👉 **Use the 📊 Stats tool** to get the full Oakley vs Ray-Ban budget and activity breakdown across the entire DACH dataset.",
+      "filters": {
+        "cluster": "DACH"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 25,000",
+          "distance": 0.1143
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 30,000",
+          "distance": 0.1154
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 70,000",
+          "distance": 0.118
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "COOP_ADV",
+          "country": "Germany",
+          "budget": "EUR 50,000",
+          "distance": 0.1183
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "Coop Advertising",
+          "country": "Germany",
+          "budget": "EUR 85,000",
+          "distance": 0.121
+        },
+        {
+          "loa_number": "LOA-2026-008",
+          "brand": "HB - Oakley",
+          "activity_type": "Coop Advertising",
+          "country": "Germany",
+          "budget": "EUR 85,000",
+          "distance": 0.121
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Oakley",
+          "activity_type": "COOP_ADV",
+          "country": "Germany",
+          "budget": "EUR 150,000",
+          "distance": 0.1212
+        },
+        {
+          "loa_number": null,
+          "brand": "Oakley",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "Germany",
+          "budget": "EUR 45,000",
+          "distance": 0.1215
+        }
+      ],
+      "sql": null,
+      "timing_ms": 18502,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "adv_004",
+      "category": "adversarial",
+      "question": "show me the stuff",
+      "expected_tool": "deep_search",
+      "answer": "Here's a snapshot of **8 LOAs** retrieved from the database (sample only — not exhaustive):\n\n| # | Brand | Activity | Country | Budget | Doors |\n|---|-------|----------|---------|--------|-------|\n| 1 | all LB | OTHER_ADVERTISING | GCC&Export | EUR 46,000 | — |\n| 2 | all HB + all LB | OTHER | EMEA | EUR 92,000 | — |\n| 3 | all LB | TM_SEASONAL | South Africa | EUR 10,000 | 100 |\n| 4 | LB - PFF | TM_SEASONAL | UK | EUR 35,000 | 200 |\n| 5 | all LB | TM_SEASONAL | SEE | EUR 65,000 | 500 |\n| 6 | all HB + all LB | TM_SEASONAL | South Africa | EUR 10,000 | 200 |\n| 7 | LB - Luxury | COOP_ADVERTISING | GCC&Export | EUR 25,000 | — |\n| 8 | all LB | TM_PERMANENT | South Africa | EUR 2,000 | 20 |\n\n### Quick observations on this sample:\n- **Most common activity:** TM_SEASONAL (4 out of 8)\n- **Regions covered:** GCC&Export, EMEA, South Africa, UK, SEE\n- **All are OpEx**\n- **Budget range:** EUR 2,000 (South Africa permanent visibility) → EUR 92,000 (EMEA customer satisfaction survey)\n\n> ⚠️ This is a **semantic sample**, not the full dataset. For totals, counts, or averages across all LOAs, please use the **📊 Stats tool**.\n\nWant me to filter by region, brand, activity type, or something else? 🔍",
+      "filters": {},
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "OTHER_ADVERTISING",
+          "country": "GCC&Export",
+          "budget": "EUR 46,000",
+          "distance": 0.1613
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "OTHER",
+          "country": "EMEA",
+          "budget": "EUR 92,000",
+          "distance": 0.162
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "South Africa",
+          "budget": "EUR 10,000",
+          "distance": 0.1621
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - PFF",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 35,000",
+          "distance": 0.1628
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "SEE",
+          "budget": "EUR 65,000",
+          "distance": 0.1634
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "South Africa",
+          "budget": "EUR 10,000",
+          "distance": 0.1634
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Luxury",
+          "activity_type": "COOP_ADVERTISING",
+          "country": "GCC&Export",
+          "budget": "EUR 25,000",
+          "distance": 0.1643
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "TM_PERMANENT",
+          "country": "South Africa",
+          "budget": "EUR 2,000",
+          "distance": 0.1652
+        }
+      ],
+      "sql": null,
+      "timing_ms": 12730,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "adv_005",
+      "category": "adversarial",
+      "question": "How much did we spend on employee leaves last year?",
+      "expected_tool": "stats",
+      "answer": "LOAs in this system refer to **Letters of Authorization** — marketing budget requests for campaigns, brand activations, retail visibility, and cooperative advertising — not employee leave of absence records. I'm not able to provide data on employee leave spending, as that falls outside the scope of this tool. For HR-related queries, please reach out to your HR department directly.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT 'I cannot answer this question' AS error",
+      "timing_ms": 7456,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 0.5,
+        "no_hallucination": 0.0,
+        "total": 0.75
+      },
+      "issues": [
+        "Answer contains forbidden keywords: ['employee leave']",
+        "HALLUCINATION: Answer contains 'Leave of Absence'"
+      ],
+      "passed": true
+    },
+    {
+      "id": "adv_006",
+      "category": "adversarial",
+      "question": "What did LOA 999999999 cost?",
+      "expected_tool": "deep_search",
+      "answer": "I couldn't find any LOA with the number **999999999** in the retrieved results. None of the 8 LOAs returned by the search match that identifier — they are all unrelated LOAs from various markets (GCC&Export, UK, North Africa, etc.).\n\nThis could mean:\n- **The LOA number doesn't exist** in the system, or\n- **It was entered incorrectly** — please double-check the number.\n\nIf you believe this LOA exists, try searching with a different identifier (e.g., brand + country + activity), or contact your system administrator for assistance.",
+      "filters": {},
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "GCC&Export",
+          "budget": "EUR 15,000",
+          "distance": 0.1676
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - PFF",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 35,000",
+          "distance": 0.169
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "TM_SEASONAL",
+          "country": "North Africa",
+          "budget": "EUR 30,000",
+          "distance": 0.1703
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "TM_PERMANENT",
+          "country": "Israel",
+          "budget": "EUR 30,000",
+          "distance": 0.171
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Luxury",
+          "activity_type": "IN_STORE",
+          "country": "GCC&Export",
+          "budget": "EUR 25,000",
+          "distance": 0.1722
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Luxury",
+          "activity_type": "IN_STORE",
+          "country": "GCC&Export",
+          "budget": "EUR 38,000",
+          "distance": 0.1723
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "TM_PERMANENT",
+          "country": "South Africa",
+          "budget": "EUR 2,000",
+          "distance": 0.1725
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TRAINING",
+          "country": "GCC&Export",
+          "budget": "EUR 7,500",
+          "distance": 0.1727
+        }
+      ],
+      "sql": null,
+      "timing_ms": 9967,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "adv_007",
+      "category": "adversarial",
+      "question": "give me all data",
+      "expected_tool": "stats",
+      "answer": "Here are the first 50 LOAs from the database (30 more rows exist beyond what's shown). The dataset spans multiple clusters — META (GCC&Export), NORTH (UK, Netherlands, Benelux), EAST (Poland & Baltics), DACH (Germany), and FRANCE — covering activity types such as TM_SEASONAL, EVENTS, IN_STORE, OTHER_ADVERTISING, e-Tools, and Training. Budgets range widely, from €0 (placeholder/zero-budget LOAs) up to €207,505 (Netherlands window campaigns), with notable entries including a UK Sales Convention at €165,000, a Netherlands Priority Door Project at €207,505, and a Poland Social Media Management at €24,500 FY2026. The full dataset contains more than 50 LOAs — if you'd like to filter by cluster, brand, status, or budget range, just let me know.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT * FROM loas LIMIT 50;",
+      "timing_ms": 15389,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "adv_008",
+      "category": "adversarial",
+      "question": "Ray-Ban Ray-Ban Ray-Ban budget",
+      "expected_tool": "deep_search",
+      "answer": "# Ray-Ban Budget Overview 🕶️\n\nHere's a summary of the **8 Ray-Ban LOAs** retrieved (this is a sample of the most relevant matches, not the full dataset):\n\n| LOA | Country | Activity | Budget |\n|-----|---------|----------|--------|\n| Ray-Ban PR | Germany (DACH) | PR | EUR 24,500 |\n| HB - Ray-Ban TM_SEASONAL | UK (NORTH) | Seasonal | EUR 34,800 |\n| Ray-Ban IN_STORE | GCC&Export (META) | In-Store (Arab Campaign) | EUR 15,000 |\n| Ray-Ban IN_STORE | Germany (DACH) | In-Store (Q1 Icons) | EUR 45,000 |\n| Ray-Ban IN_STORE | GCC&Export (META) | In-Store (Incentive) | EUR 15,000 |\n| HB - Ray-Ban OTHER_ADV | Germany (DACH) | Other Advertising | EUR 69,000 |\n| Ray-Ban IN_STORE | GCC&Export (META) | In-Store (Ferrari Tickets) | EUR 5,000 |\n| HB - Ray-Ban COOP_ADV | SEE (EAST) | Co-op Advertising | EUR 37,500 |\n\n**Combined across this sample: EUR 245,800**\n\n> ⚠️ This figure covers only these 8 retrieved LOAs. For the **complete Ray-Ban budget across all LOAs**, please use the 📊 **Stats tool**.\n\n### Key highlights:\n- 💰 **Largest single LOA**: HB - Ray-Ban OTHER_ADV in Germany at **EUR 69,000** (trade press, Iconicity & Innovation DNA)\n- 🇩🇪 **Germany** is the most represented market in this sample\n- 📦 All LOAs are **OpEx** and focused on **Frames**",
+      "filters": {
+        "brand": "Ray-Ban"
+      },
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "PR",
+          "country": "Germany",
+          "budget": "EUR 24,500",
+          "distance": 0.1229
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "TM_SEASONAL",
+          "country": "UK",
+          "budget": "EUR 34,800",
+          "distance": 0.1251
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "GCC&Export",
+          "budget": "EUR 15,000",
+          "distance": 0.1253
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "Germany",
+          "budget": "EUR 45,000",
+          "distance": 0.1263
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "GCC&Export",
+          "budget": "EUR 15,000",
+          "distance": 0.1267
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "OTHER_ADV",
+          "country": "Germany",
+          "budget": "EUR 69,000",
+          "distance": 0.1277
+        },
+        {
+          "loa_number": null,
+          "brand": "Ray-Ban",
+          "activity_type": "IN_STORE",
+          "country": "GCC&Export",
+          "budget": "EUR 5,000",
+          "distance": 0.1278
+        },
+        {
+          "loa_number": null,
+          "brand": "HB - Ray-Ban",
+          "activity_type": "COOP_ADV",
+          "country": "SEE",
+          "budget": "EUR 37,500",
+          "distance": 0.1283
+        }
+      ],
+      "sql": null,
+      "timing_ms": 13425,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "adv_009",
+      "category": "adversarial",
+      "question": "budget budget budget",
+      "expected_tool": "stats",
+      "answer": "It looks like your message didn't include a specific question I could process. Could you clarify what you'd like to know about LOA budgets? For example, you could ask about total approved budgets by brand, remaining budget for a specific campaign, or budget allocation across markets.",
+      "filters": {},
+      "sources": [],
+      "sql": "SELECT 'I cannot answer this question' AS error",
+      "timing_ms": 7386,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 1.0,
+        "no_hallucination": 1.0,
+        "total": 1.0
+      },
+      "issues": [],
+      "passed": true
+    },
+    {
+      "id": "adv_010",
+      "category": "adversarial",
+      "question": "Compare LOA approval times to industry standard sick leave duration",
+      "expected_tool": "deep_search",
+      "answer": "## LOA Approval Times vs. Industry Sick Leave Duration\n\nI need to be straightforward with you here: **this question cannot be answered from the available data**, for two reasons:\n\n### 1. Wrong Definition of \"LOA\"\nIn this system, **LOA = Letter of Authorization** (marketing budget requests). It has **nothing to do with \"Leave of Absence\"** or sick leave. Comparing LOA approval times to sick leave duration is not a meaningful or applicable comparison here.\n\n### 2. No Approval Time Data in Retrieved LOAs\nThe 8 retrieved LOAs (all from **GCC&Export/META**, covering in-store activations and training budgets ranging from **EUR 3,000 to EUR 40,000**) contain **no information about**:\n- Submission dates\n- Approval dates\n- Processing durations\n- Workflow timelines\n\n---\n\n## What I *Can* Help You With\n\nIf your actual question is about **marketing LOAs**, I can assist with:\n\n- 🔍 **Finding specific LOAs** by brand, country, activity, or budget range\n- 📊 **Budget comparisons** across campaigns or markets\n- 📋 **Activity breakdowns** (training, in-store activation, events, etc.)\n\nFor dataset-wide statistics, please use the **📊 Stats tool**.\n\n**What were you actually looking to find out?**",
+      "filters": {},
+      "sources": [
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "In-store/ consummer activation",
+          "country": "GCC&Export",
+          "budget": "EUR 24,000",
+          "distance": 0.1981
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "In-store/ consummer activation",
+          "country": "GCC&Export",
+          "budget": "EUR 35,000",
+          "distance": 0.2032
+        },
+        {
+          "loa_number": null,
+          "brand": "all LB",
+          "activity_type": "In-store/ consummer activation",
+          "country": "GCC&Export",
+          "budget": "EUR 40,000",
+          "distance": 0.2035
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TRAINING",
+          "country": "GCC&Export",
+          "budget": "EUR 7,500",
+          "distance": 0.2038
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TRAINING",
+          "country": "GCC&Export",
+          "budget": "EUR 6,000",
+          "distance": 0.204
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TRAINING",
+          "country": "GCC&Export",
+          "budget": "EUR 3,000",
+          "distance": 0.2041
+        },
+        {
+          "loa_number": null,
+          "brand": "LB - Luxury",
+          "activity_type": "IN_STORE",
+          "country": "GCC&Export",
+          "budget": "EUR 25,000",
+          "distance": 0.2048
+        },
+        {
+          "loa_number": null,
+          "brand": "all HB + all LB",
+          "activity_type": "TRAINING",
+          "country": "GCC&Export",
+          "budget": "EUR 4,000",
+          "distance": 0.2051
+        }
+      ],
+      "sql": null,
+      "timing_ms": 13931,
+      "error": null,
+      "scores": {
+        "filter_accuracy": 1.0,
+        "source_relevance": 1.0,
+        "answer_quality": 0.5,
+        "no_hallucination": 0.0,
+        "total": 0.75
+      },
+      "issues": [
+        "Answer contains forbidden keywords: ['sick leave']",
+        "HALLUCINATION: Answer contains 'Leave of Absence'"
+      ],
+      "passed": true
+    }
+  ]
+}

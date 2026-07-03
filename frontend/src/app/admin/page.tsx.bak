@@ -1,0 +1,610 @@
+'use client'
+
+import { useEffect, useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
+import { useMyRole } from '@/hooks/usePermissions'
+import { ThemeToggle } from '@/components/ThemeProvider'
+import { useToast } from '@/components/Toast'
+import { STATUS_CONFIG } from '@/types/loa'
+import type { LOAStatus } from '@/types/loa'
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
+// ── Types ─────────────────────────────────────────────────────────────────
+interface DashStats {
+  status_counts: Record<string, number>
+  total_loas: number
+  total_fy26: number
+  total_users: number
+  locked_count: number
+  pipeline_count: number
+  cluster_budgets: { cluster: string; total: number }[]
+  activity_budgets: { activity: string; total: number }[]
+  recent_loas: {
+    id: string; draft_id: string; status: string; cluster: string
+    country: string; brand: string; fy_2026_total: number
+    updated_at: string | null; requestor_email: string
+  }[]
+}
+
+interface AdminUser {
+  id: string; email: string; full_name: string; is_active: boolean
+  role_code: string | null; role_name: string; scope_type: string | null
+  can_override_lock: boolean; created_at: string | null
+}
+
+interface AdminRole {
+  id: number; code: string; display_name: string; scope_type: string
+  scope_value: string[] | null; can_override_lock: boolean; user_count: number
+}
+
+interface MatrixData {
+  statuses: string[]
+  matrix: { role_code: string; role_name: string; permissions: Record<string, string> }[]
+}
+
+// ── Fetch helper ──────────────────────────────────────────────────────────
+async function adminFetch(path: string, opts: RequestInit = {}) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null
+  const res = await fetch(`${API}${path}`, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts.headers || {}),
+    },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
+  }
+  return res.json()
+}
+
+// ── Formatting ────────────────────────────────────────────────────────────
+function fmtEuro(n: number) {
+  if (!n) return '€0'
+  if (n >= 1_000_000) return `€${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `€${Math.round(n / 1_000)}k`
+  return `€${Math.round(n)}`
+}
+
+function fmtDate(iso: string | null) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+// ── Permission badge colors ───────────────────────────────────────────────
+const PERM_STYLE: Record<string, { bg: string; color: string; label: string }> = {
+  advance_phase: { bg: 'var(--green-bg)',   color: 'var(--green-text)',  label: 'Advance' },
+  validate:      { bg: 'var(--purple-bg)',  color: 'var(--purple-text)', label: 'Validate' },
+  edit:          { bg: 'var(--amber-bg)',   color: 'var(--amber-text)',  label: 'Edit' },
+  comment:       { bg: 'var(--indigo-bg)',  color: 'var(--indigo-text)', label: 'Comment' },
+  view:          { bg: 'var(--bg-elevated)',color: 'var(--text-muted)',  label: 'View' },
+}
+
+const PERM_OPTIONS = ['advance_phase', 'validate', 'edit', 'comment', 'view', 'none']
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft', emea_review: 'EMEA', global_review: 'Global',
+  cmo_cfo_review: 'CMO/CFO', global_functions_review: 'Functions',
+  corporate_review: 'Corporate', approved: 'Approved', rejected: 'Rejected',
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  draft: '#8C97A3', emea_review: '#2E5EAA', global_review: '#4A47B5',
+  cmo_cfo_review: '#6D4AA8', global_functions_review: '#0E8074',
+  corporate_review: '#C26A06', approved: '#1B873F', rejected: '#C42B2B',
+}
+
+// ── Components ────────────────────────────────────────────────────────────
+
+function StatCard({ label, value, sub, accent }: { label: string; value: string | number; sub?: string; accent?: boolean }) {
+  return (
+    <div className="card px-5 py-4">
+      <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{label}</p>
+      <p className="text-2xl font-semibold tracking-tight" style={{ color: accent ? 'var(--green)' : 'var(--text-primary)' }}>
+        {value}
+      </p>
+      {sub && <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{sub}</p>}
+    </div>
+  )
+}
+
+function MiniBar({ items, maxValue }: { items: { label: string; value: number; color?: string }[]; maxValue: number }) {
+  return (
+    <div className="space-y-2">
+      {items.map(item => (
+        <div key={item.label}>
+          <div className="flex justify-between text-xs mb-0.5">
+            <span style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
+            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fmtEuro(item.value)}</span>
+          </div>
+          <div className="w-full h-2 rounded-full" style={{ background: 'var(--border)' }}>
+            <div
+              className="h-2 rounded-full transition-all"
+              style={{
+                width: `${maxValue > 0 ? Math.max((item.value / maxValue) * 100, 2) : 0}%`,
+                background: item.color || 'var(--accent)',
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function StatusDonut({ counts }: { counts: Record<string, number> }) {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0)
+  if (total === 0) return <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No data</p>
+
+  // Simple CSS donut via conic-gradient
+  let cumulative = 0
+  const segments: string[] = []
+  const legend: { status: string; count: number; pct: number; color: string }[] = []
+
+  for (const status of Object.keys(STATUS_LABELS)) {
+    const count = counts[status] || 0
+    if (count === 0) continue
+    const pct = (count / total) * 100
+    const color = STATUS_COLORS[status] || '#999'
+    segments.push(`${color} ${cumulative}% ${cumulative + pct}%`)
+    legend.push({ status, count, pct, color })
+    cumulative += pct
+  }
+
+  const gradient = `conic-gradient(${segments.join(', ')})`
+
+  return (
+    <div className="flex items-start gap-5">
+      <div
+        className="flex-shrink-0"
+        style={{
+          width: '120px', height: '120px', borderRadius: '50%',
+          background: gradient,
+          mask: 'radial-gradient(circle, transparent 42px, black 43px)',
+          WebkitMask: 'radial-gradient(circle, transparent 42px, black 43px)',
+        }}
+      />
+      <div className="space-y-1 flex-1 min-w-0">
+        {legend.map(l => (
+          <div key={l.status} className="flex items-center gap-2 text-xs">
+            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: l.color }} />
+            <span className="truncate" style={{ color: 'var(--text-secondary)' }}>{STATUS_LABELS[l.status]}</span>
+            <span className="ml-auto font-medium tabular-nums" style={{ color: 'var(--text-primary)' }}>
+              {l.count}
+            </span>
+            <span className="text-[10px] tabular-nums" style={{ color: 'var(--text-muted)', minWidth: '32px', textAlign: 'right' }}>
+              {Math.round(l.pct)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Tab navigation ────────────────────────────────────────────────────────
+type Tab = 'overview' | 'permissions' | 'users' | 'force'
+
+function Tabs({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'permissions', label: 'Permissions' },
+    { key: 'users', label: 'Users' },
+    { key: 'force', label: 'Force Status' },
+  ]
+  return (
+    <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-elevated)' }}>
+      {tabs.map(t => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+          style={{
+            background: active === t.key ? 'var(--bg-surface)' : 'transparent',
+            color: active === t.key ? 'var(--text-primary)' : 'var(--text-muted)',
+            boxShadow: active === t.key ? 'var(--shadow-sm)' : 'none',
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────
+export default function AdminDashboard() {
+  const router = useRouter()
+  const { success, error: toastError } = useToast()
+  const { role, loading: roleLoading } = useMyRole()
+
+  const [tab, setTab] = useState<Tab>('overview')
+  const [stats, setStats] = useState<DashStats | null>(null)
+  const [users, setUsers] = useState<AdminUser[]>([])
+  const [roles, setRoles] = useState<AdminRole[]>([])
+  const [matrix, setMatrix] = useState<MatrixData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Force-status state
+  const [forceLoaId, setForceLoaId] = useState('')
+  const [forceStatus, setForceStatus] = useState('emea_review')
+  const [forceReason, setForceReason] = useState('')
+  const [forcing, setForcing] = useState(false)
+
+  // Matrix edit state
+  const [matrixEdits, setMatrixEdits] = useState<Record<string, string>>({})
+  const [savingMatrix, setSavingMatrix] = useState(false)
+
+  // ── Load data ──
+  useEffect(() => {
+    if (roleLoading) return
+    if (!role?.can_override_lock) {
+      setError('Super-admin access required')
+      setLoading(false)
+      return
+    }
+    loadAll()
+  }, [roleLoading, role])
+
+  async function loadAll() {
+    setLoading(true)
+    try {
+      const [s, u, r, m] = await Promise.all([
+        adminFetch('/admin/stats'),
+        adminFetch('/admin/users'),
+        adminFetch('/admin/roles'),
+        adminFetch('/admin/permission-matrix'),
+      ])
+      setStats(s); setUsers(u); setRoles(r); setMatrix(m)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ── Actions ──
+  async function handleChangeRole(userId: string, roleCode: string) {
+    try {
+      await adminFetch(`/admin/users/${userId}/role`, {
+        method: 'PATCH', body: JSON.stringify({ role_code: roleCode }),
+      })
+      success('Role updated')
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role_code: roleCode, role_name: roles.find(r => r.code === roleCode)?.display_name || roleCode } : u))
+    } catch (e: any) { toastError(e.message) }
+  }
+
+  async function handleForceStatus() {
+    if (!forceLoaId.trim()) return
+    setForcing(true)
+    try {
+      const result = await adminFetch(`/admin/loa/${forceLoaId.trim()}/force-status`, {
+        method: 'POST',
+        body: JSON.stringify({ new_status: forceStatus, reason: forceReason }),
+      })
+      success(`Forced ${result.draft_id}: ${result.old_status} → ${result.new_status}`)
+      setForceLoaId(''); setForceReason('')
+    } catch (e: any) { toastError(e.message) }
+    finally { setForcing(false) }
+  }
+
+  function setMatrixCell(roleCode: string, status: string, perm: string) {
+    setMatrixEdits(prev => ({ ...prev, [`${roleCode}:${status}`]: perm }))
+  }
+
+  async function saveMatrix() {
+    const entries = Object.entries(matrixEdits).map(([key, perm]) => {
+      const [role_code, loa_status] = key.split(':')
+      return { role_code, loa_status, permission_code: perm }
+    })
+    if (entries.length === 0) return
+    setSavingMatrix(true)
+    try {
+      const result = await adminFetch('/admin/permission-matrix', {
+        method: 'PATCH', body: JSON.stringify({ entries }),
+      })
+      success(`Matrix saved: ${result.updated} updated, ${result.created} created, ${result.deleted} removed`)
+      setMatrixEdits({})
+      setMatrix(await adminFetch('/admin/permission-matrix'))
+    } catch (e: any) { toastError(e.message) }
+    finally { setSavingMatrix(false) }
+  }
+
+  // ── Gate ──
+  if (loading || roleLoading) return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
+      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading admin dashboard…</p>
+    </div>
+  )
+  if (error) return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ background: 'var(--bg-base)' }}>
+      <p className="text-sm" style={{ color: 'var(--red-text)' }}>{error}</p>
+      <button onClick={() => router.push('/')} className="btn-primary text-sm">Back to tracker</button>
+    </div>
+  )
+
+  const maxClusterBudget = stats ? Math.max(...stats.cluster_budgets.map(c => c.total), 1) : 1
+
+  // ── Render ──
+  return (
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      {/* Header */}
+      <header className="sticky top-0 z-20 px-6 py-3.5 flex items-center justify-between" style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-3">
+          <button onClick={() => router.push('/')} className="btn-ghost text-sm px-2">← Back</button>
+          <span style={{ color: 'var(--border)', opacity: 0.4 }}>|</span>
+          <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Admin Dashboard</span>
+          <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--red-bg)', color: 'var(--red-text)', border: '1px solid var(--red-border)' }}>Super-Admin</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <Tabs active={tab} onChange={setTab} />
+          <ThemeToggle />
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-6 py-6">
+
+        {/* ═══════════════════════ OVERVIEW TAB ═══════════════════════ */}
+        {tab === 'overview' && stats && (
+          <div className="space-y-5">
+            {/* Stat cards */}
+            <div className="grid grid-cols-5 gap-3">
+              <StatCard label="Total LOAs" value={stats.total_loas} />
+              <StatCard label="FY 2026 Budget" value={fmtEuro(stats.total_fy26)} accent />
+              <StatCard label="In Pipeline" value={stats.pipeline_count} sub="active review" />
+              <StatCard label="Locked" value={stats.locked_count} sub={stats.locked_count > 0 ? 'need attention' : 'all clear'} />
+              <StatCard label="Users" value={stats.total_users} />
+            </div>
+
+            {/* Charts row */}
+            <div className="grid grid-cols-2 gap-5">
+              <div className="card p-5">
+                <p className="section-heading mb-4">LOA distribution by status</p>
+                <StatusDonut counts={stats.status_counts} />
+              </div>
+              <div className="card p-5">
+                <p className="section-heading mb-4">Budget by cluster (FY 2026)</p>
+                <MiniBar
+                  items={stats.cluster_budgets.map((c, i) => ({
+                    label: c.cluster,
+                    value: c.total,
+                    color: ['#2E5EAA', '#4A47B5', '#6D4AA8', '#0E8074', '#C26A06', '#1B873F', '#C42B2B', '#8C97A3', '#3730A3'][i % 9],
+                  }))}
+                  maxValue={maxClusterBudget}
+                />
+              </div>
+            </div>
+
+            {/* Activity budgets */}
+            <div className="card p-5">
+              <p className="section-heading mb-4">Budget by activity type (top 10)</p>
+              <MiniBar
+                items={stats.activity_budgets.map(a => ({ label: a.activity, value: a.total }))}
+                maxValue={Math.max(...stats.activity_budgets.map(a => a.total), 1)}
+              />
+            </div>
+
+            {/* Recent LOAs */}
+            <div className="card overflow-hidden">
+              <div className="px-5 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+                <p className="section-heading">Recent activity (last 10 updated)</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr style={{ background: 'var(--bg-elevated)' }}>
+                      {['Draft ID', 'Status', 'Cluster', 'Country', 'Brand', 'FY 2026', 'Updated', 'Requestor'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left font-medium" style={{ color: 'var(--text-muted)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.recent_loas.map(loa => {
+                      const st = (STATUS_CONFIG as any)[loa.status] ?? { label: loa.status, cls: 'badge-draft' }
+                      return (
+                        <tr key={loa.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border)' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = '')}
+                        >
+                          <td className="px-4 py-2.5">
+                            <button onClick={() => router.push(`/loa/${loa.id}`)} className="font-medium underline" style={{ color: 'var(--blue-text)' }}>
+                              {loa.draft_id}
+                            </button>
+                          </td>
+                          <td className="px-4 py-2.5"><span className={`badge ${st.cls}`}>{st.label}</span></td>
+                          <td className="px-4 py-2.5" style={{ color: 'var(--text-secondary)' }}>{loa.cluster}</td>
+                          <td className="px-4 py-2.5" style={{ color: 'var(--text-secondary)' }}>{loa.country}</td>
+                          <td className="px-4 py-2.5" style={{ color: 'var(--text-secondary)' }}>{loa.brand}</td>
+                          <td className="px-4 py-2.5 font-medium" style={{ color: 'var(--green)' }}>{fmtEuro(loa.fy_2026_total)}</td>
+                          <td className="px-4 py-2.5" style={{ color: 'var(--text-muted)' }}>{fmtDate(loa.updated_at)}</td>
+                          <td className="px-4 py-2.5" style={{ color: 'var(--text-muted)' }}>{loa.requestor_email}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════ PERMISSIONS TAB ═══════════════════════ */}
+        {tab === 'permissions' && matrix && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                Click any cell to change the permission. Unsaved changes are highlighted.
+              </p>
+              <div className="flex gap-2">
+                {Object.keys(matrixEdits).length > 0 && (
+                  <button onClick={() => setMatrixEdits({})} className="btn-secondary text-xs px-3 py-1.5">
+                    Discard ({Object.keys(matrixEdits).length})
+                  </button>
+                )}
+                <button
+                  onClick={saveMatrix}
+                  disabled={Object.keys(matrixEdits).length === 0 || savingMatrix}
+                  className="btn-primary text-xs px-4 py-1.5 disabled:opacity-40"
+                >
+                  {savingMatrix ? 'Saving…' : `Save changes (${Object.keys(matrixEdits).length})`}
+                </button>
+              </div>
+            </div>
+            <div className="card overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr>
+                    <th className="px-3 py-2.5 text-left sticky left-0 z-10 font-semibold" style={{ background: 'var(--bg-surface)', color: 'var(--text-muted)', minWidth: '180px' }}>
+                      Role
+                    </th>
+                    {matrix.statuses.map(s => (
+                      <th key={s} className="px-2 py-2.5 text-center font-semibold" style={{
+                        color: 'white', background: STATUS_COLORS[s] || '#999', minWidth: '90px',
+                      }}>
+                        {STATUS_LABELS[s] || s}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {matrix.matrix.map((row) => (
+                    <tr key={row.role_code} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td className="px-3 py-2 sticky left-0 z-10 font-medium" style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)' }}>
+                        {row.role_name}
+                      </td>
+                      {matrix.statuses.map(status => {
+                        const editKey = `${row.role_code}:${status}`
+                        const current = matrixEdits[editKey] ?? row.permissions[status] ?? 'none'
+                        const isEdited = editKey in matrixEdits
+                        const ps = PERM_STYLE[current]
+                        return (
+                          <td key={status} className="px-1 py-1 text-center">
+                            <select
+                              value={current}
+                              onChange={e => setMatrixCell(row.role_code, status, e.target.value)}
+                              className="w-full px-1.5 py-1 rounded text-[10px] font-medium border-0 cursor-pointer text-center"
+                              style={{
+                                background: ps?.bg || 'var(--bg-elevated)',
+                                color: ps?.color || 'var(--text-muted)',
+                                outline: isEdited ? '2px solid var(--accent)' : 'none',
+                                outlineOffset: '-1px',
+                              }}
+                            >
+                              {PERM_OPTIONS.map(p => (
+                                <option key={p} value={p}>{p === 'none' ? '—' : (PERM_STYLE[p]?.label || p)}</option>
+                              ))}
+                            </select>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════ USERS TAB ═══════════════════════ */}
+        {tab === 'users' && (
+          <div className="card overflow-hidden">
+            <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+              <p className="section-heading">All users ({users.length})</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ background: 'var(--bg-elevated)' }}>
+                    {['Email', 'Name', 'Current Role', 'Scope', 'Admin', 'Change Role'].map(h => (
+                      <th key={h} className="px-4 py-2.5 text-left font-medium" style={{ color: 'var(--text-muted)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map(u => (
+                    <tr key={u.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td className="px-4 py-2.5 font-medium" style={{ color: 'var(--text-primary)' }}>{u.email}</td>
+                      <td className="px-4 py-2.5" style={{ color: 'var(--text-secondary)' }}>{u.full_name || '—'}</td>
+                      <td className="px-4 py-2.5">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}>
+                          {u.role_name}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5" style={{ color: 'var(--text-muted)' }}>{u.scope_type || '—'}</td>
+                      <td className="px-4 py-2.5">{u.can_override_lock ? <span style={{ color: 'var(--green)' }}>✓</span> : '—'}</td>
+                      <td className="px-4 py-2.5">
+                        <select
+                          value={u.role_code || ''}
+                          onChange={e => handleChangeRole(u.id, e.target.value)}
+                          className="text-xs px-2 py-1 rounded cursor-pointer"
+                          style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+                        >
+                          {roles.map(r => (
+                            <option key={r.code} value={r.code}>{r.display_name}</option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════ FORCE STATUS TAB ═══════════════════════ */}
+        {tab === 'force' && (
+          <div className="max-w-lg">
+            <div className="card p-5 space-y-4">
+              <div>
+                <p className="section-heading mb-1">Force LOA Status</p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Override the workflow for a specific LOA. Use with caution — this bypasses all permission checks.
+                </p>
+              </div>
+              <div>
+                <label className="label">LOA ID</label>
+                <input
+                  className="input"
+                  value={forceLoaId}
+                  onChange={e => setForceLoaId(e.target.value)}
+                  placeholder="Paste the LOA UUID here"
+                />
+              </div>
+              <div>
+                <label className="label">New Status</label>
+                <select className="input" value={forceStatus} onChange={e => setForceStatus(e.target.value)}>
+                  {Object.entries(STATUS_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v} ({k})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Reason (optional)</label>
+                <textarea
+                  className="input resize-none"
+                  rows={2}
+                  value={forceReason}
+                  onChange={e => setForceReason(e.target.value)}
+                  placeholder="Why are you forcing this status change?"
+                />
+              </div>
+              <button
+                onClick={handleForceStatus}
+                disabled={!forceLoaId.trim() || forcing}
+                className="btn-primary w-full disabled:opacity-40"
+                style={{ background: 'var(--red)', color: 'white' }}
+              >
+                {forcing ? 'Forcing…' : 'Force Status Change'}
+              </button>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  )
+}
