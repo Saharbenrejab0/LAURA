@@ -1,12 +1,14 @@
 'use client';
 
 /**
- * SubmissionReadiness - segmented status bar  (updated Rock 3+4)
+ * SubmissionReadiness — Editorial Finance redesign.
  *
- *   [ N required | N suggestions | N blocking | N complete ]
+ * Replaces the previous segmented horizontal bar with a Ring visualization
+ * (completion %) alongside 4 stat chips (Required / Suggestions / Blocking /
+ * Complete). Clicks preserved (jump to required + jump to suggestions).
  */
 
-import { color, font, motion, radius, space } from '@/styles/tokens';
+import { Ring, Overline } from '@/components/ui/atoms';
 
 interface SubmissionReadinessProps {
   requiredMissing: number;
@@ -22,96 +24,86 @@ export default function SubmissionReadiness({
   blockingComments = 0,
   onJumpToRequired, onJumpToSuggestions,
 }: SubmissionReadinessProps) {
-  const total = Math.max(1, requiredMissing + suggestionsAvailable + blockingComments + complete);
+  const totalFields = requiredMissing + complete;
+  const pct = totalFields > 0 ? complete / totalFields : 0;
   const hasBlockers = requiredMissing > 0 || blockingComments > 0;
 
   return (
-    <div style={{
-      background: color.bg.surface,
-      border: `1px solid ${color.border.soft}`,
-      borderRadius: radius.card,
-      padding: `${space[3]}px ${space[4]}px`,
-      marginBottom: space[5],
+    <section className="la-card" style={{
+      padding: '18px 22px', marginBottom: 22,
+      display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap',
     }}>
-      <div style={{
-        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-        marginBottom: space[2],
-      }}>
-        <span style={{
-          fontSize: 12, fontWeight: 500, color: color.text.secondary,
-          letterSpacing: '0.04em', textTransform: 'uppercase',
-        }}>Submission readiness</span>
-        <span style={{
-          fontFamily: font.mono, fontSize: 13, fontWeight: 500,
-          color: hasBlockers ? color.status.danger : color.status.success,
+      <Ring pct={pct} size={54} />
+
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <Overline style={{ marginBottom: 4 }}>Submission readiness</Overline>
+        <div style={{
+          fontSize: 14, fontWeight: 600,
+          color: hasBlockers ? 'var(--st-rejected-fg)' : 'var(--st-approved-fg)',
         }}>
           {hasBlockers
             ? `${requiredMissing + blockingComments} blocker${(requiredMissing + blockingComments) !== 1 ? 's' : ''}`
-            : 'Ready to submit'}
-        </span>
+            : pct >= 1
+              ? 'Ready to submit'
+              : 'In progress'}
+        </div>
       </div>
 
-      <div style={{
-        display: 'flex', height: 8, borderRadius: 999,
-        overflow: 'hidden', background: color.bg.subtle,
-        marginBottom: space[3],
-      }}>
-        <Segment flex={requiredMissing / total} bg={requiredMissing > 0 ? '#E6B0AB' : 'transparent'}
-          onClick={onJumpToRequired} title="Jump to required fields" />
-        <Segment flex={suggestionsAvailable / total} bg={suggestionsAvailable > 0 ? '#E5CFAE' : 'transparent'}
-          onClick={onJumpToSuggestions} title="Jump to Laura suggestions" />
-        <Segment flex={blockingComments / total} bg={blockingComments > 0 ? '#D4908A' : 'transparent'}
-          title="Blocking comments to resolve" />
-        <Segment flex={complete / total} bg={color.status.success} />
-      </div>
-
-      <div style={{ display: 'flex', gap: space[4], fontSize: 12, flexWrap: 'wrap' }}>
-        <LegendItem dot={requiredMissing > 0 ? color.status.danger : color.text.tertiary}
-          count={requiredMissing} label="required"
-          onClick={requiredMissing > 0 ? onJumpToRequired : undefined} />
-        <LegendItem dot={suggestionsAvailable > 0 ? color.accent.gold : color.text.tertiary}
-          count={suggestionsAvailable} label="Laura suggestions"
-          onClick={suggestionsAvailable > 0 ? onJumpToSuggestions : undefined} />
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+        <Stat
+          count={requiredMissing}
+          label="required"
+          tone={requiredMissing > 0 ? 'danger' : 'neutral'}
+          onClick={requiredMissing > 0 ? onJumpToRequired : undefined}
+        />
+        <Stat
+          count={suggestionsAvailable}
+          label="Laura suggestions"
+          tone={suggestionsAvailable > 0 ? 'accent' : 'neutral'}
+          onClick={suggestionsAvailable > 0 ? onJumpToSuggestions : undefined}
+        />
         {blockingComments > 0 && (
-          <LegendItem dot={color.status.danger}
-            count={blockingComments} label="blocking comments" />
+          <Stat count={blockingComments} label="blocking" tone="danger" />
         )}
-        <LegendItem dot={color.status.success}
-          count={complete} label="complete" />
+        <Stat count={complete} label="complete" tone="neutral" />
       </div>
-    </div>
+    </section>
   );
 }
 
-function Segment({ flex, bg, onClick, title }: {
-  flex: number; bg: string; onClick?: () => void; title?: string;
+function Stat({
+  count, label, tone, onClick,
+}: {
+  count: number;
+  label: string;
+  tone: 'danger' | 'accent' | 'neutral';
+  onClick?: () => void;
 }) {
-  if (flex <= 0) return null;
+  const color =
+    tone === 'danger' ? 'var(--st-rejected-fg)' :
+    tone === 'accent' ? 'var(--gold)' :
+    'var(--text-secondary)';
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div onClick={onClick} title={title} style={{
-      flex, background: bg,
-      cursor: onClick ? 'pointer' : 'default',
-      transition: `flex ${motion.duration.base}ms ${motion.easing}`,
-    }} />
-  );
-}
-
-function LegendItem({ dot, count, label, onClick }: {
-  dot: string; count: number; label: string; onClick?: () => void;
-}) {
-  return (
-    <button onClick={onClick} disabled={!onClick} style={{
-      background: 'transparent', border: 'none', padding: 0,
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      fontSize: 12, fontFamily: font.sans,
-      cursor: onClick ? 'pointer' : 'default',
-      color: color.text.secondary,
-    }}>
+    <Tag
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'baseline', gap: 6,
+        background: 'transparent', border: 'none',
+        cursor: onClick ? 'pointer' : 'default',
+        padding: 0, fontFamily: 'var(--font-sans)',
+        textAlign: 'left',
+      }}
+    >
       <span style={{
-        display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: dot,
-      }} />
-      <span style={{ fontFamily: font.mono, fontWeight: 500, color: color.text.primary }}>{count}</span>
-      <span>{label}</span>
-    </button>
+        fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700,
+        color,
+      }}>{count}</span>
+      <span style={{
+        fontSize: 12, color: 'var(--text-tertiary)',
+        textDecoration: onClick ? 'underline dotted' : 'none',
+        textUnderlineOffset: 3, textDecorationColor: 'var(--border-strong)',
+      }}>{label}</span>
+    </Tag>
   );
 }

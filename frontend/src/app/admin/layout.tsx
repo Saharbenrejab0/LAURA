@@ -1,17 +1,15 @@
 /**
- * Admin route segment layout.
+ * Admin route segment layout — Editorial Finance redesign (Phase 4).
  *
- * - Loads IBM Plex Mono (self-hosted via @fontsource, weights 400/500/600).
- * - Loads scoped admin design tokens.
- * - Wraps children in [data-admin-scope] so all --admin-* vars + .type-*
- *   classes only apply within /admin and never leak to the rest of the app.
+ * The previous version loaded a scoped token system (admin-tokens.css,
+ * IBM Plex Mono via @fontsource) that competed with the unified design
+ * system. All admin styling now flows from styles/redesign.css
+ * (--canvas, --gold, --st-*, JetBrains Mono), which follows the global
+ * light/dark theme automatically.
+ *
+ * [data-admin-scope] is kept so any residual scoped selectors stay inert
+ * rather than breaking.
  */
-
-import '@fontsource/ibm-plex-mono/400.css'
-import '@fontsource/ibm-plex-mono/500.css'
-import '@fontsource/ibm-plex-mono/600.css'
-
-import './admin-tokens.css'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return <div data-admin-scope>{children}</div>

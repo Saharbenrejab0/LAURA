@@ -1,135 +1,154 @@
 'use client';
 
 /**
- * LauraPill — Dynamic Island-style pill at top center.
+ * LauraPill → Topbar · Editorial Finance redesign.
+ * ------------------------------------------------
+ * The old center "Dynamic Island" pill is replaced by a horizontal sticky
+ * topbar (prototype parity): page title · "Search or ask Laura ⌘K" · Ask
+ * Laura button · avatar.
  *
- * Three visual states (driven by context):
- *   - 'idle'     : "◆ Ask Laura"
- *   - 'thinking' : "● Searching…" with champagne pulse
- *   - 'results'  : "◆ LOAs found [N]" with champagne badge
+ * Logic preserved: uses the SAME useLaura() context — openChat() opens the
+ * exact same chat surface. pillState/pillBadge (thinking/results) are shown
+ * as a subtle inline indicator instead of being lost.
  *
- * Dark-mode rule applied here:
- *   - background uses var(--laura-action) which inverts (black ↔ white)
- *   - therefore text MUST use var(--laura-text-on-primary) which also inverts
- *   - the champagne accent stays constant in both modes (signature color)
+ * Kept the filename LauraPill.tsx so layout.tsx imports don't change.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useLaura } from './LauraProvider';
+import { Avatar, initialsOf } from '@/components/ui/atoms';
+
+const PAGE_TITLES: { match: (p: string) => boolean; title: string }[] = [
+  { match: (p) => p === '/' || p.startsWith('/?'), title: 'Tracker' },
+  { match: (p) => p.startsWith('/past-campaigns'), title: 'Past Campaigns' },
+  { match: (p) => p.startsWith('/admin'), title: 'Admin' },
+  { match: (p) => p.startsWith('/loa/new'), title: 'New LOA' },
+  { match: (p) => p.startsWith('/loa/'), title: 'LOA Detail' },
+];
+
+function titleFor(pathname: string | null): string {
+  if (!pathname) return 'LAURA';
+  const found = PAGE_TITLES.find((t) => t.match(pathname));
+  return found ? found.title : 'LAURA';
+}
 
 export default function LauraPill() {
   const pathname = usePathname();
   const { isOpen, pillState, pillBadge, openChat } = useLaura();
-  const [hover, setHover] = useState(false);
+  const [hoverSearch, setHoverSearch] = useState(false);
+  const [hoverAsk, setHoverAsk] = useState(false);
+  const [user, setUser] = useState<{ full_name?: string; email?: string } | null>(null);
 
-  // Don't show on login page
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('laura_user');
+      if (raw) setUser(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+
+  // ⌘K / Ctrl+K opens Laura
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        openChat();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [openChat]);
+
+  // Hide on login
   if (pathname?.startsWith('/login')) return null;
 
-  const hidden = isOpen;
+  const title = titleFor(pathname);
+  const isThinking = pillState === 'thinking';
+  const isResults = pillState === 'results';
 
   return (
-    <div
+    <header
       style={{
-        position: 'fixed',
-        top: 16,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 100,
-        opacity: hidden ? 0 : 1,
-        pointerEvents: hidden ? 'none' : 'auto',
-        transition: 'opacity 200ms cubic-bezier(0.2, 0, 0, 1)',
+        position: 'sticky', top: 0, zIndex: 50,
+        height: 56,
+        display: 'flex', alignItems: 'center', gap: 16,
+        padding: '0 24px',
+        background: 'var(--canvas)',
+        borderBottom: '1px solid var(--border)',
+        fontFamily: 'var(--font-sans)',
+        // The topbar spans the content area to the right of the sidebar.
       }}
     >
+      {/* Page title */}
+      <div style={{
+        fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)',
+        minWidth: 110, whiteSpace: 'nowrap',
+      }}>
+        {title}
+      </div>
+
+      {/* Search / ask Laura pill */}
       <button
+        className="la-cmdk"
         onClick={() => openChat()}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-        aria-label="Open Laura"
+        onMouseEnter={() => setHoverSearch(true)}
+        onMouseLeave={() => setHoverSearch(false)}
         style={{
-          background: 'var(--laura-action, #0A0A0A)',
-          color: 'var(--laura-text-on-primary, #FFFFFF)', // ← inverts with theme
-          borderRadius: 999,
-          padding: '0 18px',
-          height: 40,
-          minWidth: 180,
-          border: 'none',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 10,
-          cursor: 'pointer',
-          boxShadow: hover
-            ? '0 6px 28px rgba(10, 10, 10, 0.22), 0 2px 4px rgba(10, 10, 10, 0.10)'
-            : '0 4px 24px rgba(10, 10, 10, 0.16), 0 1px 3px rgba(10, 10, 10, 0.08)',
-          transform: hover ? 'scale(1.02)' : 'scale(1)',
-          transition: 'transform 240ms cubic-bezier(0.2, 0, 0, 1), box-shadow 240ms cubic-bezier(0.2, 0, 0, 1)',
-          fontFamily: 'inherit',
-          fontSize: 13,
-          fontWeight: 500,
-          letterSpacing: '0.01em',
-          userSelect: 'none',
+          borderColor: hoverSearch ? 'var(--border-strong)' : 'var(--border)',
         }}
+        aria-label="Search or ask Laura"
       >
-        {pillState === 'idle' && (
-          <>
-            <span style={{ color: 'var(--laura-champagne, #C9A678)', fontSize: 14, lineHeight: 1 }}>◆</span>
-            <span>Ask Laura</span>
-          </>
+        <span style={{ opacity: 0.55 }}>⌕</span>
+        {isThinking ? (
+          <span style={{ color: 'var(--gold)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: 99, background: 'var(--gold)',
+              display: 'inline-block',
+              animation: 'laPulseDot 1s ease-in-out infinite',
+            }} />
+            Searching…
+          </span>
+        ) : isResults && pillBadge != null ? (
+          <span style={{ color: 'var(--text-secondary)' }}>
+            {pillBadge} source{pillBadge !== 1 ? 's' : ''} found — open Laura
+          </span>
+        ) : (
+          <span style={{ color: 'var(--text-tertiary)' }}>Search or ask Laura…</span>
         )}
-
-        {pillState === 'thinking' && (
-          <>
-            <PulseDot />
-            <span>Searching…</span>
-          </>
-        )}
-
-        {pillState === 'results' && (
-          <>
-            <span style={{ color: 'var(--laura-champagne, #C9A678)', fontSize: 14, lineHeight: 1 }}>◆</span>
-            <span>{(pillBadge ?? 0) > 1 ? 'LOAs found' : 'LOA found'}</span>
-            {pillBadge !== null && pillBadge > 0 && (
-              <span
-                style={{
-                  background: 'var(--laura-champagne, #C9A678)',
-                  // Champagne bg is constant across modes — dark ink is always
-                  // the most readable choice on it, so we keep this hardcoded.
-                  color: '#0A0A0A',
-                  fontWeight: 700,
-                  padding: '2px 7px',
-                  borderRadius: 999,
-                  fontSize: 11,
-                  fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
-                }}
-              >
-                {pillBadge}
-              </span>
-            )}
-          </>
-        )}
+        <span style={{
+          marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11,
+          padding: '2px 6px', border: '1px solid var(--border)', borderRadius: 5,
+          color: 'var(--text-tertiary)', background: 'var(--surface)',
+        }}>⌘K</span>
       </button>
 
-      <style>{`
-        @keyframes laura-pulse {
-          0%, 100% { opacity: 0.4; transform: scale(1); }
-          50%      { opacity: 1.0; transform: scale(1.3); }
-        }
-      `}</style>
-    </div>
-  );
-}
+      {/* Right cluster: Ask Laura + avatar */}
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button
+          onClick={() => openChat()}
+          onMouseEnter={() => setHoverAsk(true)}
+          onMouseLeave={() => setHoverAsk(false)}
+          style={{
+            display: 'inline-flex', alignItems: 'center',
+            height: 34, padding: '0 14px', borderRadius: 8,
+            background: isOpen ? 'var(--surface-sunken)' : 'transparent',
+            border: `1px solid ${hoverAsk ? 'var(--border-strong)' : 'var(--border)'}`,
+            color: 'var(--text-primary)', cursor: 'pointer',
+            fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sans)',
+            transition: 'all .15s ease', whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ color: 'var(--gold)', marginRight: 7 }}>✦</span>
+          Ask Laura
+        </button>
 
-function PulseDot() {
-  return (
-    <span
-      style={{
-        width: 6,
-        height: 6,
-        borderRadius: 999,
-        background: 'var(--laura-champagne, #C9A678)',
-        animation: 'laura-pulse 1.4s infinite cubic-bezier(0.2, 0, 0, 1)',
-      }}
-    />
+        <Avatar initials={initialsOf(user?.full_name || user?.email)} size={30} />
+      </div>
+
+      <style>{`@keyframes laPulseDot {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.7); }
+      }`}</style>
+    </header>
   );
 }

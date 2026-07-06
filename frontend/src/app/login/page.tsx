@@ -1,9 +1,22 @@
 'use client'
 
+/**
+ * LAURA — Login · Editorial Finance redesign (Phase A)
+ * -----------------------------------------------------
+ * Visual layer rebuilt on styles/redesign.css (Cormorant, gold, cream canvas).
+ * ALL auth logic preserved: group modal, search, POC_PASSWORD login flow,
+ * router.push, useToast feedback.
+ *
+ * Corrections in this version:
+ *   - Vanessa's admin email updated to vanessa@essilor.com (the vanessa-admin@
+ *     account was removed from the DB during the workflow-V3 migration).
+ */
+
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { login } from '@/lib/api'
 import { useToast } from '@/components/Toast'
+import { Btn, Overline, Avatar, initialsOf } from '@/components/ui/atoms'
 
 interface Account {
   email: string
@@ -15,6 +28,7 @@ interface Account {
 interface Group {
   key: string
   label: string
+  tagline: string
   description: string
   accounts: Account[]
 }
@@ -23,60 +37,56 @@ const GROUPS: Group[] = [
   {
     key: 'local',
     label: 'Local Markets',
-    description: 'Cluster marketers and finance teams across the 8 EMEA clusters. They create LOAs and edit during EMEA review.',
+    tagline: 'The builders',
+    description:
+      'Cluster marketers and finance teams across the 8 EMEA clusters. They create LOAs and edit during EMEA review.',
     accounts: [
-      { email: 'flora@laura.local',         name: 'Flora',          role_code: 'france_marketer',  sub_group: 'FRANCE' },
-      { email: 'anais@laura.local',         name: 'Anais',          role_code: 'france_marketer',  sub_group: 'FRANCE' },
-      { email: 'agathe@laura.local',        name: 'Agathe',         role_code: 'france_marketer',  sub_group: 'FRANCE' },
-      { email: 'marie@laura.local',         name: 'Marie',          role_code: 'france_marketer',  sub_group: 'FRANCE' },
-      { email: 'finance-france@laura.local',name: 'France Finance', role_code: 'france_finance',   sub_group: 'FRANCE' },
-      { email: 'chiara@laura.local',        name: 'Chiara',         role_code: 'italy_marketer',   sub_group: 'ITALY' },
-      { email: 'alessandra@laura.local',    name: 'Alessandra',     role_code: 'italy_marketer',   sub_group: 'ITALY' },
-      { email: 'finance-italy@laura.local', name: 'Italy Finance',  role_code: 'italy_finance',    sub_group: 'ITALY' },
-      { email: 'olaf@laura.local',          name: 'Olaf',           role_code: 'dach_marketer',    sub_group: 'DACH' },
-      { email: 'finance-dach@laura.local',  name: 'DACH Finance',   role_code: 'dach_finance',     sub_group: 'DACH' },
-      { email: 'nadia@laura.local',         name: 'Nadia',          role_code: 'iberia_marketer',  sub_group: 'IBERIA' },
-      { email: 'finance-iberia@laura.local',name: 'Iberia Finance', role_code: 'iberia_finance',   sub_group: 'IBERIA' },
-      { email: 'ewelina@laura.local',       name: 'Ewelina',        role_code: 'north_marketer',   sub_group: 'NORTH' },
-      { email: 'lindsey@laura.local',       name: 'Lindsey',        role_code: 'north_marketer',   sub_group: 'NORTH' },
-      { email: 'finance-north@laura.local', name: 'North Finance',  role_code: 'north_finance',    sub_group: 'NORTH' },
-      { email: 'justine@laura.local',       name: 'Justine',        role_code: 'meta_marketer',    sub_group: 'META' },
-      { email: 'finance-meta@laura.local',  name: 'Meta Finance',   role_code: 'meta_finance',     sub_group: 'META' },
-      { email: 'aude@laura.local',          name: 'Aude',           role_code: 'east_gr_marketer', sub_group: 'EAST & GR' },
-      { email: 'ionela@laura.local',        name: 'Ionela',         role_code: 'east_gr_marketer', sub_group: 'EAST & GR' },
-      { email: 'finance-east@laura.local',  name: 'East&GR Finance',role_code: 'east_gr_finance',  sub_group: 'EAST & GR' },
-      { email: 'elena@laura.local',         name: 'Elena',          role_code: 'russia_marketer',  sub_group: 'RUSSIA' },
-      { email: 'alena@laura.local',         name: 'Alena',          role_code: 'russia_marketer',  sub_group: 'RUSSIA' },
-      { email: 'finance-russia@laura.local',name: 'Russia Finance', role_code: 'russia_finance',   sub_group: 'RUSSIA' },
-    ],
-  },
-  
-  {
-    key: 'cmocfo',
-    label: 'CMO / CFO Review',
-    description: 'Alexandra validates the PowerPoint, Giulia validates the Excel. Either can approve to move the LOA forward.',
-    accounts: [
-      { email: 'alexandra@essilor.com', name: 'Alexandra',      role_code: 'regional_cmo' },
-      { email: 'giulia@essilor.com',    name: 'Giulia Uccelli', role_code: 'regional_cfo' },
+      { email: 'flora@laura.local',          name: 'Flora',           role_code: 'france_marketer',  sub_group: 'FRANCE' },
+      { email: 'anais@laura.local',          name: 'Anaïs',           role_code: 'france_marketer',  sub_group: 'FRANCE' },
+      { email: 'agathe@laura.local',         name: 'Agathe',          role_code: 'france_marketer',  sub_group: 'FRANCE' },
+      { email: 'marie@laura.local',          name: 'Marie',           role_code: 'france_marketer',  sub_group: 'FRANCE' },
+      { email: 'finance-france@laura.local', name: 'France Finance',  role_code: 'france_finance',   sub_group: 'FRANCE' },
+      { email: 'chiara@laura.local',         name: 'Chiara',          role_code: 'italy_marketer',   sub_group: 'ITALY' },
+      { email: 'alessandra@laura.local',     name: 'Alessandra',      role_code: 'italy_marketer',   sub_group: 'ITALY' },
+      { email: 'finance-italy@laura.local',  name: 'Italy Finance',   role_code: 'italy_finance',    sub_group: 'ITALY' },
+      { email: 'olaf@laura.local',           name: 'Olaf',            role_code: 'dach_marketer',    sub_group: 'DACH' },
+      { email: 'finance-dach@laura.local',   name: 'DACH Finance',    role_code: 'dach_finance',     sub_group: 'DACH' },
+      { email: 'nadia@laura.local',          name: 'Nadia',           role_code: 'iberia_marketer',  sub_group: 'IBERIA' },
+      { email: 'finance-iberia@laura.local', name: 'Iberia Finance',  role_code: 'iberia_finance',   sub_group: 'IBERIA' },
+      { email: 'ewelina@laura.local',        name: 'Ewelina',         role_code: 'north_marketer',   sub_group: 'NORTH' },
+      { email: 'lindsey@laura.local',        name: 'Lindsey',         role_code: 'north_marketer',   sub_group: 'NORTH' },
+      { email: 'finance-north@laura.local',  name: 'North Finance',   role_code: 'north_finance',    sub_group: 'NORTH' },
+      { email: 'justine@laura.local',        name: 'Justine',         role_code: 'meta_marketer',    sub_group: 'META' },
+      { email: 'finance-meta@laura.local',   name: 'Meta Finance',    role_code: 'meta_finance',     sub_group: 'META' },
+      { email: 'aude@laura.local',           name: 'Aude',            role_code: 'east_gr_marketer', sub_group: 'EAST & GR' },
+      { email: 'ionela@laura.local',         name: 'Ionela',          role_code: 'east_gr_marketer', sub_group: 'EAST & GR' },
+      { email: 'finance-east@laura.local',   name: 'East&GR Finance', role_code: 'east_gr_finance',  sub_group: 'EAST & GR' },
+      { email: 'elena@laura.local',          name: 'Elena',           role_code: 'russia_marketer',  sub_group: 'RUSSIA' },
+      { email: 'alena@laura.local',          name: 'Alena',           role_code: 'russia_marketer',  sub_group: 'RUSSIA' },
+      { email: 'finance-russia@laura.local', name: 'Russia Finance',  role_code: 'russia_finance',   sub_group: 'RUSSIA' },
     ],
   },
   {
     key: 'brands',
     label: 'Global Brands',
-    description: 'Brand custodians who comment during global review — they cannot edit, only leave feedback.',
+    tagline: 'The curators',
+    description:
+      'Brand custodians who comment during brand review — they cannot edit, only leave feedback.',
     accounts: [
       { email: 'marco@essilor.com',             name: 'Marco',             role_code: 'global_brand_rayban' },
       { email: 'brand-oakley@laura.local',      name: 'Oakley Brand Team', role_code: 'global_brand_oakley' },
       { email: 'brand-essilor@laura.local',     name: 'Essilor Lenses',    role_code: 'global_brand_essilor_lenses' },
       { email: 'brand-transitions@laura.local', name: 'Transitions',       role_code: 'global_brand_transitions' },
-      { email: 'brand-other-hb@laura.local',    name: 'Other HB',         role_code: 'global_brand_other_hb' },
-      { email: 'brand-license@laura.local',     name: 'License Brands',   role_code: 'global_brand_license' },
+      { email: 'brand-other-hb@laura.local',    name: 'Other HB',          role_code: 'global_brand_other_hb' },
+      { email: 'brand-license@laura.local',     name: 'License Brands',    role_code: 'global_brand_license' },
     ],
   },
   {
     key: 'functions',
     label: 'Global Functions',
-    description: 'PR & Events, Medical Affairs, and Trade Marketing — they comment during the global functions review step.',
+    tagline: 'The specialists',
+    description:
+      'PR & Events, Medical Affairs, and Trade Marketing — they comment during the functions review step.',
     accounts: [
       { email: 'sofia@essilor.com',            name: 'Sofia',           role_code: 'global_function_pr_events' },
       { email: 'function-medical@laura.local', name: 'Medical Affairs', role_code: 'global_function_medical' },
@@ -84,9 +94,22 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    key: 'cmocfo',
+    label: 'CMO / CFO',
+    tagline: 'The regional gate',
+    description:
+      'Alexandra validates the PowerPoint, Giulia validates the Excel. Either can approve to move the LOA forward.',
+    accounts: [
+      { email: 'alexandra@essilor.com', name: 'Alexandra',      role_code: 'regional_cmo' },
+      { email: 'giulia@essilor.com',    name: 'Giulia Uccelli', role_code: 'regional_cfo' },
+    ],
+  },
+  {
     key: 'corporate',
     label: 'Corporate Finance',
-    description: 'The final gate — Paola and Diana validate at corporate review before the LOA is approved.',
+    tagline: 'The final approval',
+    description:
+      'Paola and Diana validate at corporate review — the last gate before a LOA is approved.',
     accounts: [
       { email: 'paola@essilor.com', name: 'Paola Boneto',   role_code: 'corporate_paola' },
       { email: 'diana@essilor.com', name: 'Diana Canazaro', role_code: 'corporate_diana' },
@@ -95,36 +118,37 @@ const GROUPS: Group[] = [
   {
     key: 'admin',
     label: 'Administration',
-    description: 'Super-admins with full control — can act at any step, lock/unlock LOAs, and manage permissions.',
+    tagline: 'Full access',
+    description:
+      'Super-admins with full control — can act at any step, lock/unlock LOAs, and manage permissions.',
     accounts: [
-      { email: 'thibault@essilor.com',      name: 'Thibault de Bodman', role_code: 'super_admin' },
-      { email: 'vanessa-admin@essilor.com', name: 'Vanessa Stöecklein',    role_code: 'super_admin' },
-      { email: 'sandrine@essilor.com',       name: 'Sandrine Goetz',    role_code: 'super_admin' },
+      { email: 'thibault@essilor.com', name: 'Thibault de Bodman', role_code: 'super_admin' },
+      { email: 'vanessa@essilor.com',  name: 'Vanessa Stoecklein', role_code: 'super_admin' },
+      { email: 'sandrine@essilor.com', name: 'Sandrine Goetz',     role_code: 'super_admin' },
     ],
   },
 ]
 
 function roleDisplayName(code: string): string {
   return {
-    france_marketer:    'France Marketer',
-    italy_marketer:     'Italy Marketer',
-    dach_marketer:      'DACH Marketer',
-    iberia_marketer:    'Iberia Marketer',
-    north_marketer:     'North Marketer',
-    meta_marketer:      'Meta Marketer',
-    east_gr_marketer:   'East & GR Marketer',
-    russia_marketer:    'Russia Marketer',
-    france_finance:     'France Finance',
-    italy_finance:      'Italy Finance',
-    dach_finance:       'DACH Finance',
-    iberia_finance:     'Iberia Finance',
-    north_finance:      'North Finance',
-    meta_finance:       'Meta Finance',
-    east_gr_finance:    'East & GR Finance',
-    russia_finance:     'Russia Finance',
-    emea_ps_editor:     'EMEA PS Editor',
-    regional_cmo:       'Regional CMO',
-    regional_cfo:       'Regional CFO',
+    france_marketer:  'France Marketer',
+    italy_marketer:   'Italy Marketer',
+    dach_marketer:    'DACH Marketer',
+    iberia_marketer:  'Iberia Marketer',
+    north_marketer:   'North Marketer',
+    meta_marketer:    'Meta Marketer',
+    east_gr_marketer: 'East & GR Marketer',
+    russia_marketer:  'Russia Marketer',
+    france_finance:   'France Finance',
+    italy_finance:    'Italy Finance',
+    dach_finance:     'DACH Finance',
+    iberia_finance:   'Iberia Finance',
+    north_finance:    'North Finance',
+    meta_finance:     'Meta Finance',
+    east_gr_finance:  'East & GR Finance',
+    russia_finance:   'Russia Finance',
+    regional_cmo:     'Regional CMO',
+    regional_cfo:     'Regional CFO',
     global_brand_rayban:         'Ray-Ban Brand',
     global_brand_oakley:         'Oakley Brand',
     global_brand_essilor_lenses: 'Essilor Lenses Brand',
@@ -134,9 +158,9 @@ function roleDisplayName(code: string): string {
     global_function_pr_events:   'PR & Events',
     global_function_medical:     'Medical Affairs',
     global_function_trade:       'Trade Marketing',
-    corporate_paola:    'Corporate (Paola)',
-    corporate_diana:    'Corporate (Diana)',
-    super_admin:        'Super-Admin',
+    corporate_paola: 'Corporate (Paola)',
+    corporate_diana: 'Corporate (Diana)',
+    super_admin:     'Super-Admin',
   }[code] || code
 }
 
@@ -149,49 +173,50 @@ export default function LoginPage() {
 
   const [openGroup, setOpenGroup] = useState<Group | null>(null)
   const [search, setSearch] = useState('')
-  const [searchFocused, setSearchFocused] = useState(false)
   const [loggingIn, setLoggingIn] = useState<string | null>(null)
-  const [hoveredCard, setHoveredCard] = useState<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  // Ensure the redesign palette variables apply on the login route
+  // (AppShell is skipped on /login, so we set data-theme locally)
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('laura.theme') : null
+    const t = stored === 'dark' ? 'dark' : 'light'
+    document.documentElement.setAttribute('data-theme', t)
+    if (t === 'dark') document.documentElement.classList.add('dark')
+    else document.documentElement.classList.remove('dark')
+  }, [])
 
   useEffect(() => {
     if (openGroup) {
       setSearch('')
-      setSearchFocused(false)
-      setTimeout(() => searchInputRef.current?.focus(), 50)
+      setTimeout(() => searchInputRef.current?.focus(), 60)
     }
   }, [openGroup])
 
   useEffect(() => {
-    if (openGroup) document.body.style.overflow = 'hidden'
-    else document.body.style.overflow = ''
+    document.body.style.overflow = openGroup ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [openGroup])
 
   useEffect(() => {
     if (!openGroup) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenGroup(null)
-    }
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenGroup(null) }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [openGroup])
 
   const visibleAccounts = useMemo(() => {
     if (!openGroup) return []
-    if (search.trim()) {
-      const q = search.toLowerCase().trim()
-      return openGroup.accounts.filter(a =>
-        a.name.toLowerCase().includes(q) ||
-        a.email.toLowerCase().includes(q) ||
-        a.role_code.toLowerCase().includes(q) ||
-        roleDisplayName(a.role_code).toLowerCase().includes(q) ||
-        (a.sub_group?.toLowerCase().includes(q) ?? false)
-      )
-    }
-    if (searchFocused) return openGroup.accounts
-    return []
-  }, [openGroup, search, searchFocused])
+    const q = search.trim().toLowerCase()
+    if (!q) return openGroup.accounts
+    return openGroup.accounts.filter(a =>
+      a.name.toLowerCase().includes(q) ||
+      a.email.toLowerCase().includes(q) ||
+      a.role_code.toLowerCase().includes(q) ||
+      roleDisplayName(a.role_code).toLowerCase().includes(q) ||
+      (a.sub_group?.toLowerCase().includes(q) ?? false)
+    )
+  }, [openGroup, search])
 
   async function handleSelectAccount(account: Account) {
     if (loggingIn) return
@@ -207,207 +232,388 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={styles.page}>
-      <header style={styles.header}>
-        <div style={styles.headerInner}>
-          <div style={styles.brand}>
-            <span style={styles.brandMark}>L</span>
-            <div>
-              <h1 style={styles.brandTitle}>LAURA</h1>
-              <p style={styles.brandSub}>LOA Automation & Review Agent</p>
-            </div>
-          </div>
-          <span style={styles.pocBadge}>Preview</span>
+    <div style={{
+      minHeight: '100vh',
+      background: 'var(--canvas)',
+      color: 'var(--text-primary)',
+      fontFamily: 'var(--font-sans)',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      {/* ── Header ──────────────────────────────────────────────── */}
+      <header style={{
+        padding: '22px 44px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: 28, fontWeight: 600, lineHeight: 1,
+            color: 'var(--text-primary)',
+          }}>
+            LAURA<span style={{ color: 'var(--gold)' }}>.</span>
+          </span>
+          <span style={{
+            fontSize: 11.5, color: 'var(--text-tertiary)',
+            paddingLeft: 12, borderLeft: '1px solid var(--border)',
+            letterSpacing: '.03em',
+          }}>
+            LOA Automation &amp; Review Agent
+          </span>
         </div>
+
+        <span style={{
+          padding: '4px 12px',
+          border: '1px solid var(--border-strong)',
+          borderRadius: 99,
+          fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase',
+          fontWeight: 600, color: 'var(--text-secondary)',
+        }}>
+          Preview
+        </span>
       </header>
 
-      <main style={{ ...styles.main, ...(openGroup ? styles.mainBlurred : {}) }}>
-        <div style={styles.intro}>
-          <h2 style={styles.introTitle}>Welcome back.</h2>
-          <p style={styles.introText}>
+      {/* ── Main ────────────────────────────────────────────────── */}
+      <main style={{
+        flex: 1,
+        maxWidth: 1180, width: '100%',
+        margin: '0 auto',
+        padding: '76px 44px 60px',
+        boxSizing: 'border-box',
+        filter: openGroup ? 'blur(8px)' : 'none',
+        opacity: openGroup ? 0.35 : 1,
+        pointerEvents: openGroup ? 'none' : 'auto',
+        transition: 'filter .35s ease, opacity .35s ease',
+      }}>
+        <div style={{
+          textAlign: 'center',
+          maxWidth: 640, margin: '0 auto 56px',
+        }}>
+          <Overline style={{ marginBottom: 18 }}>Welcome to Laura</Overline>
+          <h1 style={{
+            margin: 0,
+            fontFamily: 'var(--font-display)',
+            fontStyle: 'italic', fontWeight: 500,
+            fontSize: 60, lineHeight: 1.05, letterSpacing: '-0.01em',
+            color: 'var(--text-primary)',
+          }}>
+            Welcome back.
+          </h1>
+          <div style={{
+            width: 64, height: 2, background: 'var(--gold)',
+            margin: '22px auto 0',
+          }} />
+          <p style={{
+            marginTop: 22, fontSize: 15, lineHeight: 1.6,
+            color: 'var(--text-secondary)', maxWidth: 520, marginLeft: 'auto', marginRight: 'auto',
+          }}>
             Choose where you sit in the LOA workflow, and we'll bring you
             straight to what matters.
           </p>
         </div>
 
-        <div style={styles.grid}>
-          {GROUPS.map(group => {
-            const isHover = hoveredCard === group.key
-            return (
-              <button
-                key={group.key}
-                onClick={() => setOpenGroup(group)}
-                onMouseEnter={() => setHoveredCard(group.key)}
-                onMouseLeave={() => setHoveredCard(null)}
-                style={{ ...styles.card, ...(isHover ? styles.cardHover : {}) }}
-              >
-                <div style={styles.cardShine} />
-                <p style={styles.cardLabel}>{group.label}</p>
-              </button>
-            )
-          })}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          gap: 20,
+          maxWidth: 1100, margin: '0 auto',
+        }}>
+          {GROUPS.map((group, i) => (
+            <RoleCard
+              key={group.key}
+              group={group}
+              index={i}
+              onClick={() => setOpenGroup(group)}
+            />
+          ))}
         </div>
       </main>
 
-      <footer style={{ ...styles.footer, ...(openGroup ? styles.footerBlurred : {}) }}>
-        <p style={styles.footerText}>
-          LAURA for EssilorLuxottica · {TOTAL_ACCOUNTS} accounts
+      {/* ── Footer ──────────────────────────────────────────────── */}
+      <footer style={{
+        padding: '26px 44px',
+        borderTop: '1px solid var(--border)',
+        textAlign: 'center',
+        filter: openGroup ? 'blur(8px)' : 'none',
+        opacity: openGroup ? 0.35 : 1,
+        transition: 'filter .35s ease, opacity .35s ease',
+      }}>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)', letterSpacing: '.03em' }}>
+          LAURA for EssilorLuxottica · {TOTAL_ACCOUNTS} accounts · Preview environment
         </p>
       </footer>
 
+      {/* ── Account picker modal ────────────────────────────────── */}
       {openGroup && (
-        <div style={styles.modalBackdrop} onClick={() => setOpenGroup(null)}>
-          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <div style={styles.modalCardPreview}>
-                <div style={styles.modalCardShine} />
-                <p style={styles.modalCardLabel}>{openGroup.label}</p>
-              </div>
-              <button onClick={() => setOpenGroup(null)} style={styles.modalClose} aria-label="Close">×</button>
-            </div>
-
-            <p style={styles.modalDescription}>{openGroup.description}</p>
-
-            <div style={styles.modalBody}>
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onFocus={() => setSearchFocused(true)}
-                onBlur={() => setSearchFocused(false)}
-                placeholder="Search by name…"
-                style={styles.searchInput}
-              />
-
-              {!searchFocused && !search.trim() && (
-                <div style={styles.emptyState}>
-                  <p style={styles.emptyText}>
-                    {openGroup.accounts.length} account{openGroup.accounts.length !== 1 ? 's' : ''} in this group.
-                  </p>
-                  <p style={styles.emptyHint}>Tap the search field to see them all, or type your name.</p>
-                </div>
-              )}
-
-              {search.trim() && visibleAccounts.length === 0 && (
-                <div style={styles.emptyState}>
-                  <p style={styles.emptyText}>No accounts match "{search}".</p>
-                  <p style={styles.emptyHint}>Try a different keyword.</p>
-                </div>
-              )}
-
-              {visibleAccounts.length > 0 && (
-                <div style={styles.resultsList}>
-                  {visibleAccounts.map(account => {
-                    const isLoading = loggingIn === account.email
-                    const disabled = loggingIn !== null && !isLoading
-                    return (
-                      <button
-                        key={account.email}
-                        onClick={() => handleSelectAccount(account)}
-                        disabled={disabled || isLoading}
-                        onMouseDown={(e) => e.preventDefault()}
-                        style={{
-                          ...styles.resultRow,
-                          ...(isLoading ? styles.resultRowLoading : {}),
-                          ...(disabled ? styles.resultRowDisabled : {}),
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!disabled && !isLoading) {
-                            Object.assign(e.currentTarget.style, { ...styles.resultRow, ...styles.resultRowHover })
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!disabled && !isLoading) {
-                            Object.assign(e.currentTarget.style, styles.resultRow)
-                          }
-                        }}
-                      >
-                        <div style={styles.resultMain}>
-                          <p style={styles.resultName}>{isLoading ? 'Signing in…' : account.name}</p>
-                          <p style={styles.resultMeta}>
-                            {roleDisplayName(account.role_code)}
-                            {account.sub_group && <> · {account.sub_group}</>}
-                          </p>
-                        </div>
-                        <p style={styles.resultEmail}>{account.email}</p>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <AccountPicker
+          group={openGroup}
+          search={search}
+          setSearch={setSearch}
+          searchInputRef={searchInputRef}
+          visibleAccounts={visibleAccounts}
+          loggingIn={loggingIn}
+          onSelect={handleSelectAccount}
+          onClose={() => setOpenGroup(null)}
+        />
       )}
     </div>
   )
 }
 
-const COLOR = {
-  bg:         '#F8F6F3',
-  surface:    '#FFFFFF',
-  surfaceSoft:'#FCFAF7',
-  border:     '#E8E4DE',
-  borderSoft: '#F0EDE7',
-  text:       '#1A1A1A',
-  textSoft:   '#4D4944',
-  textMuted:  '#8A857E',
-  textFaint:  '#B8B3AC',
-  cardBg:     '#1A1A1A',
-  cardBgHover:'#262626',
-  cardText:   '#FCFAF7',
-  shadow:     'rgba(26, 22, 18, 0.06)',
-  shadowMd:   'rgba(26, 22, 18, 0.10)',
-  shadowLg:   'rgba(26, 22, 18, 0.18)',
-  shadowDeep: 'rgba(26, 22, 18, 0.28)',
+/* ═══════════════════════════════════════════════════════════════
+   Role card
+   ═══════════════════════════════════════════════════════════════ */
+
+function RoleCard({
+  group, index, onClick,
+}: { group: Group; index: number; onClick: () => void }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        position: 'relative',
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+        textAlign: 'left',
+        background: 'var(--ink)', color: 'var(--ink-text)',
+        borderRadius: 16,
+        padding: '26px 26px 20px',
+        minHeight: 200,
+        border: `1px solid ${hover ? 'var(--gold)' : 'transparent'}`,
+        transition: 'all .25s cubic-bezier(0.16, 1, 0.3, 1)',
+        cursor: 'pointer',
+        fontFamily: 'var(--font-sans)',
+        transform: hover ? 'translateY(-4px)' : 'none',
+        boxShadow: hover
+          ? '0 0 0 1px var(--gold), 0 24px 60px rgba(0,0,0,.28)'
+          : '0 6px 20px rgba(0,0,0,.14)',
+        animation: `laRoleIn .5s cubic-bezier(0.16, 1, 0.3, 1) ${index * 60}ms backwards`,
+      }}
+    >
+      <style>{`@keyframes laRoleIn {
+        from { opacity: 0; transform: translateY(12px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }`}</style>
+
+      <span style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: '.14em',
+        textTransform: 'uppercase',
+        color: hover ? 'var(--gold)' : 'rgba(244, 238, 223, .55)',
+        transition: 'color .25s ease',
+      }}>
+        {group.tagline}
+      </span>
+
+      <span style={{
+        marginTop: 12,
+        fontFamily: 'var(--font-display)', fontStyle: 'italic',
+        fontSize: 27, fontWeight: 600, lineHeight: 1.15,
+      }}>
+        {group.label}
+      </span>
+
+      <span style={{
+        marginTop: 10,
+        fontSize: 12.5, lineHeight: 1.55, opacity: 0.7,
+      }}>
+        {group.description}
+      </span>
+
+      <div style={{
+        marginTop: 'auto', paddingTop: 18, width: '100%',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        opacity: 0.85,
+      }}>
+        <span style={{
+          fontFamily: 'var(--font-mono)', fontSize: 11.5, fontWeight: 500,
+        }}>
+          {group.accounts.length} account{group.accounts.length > 1 ? 's' : ''}
+        </span>
+        <span style={{
+          fontSize: 16,
+          transform: hover ? 'translateX(4px)' : 'none',
+          color: hover ? 'var(--gold)' : 'inherit',
+          transition: 'all .25s ease',
+        }}>→</span>
+      </div>
+    </button>
+  )
 }
 
-const FONT_SERIF = '"Cormorant Garamond", "Playfair Display", Georgia, "Times New Roman", serif'
-const FONT_SANS  = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+/* ═══════════════════════════════════════════════════════════════
+   Account picker modal
+   ═══════════════════════════════════════════════════════════════ */
 
-const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: '100vh', background: COLOR.bg, color: COLOR.text, fontFamily: FONT_SANS, display: 'flex', flexDirection: 'column', fontFeatureSettings: '"liga" 1, "kern" 1', WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale' },
-  header: { background: COLOR.bg, borderBottom: `1px solid ${COLOR.borderSoft}` },
-  headerInner: { maxWidth: '1200px', margin: '0 auto', padding: '28px 48px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  brand: { display: 'flex', alignItems: 'center', gap: '14px' },
-  brandMark: { width: '40px', height: '40px', borderRadius: '6px', background: COLOR.text, color: COLOR.cardText, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 500, letterSpacing: '0.5px', fontFamily: FONT_SERIF },
-  brandTitle: { fontSize: '16px', fontWeight: 500, letterSpacing: '2px', color: COLOR.text, margin: 0, fontFamily: FONT_SANS },
-  brandSub: { fontSize: '11px', color: COLOR.textMuted, margin: '2px 0 0 0', letterSpacing: '0.5px', fontWeight: 400 },
-  pocBadge: { padding: '6px 14px', border: `1px solid ${COLOR.text}`, borderRadius: '20px', fontSize: '10px', letterSpacing: '2px', fontWeight: 500, color: COLOR.text, background: 'transparent', textTransform: 'uppercase' },
-  main: { flex: 1, maxWidth: '1200px', width: '100%', margin: '0 auto', padding: '80px 48px 64px 48px', boxSizing: 'border-box', transition: 'filter 0.35s ease, opacity 0.35s ease' },
-  mainBlurred: { filter: 'blur(8px)', opacity: 0.35, pointerEvents: 'none' },
-  intro: { marginBottom: '64px', textAlign: 'center', maxWidth: '600px', margin: '0 auto 64px auto' },
-  introTitle: { fontSize: '52px', fontWeight: 400, letterSpacing: '-1px', color: COLOR.text, margin: '0 0 16px 0', lineHeight: 1.1, fontFamily: FONT_SERIF, fontStyle: 'italic' },
-  introText: { fontSize: '16px', color: COLOR.textSoft, margin: 0, lineHeight: 1.6, fontWeight: 400, letterSpacing: '0.1px' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px', maxWidth: '1100px', margin: '0 auto' },
-  card: { background: COLOR.cardBg, border: 'none', borderRadius: '16px', padding: '40px 24px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', minHeight: '200px', position: 'relative', overflow: 'hidden', transition: 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.35s ease, background 0.35s ease', boxShadow: `0 4px 12px ${COLOR.shadow}, 0 12px 32px ${COLOR.shadowMd}`, fontFamily: FONT_SANS, color: COLOR.cardText, outline: 'none' },
-  cardHover: { transform: 'translateY(-8px) scale(1.015)', background: COLOR.cardBgHover, boxShadow: `0 8px 20px ${COLOR.shadowMd}, 0 28px 60px ${COLOR.shadowLg}` },
-  cardShine: { position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 45%, rgba(255,255,255,0) 100%)', pointerEvents: 'none' },
-  cardLabel: { fontSize: '24px', fontWeight: 400, color: COLOR.cardText, margin: 0, letterSpacing: '-0.5px', lineHeight: 1.2, position: 'relative', zIndex: 1, fontFamily: FONT_SERIF, fontStyle: 'italic' },
-  footer: { padding: '32px 48px', textAlign: 'center', borderTop: `1px solid ${COLOR.borderSoft}`, background: COLOR.bg, transition: 'filter 0.35s ease, opacity 0.35s ease' },
-  footerBlurred: { filter: 'blur(8px)', opacity: 0.35 },
-  footerText: { fontSize: '12px', color: COLOR.textMuted, margin: 0, letterSpacing: '0.3px', fontWeight: 400 },
-  modalBackdrop: { position: 'fixed', inset: 0, background: 'rgba(26, 22, 18, 0.4)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' },
-  modal: { background: COLOR.surface, borderRadius: '20px', width: '100%', maxWidth: '600px', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: `0 40px 120px ${COLOR.shadowDeep}, 0 0 0 1px ${COLOR.borderSoft}`, overflow: 'hidden' },
-  modalHeader: { padding: '20px 20px 0 20px', position: 'relative' },
-  modalCardPreview: { background: COLOR.cardBg, borderRadius: '14px', padding: '40px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 12px 32px ${COLOR.shadowMd}`, position: 'relative', overflow: 'hidden' },
-  modalCardShine: { position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 50%)', pointerEvents: 'none' },
-  modalCardLabel: { fontSize: '28px', fontWeight: 400, color: COLOR.cardText, margin: 0, letterSpacing: '-0.5px', textAlign: 'center', fontFamily: FONT_SERIF, fontStyle: 'italic', position: 'relative', zIndex: 1 },
-  modalClose: { position: 'absolute', top: '30px', right: '30px', background: 'rgba(255, 255, 255, 0.12)', border: '1px solid rgba(255, 255, 255, 0.25)', fontSize: '20px', color: COLOR.cardText, cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1, zIndex: 2, fontFamily: FONT_SANS },
-  modalDescription: { padding: '24px 32px 8px 32px', fontSize: '15px', color: COLOR.textSoft, margin: 0, lineHeight: 1.6, fontStyle: 'italic', fontFamily: FONT_SERIF, fontWeight: 400, letterSpacing: '0.2px' },
-  modalBody: { padding: '16px 32px 32px 32px', overflowY: 'auto', flex: 1 },
-  searchInput: { width: '100%', padding: '14px 18px', fontSize: '14px', border: `1px solid ${COLOR.border}`, borderRadius: '12px', background: COLOR.surfaceSoft, color: COLOR.text, outline: 'none', fontFamily: FONT_SANS, marginBottom: '16px', boxSizing: 'border-box', transition: 'border-color 0.2s ease, background 0.2s ease', letterSpacing: '0.1px' },
-  emptyState: { padding: '40px 20px', textAlign: 'center' },
-  emptyText: { fontSize: '14px', color: COLOR.textSoft, margin: '0 0 8px 0', fontWeight: 500, letterSpacing: '0.1px' },
-  emptyHint: { fontSize: '13px', color: COLOR.textMuted, margin: 0, fontStyle: 'italic', fontFamily: FONT_SERIF },
-  resultsList: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  resultRow: { background: COLOR.surface, border: `1px solid ${COLOR.borderSoft}`, borderRadius: '10px', padding: '14px 18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', transition: 'background 0.15s ease, border-color 0.15s ease, transform 0.15s ease', fontFamily: FONT_SANS, textAlign: 'left', color: COLOR.text, width: '100%' },
-  resultRowHover: { background: COLOR.surfaceSoft, borderColor: COLOR.text, transform: 'translateX(2px)' },
-  resultRowLoading: { background: COLOR.bg, borderColor: COLOR.textMuted, cursor: 'wait', opacity: 0.6 },
-  resultRowDisabled: { opacity: 0.4, cursor: 'not-allowed' },
-  resultMain: { width: '100%' },
-  resultName: { fontSize: '15px', fontWeight: 500, color: COLOR.text, margin: 0, letterSpacing: '0.1px' },
-  resultMeta: { fontSize: '12px', color: COLOR.textMuted, margin: '3px 0 0 0', letterSpacing: '0.2px' },
-  resultEmail: { fontSize: '11px', color: COLOR.textFaint, margin: 0, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '0.2px' },
+function AccountPicker({
+  group, search, setSearch, searchInputRef,
+  visibleAccounts, loggingIn, onSelect, onClose,
+}: {
+  group: Group
+  search: string
+  setSearch: (v: string) => void
+  searchInputRef: React.RefObject<HTMLInputElement>
+  visibleAccounts: Account[]
+  loggingIn: string | null
+  onSelect: (a: Account) => void
+  onClose: () => void
+}) {
+  return (
+    <div className="la-dim" onClick={onClose}>
+      <div
+        className="la-modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 620, padding: 0 }}
+      >
+        {/* Ink header — matches the role card */}
+        <div style={{
+          position: 'relative',
+          background: 'var(--ink)', color: 'var(--ink-text)',
+          padding: '28px 32px 26px',
+          borderRadius: '16px 16px 0 0',
+        }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '.14em',
+            textTransform: 'uppercase', color: 'var(--gold)',
+          }}>
+            {group.tagline}
+          </span>
+          <div style={{
+            marginTop: 8,
+            fontFamily: 'var(--font-display)', fontStyle: 'italic',
+            fontSize: 30, fontWeight: 600, lineHeight: 1.1,
+          }}>
+            {group.label}
+          </div>
+          <p style={{
+            margin: '14px 0 0',
+            fontSize: 13, lineHeight: 1.6, opacity: 0.72,
+            maxWidth: 480,
+          }}>
+            {group.description}
+          </p>
+
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              position: 'absolute', top: 20, right: 20,
+              width: 32, height: 32, borderRadius: 99,
+              background: 'rgba(244, 238, 223, .12)',
+              border: '1px solid rgba(244, 238, 223, .25)',
+              color: 'var(--ink-text)',
+              fontSize: 16, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 0, fontFamily: 'var(--font-sans)',
+            }}
+          >×</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '20px 26px 26px' }}>
+          <div className="la-search" style={{ maxWidth: 'none', marginBottom: 14 }}>
+            <span style={{ color: 'var(--text-tertiary)', fontSize: 14 }}>⌕</span>
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, cluster, or role…"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                style={{
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-sans)',
+                }}
+              >Clear</button>
+            )}
+          </div>
+
+          {visibleAccounts.length === 0 ? (
+            <div style={{
+              padding: '32px 20px', textAlign: 'center',
+              color: 'var(--text-tertiary)', fontSize: 13,
+            }}>
+              No accounts match "{search}".
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex', flexDirection: 'column', gap: 6,
+              maxHeight: '52vh', overflowY: 'auto',
+              paddingRight: 4,
+            }}>
+              {visibleAccounts.map(account => (
+                <AccountRow
+                  key={account.email}
+                  account={account}
+                  loading={loggingIn === account.email}
+                  disabled={loggingIn !== null && loggingIn !== account.email}
+                  onClick={() => onSelect(account)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AccountRow({
+  account, loading, disabled, onClick,
+}: {
+  account: Account
+  loading: boolean
+  disabled: boolean
+  onClick: () => void
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || loading}
+      onMouseDown={(e) => e.preventDefault()}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '12px 14px', borderRadius: 10,
+        background: hover && !disabled && !loading ? 'var(--surface-raised)' : 'var(--surface)',
+        border: `1px solid ${hover && !disabled && !loading ? 'var(--gold)' : 'var(--border)'}`,
+        cursor: disabled ? 'not-allowed' : loading ? 'wait' : 'pointer',
+        opacity: disabled ? 0.4 : loading ? 0.6 : 1,
+        textAlign: 'left', width: '100%',
+        transition: 'all .15s ease',
+        fontFamily: 'var(--font-sans)',
+      }}
+    >
+      <Avatar initials={initialsOf(account.name)} size={34} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 14, fontWeight: 600, color: 'var(--text-primary)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {loading ? 'Signing in…' : account.name}
+        </div>
+        <div style={{
+          marginTop: 2, fontSize: 11.5, color: 'var(--text-tertiary)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {roleDisplayName(account.role_code)}
+          {account.sub_group && <> · {account.sub_group}</>}
+        </div>
+      </div>
+      <div style={{
+        fontFamily: 'var(--font-mono)', fontSize: 10.5,
+        color: 'var(--text-tertiary)',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        maxWidth: 200,
+      }}>
+        {account.email}
+      </div>
+    </button>
+  )
 }

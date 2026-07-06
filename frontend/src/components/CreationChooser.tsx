@@ -1,21 +1,22 @@
-﻿'use client';
+'use client';
 
 /**
- * LAURA - CreationChooser
- *
- * Modal opened from "+ New LOA" or from the sidebar's "Ask Laura" item.
- * Three paths: Start blank, Ask Laura (precedent search), Browse past.
+ * LAURA — CreationChooser · Editorial Finance redesign.
+ * -----------------------------------------------------
+ * Modal opened from "+ New LOA". Visual layer rebuilt on redesign.css.
+ * ALL logic preserved verbatim:
+ *   - POST /templates/search  { brief, limit }
+ *   - POST /loa/{id}/duplicate
+ *   - start blank → /loa/new
+ *   - browse → /past-campaigns
+ *   - initialStep sync (chooser | ask-laura)
  */
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import api from '@/lib/api';
-import { color, font, type, space, radius, motion } from '@/styles/tokens';
-
-/* ------------------------------------------------------------------ */
-/* Types                                                              */
-/* ------------------------------------------------------------------ */
+import { Pill, Btn, Overline } from '@/components/ui/atoms';
 
 interface TemplateMatch {
   id: string;
@@ -33,15 +34,10 @@ interface TemplateMatch {
 interface CreationChooserProps {
   open: boolean;
   onClose: () => void;
-  /** Lets the sidebar open the modal directly on the Ask Laura step. */
   initialStep?: 'chooser' | 'ask-laura';
 }
 
 type Step = 'chooser' | 'ask-laura';
-
-/* ------------------------------------------------------------------ */
-/* Component                                                          */
-/* ------------------------------------------------------------------ */
 
 export default function CreationChooser({
   open, onClose, initialStep = 'chooser',
@@ -53,10 +49,17 @@ export default function CreationChooser({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /* Sync external initialStep when the modal opens. */
   useEffect(() => {
     if (open) setStep(initialStep);
   }, [open, initialStep]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 
@@ -98,36 +101,20 @@ export default function CreationChooser({
     }
   };
 
-  const overlay: React.CSSProperties = {
-    position: 'fixed',
-    inset: 0,
-    background: 'rgba(22, 20, 18, 0.36)',
-    backdropFilter: 'blur(4px)',
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    paddingTop: 80,
-    zIndex: 1000,
-    fontFamily: font.sans,
-  };
-
-  const sheet: React.CSSProperties = {
-    width: 'min(880px, calc(100vw - 32px))',
-    background: color.bg.surface,
-    borderRadius: radius.card,
-    border: `1px solid ${color.border.soft}`,
-    padding: `${space[8]}px ${space[8]}px ${space[6]}px`,
-    maxHeight: 'calc(100vh - 120px)',
-    overflowY: 'auto',
-  };
-
   return (
-    <div style={overlay} onClick={close}>
-      <div style={sheet} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <div className="la-dim" onClick={close}>
+      <div
+        className="la-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog" aria-modal="true"
+        style={{ maxWidth: step === 'ask-laura' ? 720 : 640 }}
+      >
         {step === 'chooser' ? (
           <ChooserStep
+            brief={brief}
+            onBrief={setBrief}
+            onGenerate={() => { setStep('ask-laura'); search(); }}
             onBlank={startBlank}
-            onAsk={() => setStep('ask-laura')}
             onBrowse={browse}
             onClose={close}
           />
@@ -148,103 +135,126 @@ export default function CreationChooser({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* ChooserStep                                                        */
-/* ------------------------------------------------------------------ */
+/* ─────────────────────── Chooser step ─────────────────────── */
 
-function ChooserStep({ onBlank, onAsk, onBrowse, onClose }: {
-  onBlank: () => void; onAsk: () => void; onBrowse: () => void; onClose: () => void;
+function ChooserStep({
+  brief, onBrief, onGenerate, onBlank, onBrowse, onClose,
+}: {
+  brief: string;
+  onBrief: (s: string) => void;
+  onGenerate: () => void;
+  onBlank: () => void;
+  onBrowse: () => void;
+  onClose: () => void;
 }) {
   return (
     <>
-      <header style={{ marginBottom: space[6] }}>
-        <h1 style={{
-          fontSize: type.display.size, lineHeight: `${type.display.line}px`,
-          fontWeight: type.display.weight, color: color.text.primary, margin: 0,
-        }}>New LOA</h1>
-        <p style={{
-          fontSize: type.body.size, lineHeight: `${type.body.line}px`,
-          color: color.text.secondary, margin: `${space[2]}px 0 0`,
-        }}>
-          Create a marketing investment request from scratch, with Laura, or from a past campaign in your cluster.
-        </p>
-      </header>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
+        <div>
+          <h1 style={{
+            margin: 0, fontFamily: 'var(--font-display)',
+            fontSize: 30, fontWeight: 600, color: 'var(--text-primary)',
+          }}>Start a new LOA</h1>
+          <p style={{ margin: '6px 0 0', fontSize: 13.5, color: 'var(--text-secondary)' }}>
+            Describe it to Laura — or start from scratch, or from a past campaign.
+          </p>
+        </div>
+        <button className="la-x" onClick={onClose} aria-label="Close">✕</button>
+      </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: space[3] }}>
-        <PathCard glyph="+" title="Start blank"
-          body="Begin with an empty draft and fill every field manually."
-          bestFor="New concepts, sensitive budgets, or requests without precedent."
-          cta="Start blank" onClick={onBlank} />
-        <PathCard glyph="✦" title="Ask Laura"
-          body="Describe the activity. Laura finds the closest approved precedent and seeds the draft."
-          bestFor="Campaigns similar to prior activations."
-          cta="Describe brief" recommended onClick={onAsk} />
-        <PathCard glyph="▦" title="Browse past campaigns"
-          body="Search historical LOAs from your cluster and use one as a template."
-          bestFor="Inspiration, benchmarking, and local reuse."
-          cta="Open explorer" onClick={onBrowse} />
+      {/* Ask Laura — recommended box */}
+      <div className="la-briefbox">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <span style={{ fontSize: 15, color: 'var(--gold)' }}>✦</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Ask Laura</span>
+          <span style={{
+            fontSize: 9.5, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase',
+            padding: '2px 8px', borderRadius: 99,
+            background: 'var(--gold-soft)', color: 'var(--gold)',
+          }}>★ Recommended</span>
+        </div>
+
+        <textarea
+          value={brief}
+          onChange={(e) => onBrief(e.target.value)}
+          maxLength={700}
+          rows={2}
+          placeholder="e.g. Ray-Ban in-store activation in France, ~€80k, Q3 — permanent displays in 15 doors…"
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && brief.trim()) onGenerate();
+          }}
+          className="la-input"
+          style={{
+            height: 'auto', padding: '10px 12px', resize: 'vertical',
+            fontSize: 13.5, lineHeight: 1.5,
+          }}
+        />
+
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginTop: 12,
+        }}>
+          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+            Laura finds the closest approved precedent and seeds your draft.
+          </span>
+          <Btn variant="primary" small onClick={onGenerate} disabled={!brief.trim()}>
+            ✦ Generate draft
+          </Btn>
+        </div>
+      </div>
+
+      {/* Secondary options */}
+      <div style={{
+        marginTop: 22, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16,
+      }} className="la-modal-grid">
+        <SecondaryOption
+          title="Start blank"
+          body="Empty draft, every field manual. Best for new concepts or sensitive budgets."
+          cta="Start blank →"
+          onClick={onBlank}
+        />
+        <SecondaryOption
+          title="Browse past campaigns"
+          body="Use a historical LOA from your cluster as a template."
+          cta="Open explorer →"
+          onClick={onBrowse}
+        />
       </div>
 
       <footer style={{
-        marginTop: space[6], display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        fontSize: type.small.size, color: color.text.tertiary,
+        marginTop: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        fontSize: 12, color: 'var(--text-tertiary)',
       }}>
-        <span>Historical LOAs may contain legacy values. Laura sanitizes fields before creating your draft.</span>
-        <button onClick={onClose} style={textButtonStyle}>Cancel</button>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ opacity: 0.6 }}>♡</span>
+          Historical LOAs may contain legacy values. Laura sanitizes fields before creating your draft.
+        </span>
+        <button onClick={onClose} className="la-link">Cancel</button>
       </footer>
     </>
   );
 }
 
-function PathCard({ glyph, title, body, bestFor, cta, recommended, onClick }: {
-  glyph: string; title: string; body: string; bestFor: string; cta: string;
-  recommended?: boolean; onClick: () => void;
+function SecondaryOption({ title, body, cta, onClick }: {
+  title: string; body: string; cta: string; onClick: () => void;
 }) {
-  const [hover, setHover] = useState(false);
   return (
-    <div onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+    <button
+      onClick={onClick}
+      className="la-option"
       style={{
-        position: 'relative',
-        background: recommended ? color.bg.tint : color.bg.surface,
-        border: `1px solid ${recommended ? color.border.strong : color.border.soft}`,
-        borderRadius: radius.card,
-        padding: `${space[5]}px ${space[5]}px ${space[4]}px`,
-        cursor: 'pointer',
-        transform: hover ? 'translateY(-2px)' : 'translateY(0)',
-        transition: `transform ${motion.duration.quick}ms ${motion.easing}`,
-      }}>
-      {recommended && (
-        <span style={{
-          position: 'absolute', top: space[3], right: space[3],
-          fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
-          padding: '2px 8px', borderRadius: radius.pill,
-          background: color.action.primary, color: color.text.onPrimary,
-        }}>Recommended</span>
-      )}
-      <div style={{ fontSize: 26, lineHeight: 1, color: color.action.primary, marginBottom: space[3] }}>{glyph}</div>
-      <h2 style={{
-        fontSize: type.h2.size, lineHeight: `${type.h2.line}px`,
-        fontWeight: type.h2.weight, color: color.text.primary, margin: 0,
-      }}>{title}</h2>
-      <p style={{
-        fontSize: type.body.size, lineHeight: `${type.body.line}px`,
-        color: color.text.secondary, margin: `${space[2]}px 0 ${space[4]}px`,
-      }}>{body}</p>
-      <p style={{ fontSize: type.small.size, color: color.text.tertiary, margin: 0 }}>
-        <span style={{ fontWeight: type.bodyStrong.weight, color: color.text.secondary }}>Best for </span>
-        {bestFor}
-      </p>
-      <div style={{
-        marginTop: space[5], display: 'flex', alignItems: 'center', gap: space[2],
-        fontSize: type.body.size, fontWeight: type.bodyStrong.weight, color: color.action.primary,
-      }}>{cta} <span aria-hidden>→</span></div>
-    </div>
+        flexDirection: 'column', alignItems: 'flex-start',
+        padding: '16px 18px', gap: 8, textAlign: 'left',
+      }}
+    >
+      <span style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
+      <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{body}</span>
+      <span style={{ marginTop: 4, fontSize: 12.5, fontWeight: 600, color: 'var(--gold)' }}>{cta}</span>
+    </button>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* AskLauraStep                                                       */
-/* ------------------------------------------------------------------ */
+/* ─────────────────────── Ask Laura step (results) ─────────────────────── */
 
 function AskLauraStep({
   brief, onBrief, onSearch, onBack, matches, busy, error, onUse,
@@ -255,68 +265,63 @@ function AskLauraStep({
 }) {
   return (
     <>
-      <header style={{ marginBottom: space[5] }}>
-        <button onClick={onBack} style={{ ...textButtonStyle, marginBottom: space[2], padding: 0 }}>
+      <div style={{ marginBottom: 18 }}>
+        <button onClick={onBack} className="la-link" style={{ marginBottom: 10, fontSize: 12.5 }}>
           ← Back
         </button>
         <h1 style={{
-          fontSize: type.h1.size, lineHeight: `${type.h1.line}px`,
-          fontWeight: type.h1.weight, color: color.text.primary, margin: 0,
+          margin: 0, fontFamily: 'var(--font-display)',
+          fontSize: 26, fontWeight: 600, color: 'var(--text-primary)',
         }}>Ask Laura</h1>
-        <p style={{
-          fontSize: type.body.size, color: color.text.secondary, margin: `${space[2]}px 0 0`,
-        }}>Describe the campaign. Laura searches approved LOAs available to your cluster.</p>
-      </header>
+        <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
+          Laura searches approved LOAs available to your cluster.
+        </p>
+      </div>
 
       <div style={{
-        border: `1px solid ${color.border.soft}`, borderRadius: radius.field,
-        padding: space[3], background: color.bg.surface,
+        border: '1px solid var(--border)', borderRadius: 12,
+        padding: 12, background: 'var(--surface)',
       }}>
-        <textarea value={brief} onChange={(e) => onBrief(e.target.value)} maxLength={700}
-          placeholder="Example: Ray-Ban summer retail visibility for sunglass specialists in Italy, including POS materials, window displays, and staff incentives."
-          rows={3}
-          style={{
-            width: '100%', border: 'none', outline: 'none', resize: 'vertical',
-            fontFamily: font.sans, fontSize: type.body.size, lineHeight: `${type.body.line}px`,
-            color: color.text.primary, background: 'transparent',
-          }} />
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: space[2],
-        }}>
-          <span style={{
-            fontFamily: font.mono, fontSize: type.monoSmall.size, color: color.text.tertiary,
-          }}>{brief.length} / 700</span>
-          <button onClick={onSearch} disabled={busy || !brief.trim()} style={primaryButtonStyle(busy || !brief.trim())}>
-            {busy ? 'Searching...' : 'Find similar campaigns'}
-          </button>
+        <textarea
+          value={brief}
+          onChange={(e) => onBrief(e.target.value)}
+          maxLength={700}
+          rows={2}
+          placeholder="Describe the campaign…"
+          className="la-input"
+          style={{ height: 'auto', padding: '8px 10px', resize: 'vertical', fontSize: 13.5, lineHeight: 1.5, border: 'none' }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)' }}>
+            {brief.length} / 700
+          </span>
+          <Btn variant="primary" small onClick={onSearch} disabled={busy || !brief.trim()}>
+            {busy ? 'Searching…' : 'Find similar campaigns'}
+          </Btn>
         </div>
       </div>
 
       {error && (
         <div style={{
-          marginTop: space[4], padding: space[3], borderRadius: radius.field,
-          background: color.status.dangerBg, color: color.status.danger, fontSize: type.small.size,
+          marginTop: 16, padding: '10px 12px', borderRadius: 8,
+          background: 'var(--st-rejected-bg)', color: 'var(--st-rejected-fg)', fontSize: 12.5,
         }}>{error}</div>
       )}
 
       {matches && (
-        <div style={{ marginTop: space[5] }}>
-          <p style={{
-            fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase',
-            fontWeight: type.bodyStrong.weight, color: color.text.tertiary,
-            margin: `0 0 ${space[3]}px`,
-          }}>
+        <div style={{ marginTop: 20 }}>
+          <Overline style={{ marginBottom: 12 }}>
             {matches.length > 0
               ? `${matches.length} precedent${matches.length === 1 ? '' : 's'} found`
               : 'No strong precedent in your cluster'}
-          </p>
+          </Overline>
           {matches.length === 0 ? (
             <div style={{
-              padding: space[5], border: `1px solid ${color.border.soft}`, borderRadius: radius.field,
-              background: color.bg.subtle, color: color.text.secondary, fontSize: type.body.size,
+              padding: 18, border: '1px solid var(--border)', borderRadius: 10,
+              background: 'var(--surface-sunken)', color: 'var(--text-secondary)', fontSize: 13,
             }}>Try broader wording, or start blank.</div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {matches.map((m) => (
                 <MatchCard key={m.id} match={m} onUse={() => onUse(m.id)} disabled={busy} />
               ))}
@@ -330,74 +335,50 @@ function AskLauraStep({
 
 function MatchCard({ match, onUse, disabled }: { match: TemplateMatch; onUse: () => void; disabled: boolean }) {
   const scoreColor =
-    match.match_score >= 90 ? color.status.success
-    : match.match_score >= 75 ? color.accent.gold
-    : color.status.warning;
+    match.match_score >= 90 ? 'var(--st-approved-fg)'
+    : match.match_score >= 75 ? 'var(--gold)'
+    : 'var(--st-wait-fg)';
 
   const meta = [
     match.country, match.brand, match.activity_type,
-    `FY ${new Date().getFullYear()}`,
     formatMoney(match.budget_total), titleCase(match.status),
   ].filter(Boolean).join(' · ');
 
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: space[4],
-      padding: space[4], border: `1px solid ${color.border.soft}`,
-      borderRadius: radius.field, background: color.bg.surface, alignItems: 'center',
+      display: 'grid', gridTemplateColumns: '58px 1fr auto', gap: 14,
+      padding: 14, border: '1px solid var(--border)',
+      borderRadius: 10, background: 'var(--surface)', alignItems: 'center',
     }}>
       <div style={{ textAlign: 'center' }}>
         <div style={{
-          fontFamily: font.mono, fontSize: type.monoMatch.size,
-          lineHeight: `${type.monoMatch.line}px`, fontWeight: type.monoMatch.weight,
-          color: scoreColor,
+          fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700,
+          color: scoreColor, lineHeight: 1,
         }}>{match.match_score}</div>
         <div style={{
-          fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
-          color: color.text.tertiary, marginTop: 2,
+          fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase',
+          color: 'var(--text-tertiary)', marginTop: 3,
         }}>Match</div>
       </div>
       <div style={{ minWidth: 0 }}>
         <p style={{
-          margin: 0, fontSize: type.bodyStrong.size, fontWeight: type.bodyStrong.weight,
-          color: color.text.primary,
+          margin: 0, fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{match.title}</p>
-        <p style={{
-          margin: `${space[1]}px 0 ${space[2]}px`,
-          fontSize: type.small.size, color: color.text.secondary,
-        }}>{meta}</p>
+        <p style={{ margin: '3px 0 8px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{meta}</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {match.matched_on.map((tag) => (
             <span key={tag} style={{
-              fontSize: 10, padding: '2px 8px', borderRadius: radius.pill,
-              background: color.bg.tint, color: color.action.primary, textTransform: 'capitalize',
+              fontSize: 10, padding: '2px 8px', borderRadius: 99,
+              background: 'var(--gold-soft)', color: 'var(--gold)', textTransform: 'capitalize',
             }}>{tag}</span>
           ))}
         </div>
       </div>
-      <button onClick={onUse} disabled={disabled} style={primaryButtonStyle(disabled)}>Use as template</button>
+      <Btn variant="primary" small onClick={onUse} disabled={disabled}>Use as template</Btn>
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/* Shared button styles + formatters                                  */
-/* ------------------------------------------------------------------ */
-
-function primaryButtonStyle(disabled: boolean): React.CSSProperties {
-  return {
-    background: disabled ? color.border.strong : color.action.primary,
-    color: color.text.onPrimary, border: 'none', borderRadius: radius.field,
-    padding: '10px 16px', fontSize: type.body.size, fontWeight: type.bodyStrong.weight,
-    fontFamily: font.sans, cursor: disabled ? 'not-allowed' : 'pointer',
-  };
-}
-
-const textButtonStyle: React.CSSProperties = {
-  background: 'transparent', border: 'none', color: color.text.secondary,
-  fontSize: type.small.size, fontFamily: font.sans, cursor: 'pointer',
-};
 
 function formatMoney(n: number): string {
   if (!n) return '—';
@@ -408,4 +389,3 @@ function formatMoney(n: number): string {
 function titleCase(s: string): string {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
-

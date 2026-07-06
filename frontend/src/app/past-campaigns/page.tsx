@@ -20,6 +20,7 @@ import { useRouter } from 'next/navigation';
 
 import api from '@/lib/api';
 import StatusBadge from '@/components/StatusBadge';
+import LauraPicks from '@/components/LauraPicks';
 import { color, font, motion, radius, space } from '@/styles/tokens';
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
@@ -251,6 +252,10 @@ export default function PastCampaignsPage() {
         )}
 
         {/* ─── Archive table ─── */}
+        {!loading && templates.length > 0 && (
+          <LauraPicks templates={templates} onUse={useTemplate} viewerCluster={scope.value} disabled={duplicating} />
+        )}
+
         {!loading && templates.length === 0 ? (
           <EmptyState />
         ) : (

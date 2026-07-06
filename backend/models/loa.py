@@ -21,7 +21,7 @@ from backend.models.database import Base
 class LOAStatus(str, enum.Enum):
     DRAFT                   = "draft"                    # author creates the LOA
     EMEA_REVIEW             = "emea_review"              # EMEA PS reviews XLS & PPT
-    GLOBAL_REVIEW           = "global_review"            # Global Brands pre-validate (comment)
+    GLOBAL_BRAND_REVIEW           = "global_brand_review"            # Global Brands pre-validate (comment)
     CMO_CFO_REVIEW          = "cmo_cfo_review"           # Alexandra OR Giulia validates
     GLOBAL_FUNCTIONS_REVIEW = "global_functions_review"  # PR/Medical/Trade comment, EMEA PS advances
     CORPORATE_REVIEW        = "corporate_review"         # Paola + Diana — final gate

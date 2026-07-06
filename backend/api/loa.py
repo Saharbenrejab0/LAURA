@@ -33,6 +33,18 @@ import shutil
 
 from backend.models.database import get_db
 from backend.models.loa import LOA, LOAStatus
+
+
+# Where does a LOA go when rejected at each step?
+REJECT_DESTINATIONS = {
+    "emea_review":              "draft",                # back to marketer
+    "global_brand_review":      "emea_review",          # EMEA fixes brand feedback
+    "emea_brand_rework":        "draft",                # EMEA sends back to marketer
+    "global_functions_review":  "emea_brand_rework",    # EMEA fixes functions feedback
+    "emea_functions_rework":    "draft",                # EMEA sends back to marketer
+    "cmo_cfo_review":           "emea_functions_rework", # EMEA handles CMO/CFO feedback
+    "corporate_review":         "emea_functions_rework", # EMEA handles corporate feedback
+}
 from backend.models.permission import Permission, implies
 from backend.models.role_permission import RolePermission
 from backend.reference_data import (
@@ -218,8 +230,8 @@ class SuggestRequest(BaseModel):
 
 # ── Workflow state machine ──────────────────────────────────────────────
 WORKFLOW_TRANSITIONS = {
-    "emea_review":             "global_review",
-    "global_review":           "cmo_cfo_review",
+    "emea_review":             "global_brand_review",
+    "global_brand_review":           "cmo_cfo_review",
     "cmo_cfo_review":          "global_functions_review",
     "global_functions_review": "corporate_review",
     "corporate_review":        "approved",
@@ -228,7 +240,7 @@ WORKFLOW_TRANSITIONS = {
 VALIDATION_STATUSES = {"cmo_cfo_review", "corporate_review"}
 
 ADVANCE_PHASE_STATUSES = {
-    "emea_review", "global_review", "global_functions_review",
+    "emea_review", "global_brand_review", "global_functions_review",
 }
 
 
@@ -317,7 +329,7 @@ def _has_reviewer_for_step(loa: LOA, target_status: str, db: Session) -> bool:
 
 
 # Status steps that we may skip if no reviewer is available
-SKIPPABLE_STATUSES = {"global_review", "global_functions_review"}
+SKIPPABLE_STATUSES = {"global_brand_review", "global_functions_review"}
 
 
 def _resolve_next_status(loa: LOA, current_status: str, db: Session) -> tuple[str, list[str]]:
@@ -792,7 +804,7 @@ async def reject_loa(
     _check_workflow_permission(user, loa, db)
 
     previous_status = loa.status
-    loa.status = "rejected"
+    loa.status = REJECT_DESTINATIONS.get(loa.status, "draft")
     loa.rejection_reason = reason.strip()
     loa.cmo_approved = False
     loa.cfo_approved = False

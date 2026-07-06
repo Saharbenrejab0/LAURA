@@ -1,0 +1,374 @@
+/* ================================================================
+   LAURA — Editorial Finance Redesign · Foundation (Phase 1)
+   ----------------------------------------------------------------
+   Additive stylesheet. Import AFTER theme.css in app/layout.tsx:
+     import '@/styles/redesign.css'
+
+   Theme switching: variables respond to [data-theme="dark"] on
+   <html> or <body>. Light is the default (no attribute needed).
+
+   Naming: all variables are unprefixed (--canvas, --gold, --st-*)
+   and all classes are .la-* so nothing collides with legacy styles.
+   ================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ------------------------------ LIGHT ----------------------------- */
+:root {
+  --canvas: #F6F4EF;
+  --surface: #FFFFFF;
+  --surface-raised: #FDFBF7;
+  --surface-sunken: #F0EDE6;
+  --border: #E4DFD5;
+  --border-strong: #CFC8B8;
+  --text-primary: #1A1815;
+  --text-secondary: #6B6558;
+  --text-tertiary: #9A9284;
+  --gold: #B08D2F;
+  --gold-soft: #EFE3C2;
+  --ink: #1A1815;
+  --ink-text: #F6F4EF;
+  --dim: rgba(26, 24, 21, .45);
+  --shadow-sm: 0 1px 2px rgba(26, 24, 21, .06);
+  --shadow-md: 0 4px 16px rgba(26, 24, 21, .08);
+  --shadow-lg: 0 16px 48px rgba(26, 24, 21, .16);
+
+  /* Status semantic families */
+  --st-draft-bg: #E9EBEF;    --st-draft-fg: #333B4D;
+  --st-review-bg: #DCE8F7;   --st-review-fg: #123C6B;
+  --st-wait-bg: #F3E8CC;     --st-wait-fg: #5C4508;
+  --st-rework-bg: #F6E2D2;   --st-rework-fg: #6B3410;
+  --st-decision-bg: #E7E0F2; --st-decision-fg: #3A2A5E;
+  --st-approved-bg: #DEF7ED; --st-approved-fg: #0B653F;
+  --st-rejected-bg: #F7DEDE; --st-rejected-fg: #650B0B;
+  --st-warn-bg: #F6E2D2;     --st-warn-fg: #6B3410;
+
+  /* Font stacks */
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'SFMono-Regular', monospace;
+}
+
+/* ------------------------------ DARK ------------------------------ */
+[data-theme="dark"] {
+  --canvas: #0E0D0B;
+  --surface: #16150F;
+  --surface-raised: #1E1C16;
+  --surface-sunken: #100F0C;
+  --border: #2A2822;
+  --border-strong: #3A362D;
+  --text-primary: #F4EEDF;
+  --text-secondary: #A9A290;
+  --text-tertiary: #726C5D;
+  --gold: #D9B968;
+  --gold-soft: #3A2F17;
+  --ink: #F4EEDF;
+  --ink-text: #141310;
+  --dim: rgba(0, 0, 0, .6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, .5);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, .65);
+
+  --st-draft-bg: #2B2F38;    --st-draft-fg: #C4CBDB;
+  --st-review-bg: #1A2C42;   --st-review-fg: #A9C8EE;
+  --st-wait-bg: #3A3113;     --st-wait-fg: #E4CD8B;
+  --st-rework-bg: #3D2513;   --st-rework-fg: #EBB98D;
+  --st-decision-bg: #2C2440; --st-decision-fg: #CBBCE8;
+  --st-approved-bg: #1A4D37; --st-approved-fg: #B3E6D0;
+  --st-rejected-bg: #4D1A1A; --st-rejected-fg: #E6B3B3;
+  --st-warn-bg: #3D2513;     --st-warn-fg: #EBB98D;
+}
+
+/* ============================ UTILITIES ============================ */
+
+/* Page container */
+.la-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 26px 28px 48px;
+}
+
+/* Fade-in on view mount */
+.la-fade { animation: laFade .22s ease; }
+@keyframes laFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* --------------------------- Navigation --------------------------- */
+.la-nav {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border-radius: 8px;
+  font-size: 13.5px; font-weight: 500; color: var(--text-secondary);
+  transition: all .15s ease; text-align: left;
+  background: transparent; border: none; cursor: pointer;
+  font-family: var(--font-sans);
+}
+.la-nav:hover { background: var(--surface-raised); color: var(--text-primary); }
+.la-nav-on {
+  background: var(--surface); color: var(--text-primary); font-weight: 600;
+  box-shadow: var(--shadow-sm); border: 1px solid var(--border);
+}
+
+.la-seg { transition: all .15s ease; border: none; cursor: pointer; font-family: var(--font-sans); }
+
+.la-profile {
+  background: transparent; border: none; cursor: pointer; font-family: var(--font-sans);
+  border-radius: 8px;
+}
+.la-profile:hover { background: var(--surface-raised); }
+
+/* ----------------------------- Topbar ----------------------------- */
+.la-cmdk {
+  flex: 1; max-width: 460px; height: 34px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface); font-size: 13px;
+  transition: border-color .15s ease; cursor: pointer;
+  font-family: var(--font-sans);
+}
+.la-cmdk:hover { border-color: var(--border-strong); }
+
+/* ------------------------- Chips & filters ------------------------ */
+.la-chip {
+  display: inline-flex; align-items: center;
+  padding: 7px 14px; border-radius: 99px;
+  border: 1px solid var(--border-strong);
+  font-size: 13px; font-weight: 500;
+  background: var(--surface); color: var(--text-primary);
+  transition: all .15s ease; cursor: pointer;
+  font-family: var(--font-sans);
+}
+.la-chip:hover { border-color: var(--gold); }
+.la-chip-on { border-color: var(--gold); background: var(--gold-soft); font-weight: 600; }
+
+.la-filter {
+  display: inline-flex; align-items: center;
+  height: 34px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 12.5px; font-weight: 500;
+  color: var(--text-secondary); background: var(--surface);
+  transition: all .15s ease; cursor: pointer;
+  font-family: var(--font-sans);
+}
+.la-filter:hover { border-color: var(--border-strong); color: var(--text-primary); }
+
+.la-search {
+  display: flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface);
+  flex: 1; min-width: 200px; max-width: 380px;
+}
+.la-search input {
+  flex: 1; background: transparent; font-size: 13px;
+  border: none; outline: none; color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+.la-search:focus-within { border-color: var(--gold); }
+
+/* ------------------------------ Cards ------------------------------ */
+.la-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+.la-hover { transition: all .15s ease; cursor: pointer; }
+.la-hover:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+
+/* ------------------------------ Table ------------------------------ */
+.la-thead {
+  padding: 11px 20px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border);
+}
+.la-row {
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: background .15s ease;
+}
+.la-row:last-of-type { border-bottom: none; }
+.la-row:hover { background: var(--surface-raised); }
+
+/* Board card (kanban) */
+.la-boardcard {
+  display: flex; flex-direction: column; width: 100%;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px;
+  box-shadow: var(--shadow-sm); transition: all .15s ease;
+  cursor: pointer; font-family: var(--font-sans); color: var(--text-primary);
+}
+.la-boardcard:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); transform: translateY(-1px); }
+
+/* ------------------------------ Forms ------------------------------ */
+.la-input {
+  width: 100%; height: 38px; padding: 0 12px;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px; background: var(--surface);
+  font-size: 13.5px; color: var(--text-primary);
+  transition: border-color .15s ease;
+  font-family: var(--font-sans); outline: none;
+}
+.la-input:focus { border-color: var(--gold) !important; }
+.la-flabel {
+  font-size: 12.5px; font-weight: 600;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.la-checkitem {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 5px 6px; border-radius: 6px; font-size: 12.5px;
+  text-align: left; transition: background .15s ease;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-primary); font-family: var(--font-sans);
+}
+.la-checkitem:hover { background: var(--surface-raised); }
+.la-collapse {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 13px 16px; font-size: 13px; font-weight: 600;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-primary); font-family: var(--font-sans);
+}
+.la-collapse:hover { background: var(--surface-raised); }
+.la-photo {
+  border: 1px dashed var(--border-strong); border-radius: 8px;
+  height: 64px; font-size: 11px; color: var(--text-tertiary);
+  line-height: 1.6; transition: all .15s ease;
+  background: transparent; cursor: pointer; font-family: var(--font-sans);
+}
+.la-photo:hover { border-color: var(--gold); color: var(--text-secondary); }
+
+/* Section rail (form nav) */
+.la-secitem {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; font-size: 12.5px; font-weight: 500;
+  color: var(--text-tertiary); text-align: left;
+  transition: all .15s ease;
+  border: none; border-left: 2px solid transparent;
+  border-radius: 0 8px 8px 0;
+  background: transparent; cursor: pointer;
+  font-family: var(--font-sans);
+}
+.la-secitem:hover { color: var(--text-primary); background: var(--surface-raised); }
+.la-secitem-on { color: var(--text-primary); font-weight: 600; border-left-color: var(--gold); background: var(--surface); }
+
+/* Laura brief box (New LOA modal) */
+.la-briefbox {
+  margin-top: 22px; padding: 18px 20px;
+  border: 1px solid var(--gold); border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--gold), var(--shadow-md);
+}
+
+/* ------------------------------ Tabs ------------------------------- */
+.la-tab {
+  padding: 8px 14px; font-size: 13.5px; font-weight: 500;
+  color: var(--text-tertiary);
+  border: none; border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+  transition: all .15s ease; background: transparent; cursor: pointer;
+  font-family: var(--font-sans);
+}
+.la-tab:hover { color: var(--text-primary); }
+.la-tab-on { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--gold); }
+
+/* ----------------------------- Modals ------------------------------ */
+.la-dim {
+  position: fixed; inset: 0; background: var(--dim); z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; animation: laFade .18s ease;
+  backdrop-filter: blur(2px);
+}
+.la-modal {
+  width: 100%; max-width: 780px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border); border-radius: 16px;
+  padding: 30px 32px 24px;
+  box-shadow: var(--shadow-lg);
+  max-height: 92vh; overflow: auto;
+}
+.la-option {
+  position: relative; display: flex;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface); transition: all .15s ease;
+  cursor: pointer; font-family: var(--font-sans); color: var(--text-primary);
+}
+.la-option:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+
+.la-x {
+  width: 30px; height: 30px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-secondary); cursor: pointer; font-size: 13px;
+  transition: all .15s ease; margin-left: auto; flex-shrink: 0;
+  font-family: var(--font-sans);
+}
+.la-x:hover { background: var(--ink); color: var(--ink-text); border-color: var(--ink); }
+
+/* --------------------------- Laura Lens ---------------------------- */
+.la-lensdim { position: fixed; inset: 0; background: transparent; z-index: 70; }
+.la-lens {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: min(640px, 96vw);
+  background: var(--surface-raised);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column;
+  animation: laSlide .24s ease;
+}
+@keyframes laSlide { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.la-lensrail {
+  width: 196px; flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding: 14px 12px; overflow: auto;
+}
+.la-conv {
+  display: block; width: 100%; text-align: left;
+  padding: 7px 8px; border-radius: 7px;
+  transition: background .15s ease;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-primary); font-family: var(--font-sans);
+}
+.la-conv:hover { background: var(--surface); }
+.la-conv-on { background: var(--surface); border: 1px solid var(--border); }
+.la-src {
+  font-family: var(--font-mono); font-size: 10.5px;
+  padding: 2px 8px; border-radius: 5px;
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  margin-right: 6px; cursor: pointer;
+}
+.la-src:hover { border-color: var(--gold); }
+
+/* ------------------------------ Links ------------------------------ */
+.la-link {
+  background: none; border: none; padding: 0;
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  cursor: pointer; font-family: var(--font-sans);
+  transition: color .15s ease;
+}
+.la-link:hover { color: var(--gold); }
+
+/* --------------------------- Admin extras -------------------------- */
+.la-flowline { animation: laFlow 1.6s linear infinite; }
+@keyframes laFlow { to { stroke-dashoffset: -12; } }
+.la-pulse { animation: laPulse 2.2s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+@keyframes laPulse { 0%, 100% { stroke-width: 1.6; } 50% { stroke-width: 3.2; } }
+.la-gauge { transition: stroke-dasharray .6s ease; }
+
+/* --------------------------- Responsive ---------------------------- */
+@media (max-width: 1080px) {
+  .la-form-grid { grid-template-columns: 1fr !important; }
+  .la-modal-grid { grid-template-columns: 1fr !important; }
+  .la-railnav { display: none; }
+}
+@media (max-width: 840px) {
+  .la-sidebar { display: none; }
+  .la-lensrail { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .la-fade, .la-lens, .la-flowline, .la-pulse, .la-gauge,
+  .la-hover, .la-boardcard, .la-chip, .la-nav {
+    animation: none !important; transition: none !important;
+  }
+}

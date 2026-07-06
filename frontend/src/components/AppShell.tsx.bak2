@@ -1,0 +1,65 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { usePathname } from 'next/navigation'
+import Sidebar from '@/components/Sidebar'
+import { layout } from '@/styles/tokens'
+import { useTheme } from '@/lib/theme'
+
+const SIDEBAR_PINNED_KEY = 'laura.sidebar.pinned'
+const SIDEBAR_PIN_EVENT = 'laura:sidebar-pin-change'
+
+/**
+ * Routes that should NOT show the sidebar / app chrome.
+ * Currently: /login (authentication page is full-screen).
+ */
+const BARE_ROUTES = ['/login']
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  const { theme } = useTheme()
+  const [pinned, setPinned] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    const stored = localStorage.getItem(SIDEBAR_PINNED_KEY)
+    if (stored === 'true') setPinned(true)
+    setMounted(true)
+
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      setPinned(detail.pinned)
+    }
+    window.addEventListener(SIDEBAR_PIN_EVENT, handler)
+    return () => window.removeEventListener(SIDEBAR_PIN_EVENT, handler)
+  }, [])
+
+  // Sync the redesign palette (styles/redesign.css) with the app theme.
+  // redesign.css switches its CSS variables on [data-theme="dark"].
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light')
+  }, [theme])
+
+  // Bare routes (login): render children full-bleed, no sidebar
+  const isBare = BARE_ROUTES.some(r => pathname?.startsWith(r))
+  if (isBare) {
+    return <>{children}</>
+  }
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--canvas)' }}>
+      <Sidebar isAdmin={true} />
+      <main style={{
+        flex: 1,
+        minWidth: 0,
+        marginLeft: pinned ? layout.sidebarExpanded : layout.sidebarCollapsed,
+        transition: mounted ? 'margin-left 180ms cubic-bezier(0.2,0,0,1)' : 'none',
+        background: 'var(--canvas)',
+        color: 'var(--text-primary)',
+      }}>
+        {children}
+      </main>
+    </div>
+  )
+}

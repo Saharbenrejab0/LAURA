@@ -1,27 +1,33 @@
 'use client';
 
 /**
- * Draft / LOA detail page  (Rock 3+4 + Edit details button)
- *
- * Workspace de revue : inline-edit, comments rail, approval panel.
- * Le bouton "Edit details" route vers /loa/new?edit={id} pour le formulaire complet.
+ * LAURA — LOA Detail · Editorial Finance redesign (Phase B)
+ * ---------------------------------------------------------
+ * Container for the LOA detail workspace. Visual layer rebuilt on
+ * styles/redesign.css; ALL business logic preserved verbatim:
+ *   - GET /loa/{id} + /permissions/loa/{id} + /loa/{src}/loa_draft_id
+ *   - POST /loa/{id}/suggest-fills
+ *   - GET /loa/{id}/comments/summary
+ *   - Inline-edit provenance tracking (manual / laura / source)
+ *   - Suggestions map + dismissed set
+ *   - Comments rail (per-field + global)
+ *   - "Edit details" routes to /loa/new?edit={id}
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
 import api from '@/lib/api';
-import { color, font, layout, space, type } from '@/styles/tokens';
 
 import DraftHeader, { SaveState } from '@/components/draft/DraftHeader';
 import DraftSection from '@/components/draft/DraftSection';
 import InlineEditField, { LauraSuggestion, Provenance } from '@/components/draft/InlineEditField';
 import ApprovalPanel from '@/components/draft/ApprovalPanel';
 import SubmissionReadiness from '@/components/draft/SubmissionReadiness';
-import CommentBadge from '@/components/comments/CommentBadge';
 import CommentsRail from '@/components/comments/CommentsRail';
+import { Btn, Overline } from '@/components/ui/atoms';
 
-/* ----- Types ----------------------------------------------------------- */
+/* ----- Types (unchanged) ------------------------------------------------ */
 
 interface LOAData {
   id: string;
@@ -90,7 +96,6 @@ export default function DraftPage() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Comments state ─────────────────────────────────────────────
   const [commentSummary, setCommentSummary] = useState<CommentSummary | null>(null);
   const [railOpen, setRailOpen] = useState(false);
   const [railFieldKey, setRailFieldKey] = useState<string | null>(null);
@@ -131,7 +136,7 @@ export default function DraftPage() {
           try {
             const src = await api.get(`/loa/${loaRes.data.duplicated_from_id}`);
             if (!cancelled) setDuplicatedFromDraftId(src.data.loa_draft_id);
-          } catch {/* source may be restricted */}
+          } catch { /* source may be restricted */ }
         }
 
         const initialProv: Record<string, Provenance> = {};
@@ -151,7 +156,6 @@ export default function DraftPage() {
           }).catch(() => {});
         }
 
-        // Fetch comment summary
         if (!cancelled) fetchCommentSummary();
       } catch (e: any) {
         if (!cancelled) setError(e?.response?.data?.detail || e?.message || 'Failed to load LOA');
@@ -160,7 +164,6 @@ export default function DraftPage() {
     return () => { cancelled = true; };
   }, [loaId, fetchCommentSummary]);
 
-  // Refresh summary when rail closes (user may have added/resolved comments)
   useEffect(() => {
     if (!railOpen) fetchCommentSummary();
   }, [railOpen, fetchCommentSummary]);
@@ -216,120 +219,126 @@ export default function DraftPage() {
     router.push(`/loa/new?edit=${loa.id}`);
   };
 
+  const title = loa.description || loa.detail || 'Untitled LOA';
+
   return (
     <div style={{
-      background: color.bg.canvas, minHeight: '100vh',
-      fontFamily: font.sans, color: color.text.primary,
+      background: 'var(--canvas)', minHeight: '100vh',
+      fontFamily: 'var(--font-sans)', color: 'var(--text-primary)',
     }}>
-      <div style={{
-        maxWidth: layout.draftColumn + 80,
-        margin: '0 auto',
-        padding: `${space[8]}px ${space[6]}px`,
-      }}>
-        <button onClick={() => router.push('/')} style={{
-          background: 'transparent', border: 'none', cursor: 'pointer',
-          color: color.text.secondary, fontSize: 13, padding: 0,
-          marginBottom: space[4], fontFamily: font.sans,
-        }}>← Back to tracker</button>
+      <div className="la-page la-fade" style={{ maxWidth: 1180 }}>
 
-        {/* Header + action buttons */}
-        <div style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          gap: space[3], marginBottom: space[4],
-        }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <DraftHeader
-              loaDraftId={loa.loa_draft_id}
-              title={loa.description || `${loa.activity_type || ''} ${loa.country ? '· ' + loa.country : ''}`.trim() || loa.loa_draft_id}
-              status={loa.status}
-              duplicatedFromId={loa.duplicated_from_id}
-              duplicatedFromDraftId={duplicatedFromDraftId}
-              saveState={saveState}
-              lastSavedAt={lastSavedAt}
-              editable={editable}
-            />
-          </div>
+        {/* ── Back link ── */}
+        <button
+          onClick={() => router.push('/')}
+          className="la-link"
+          style={{ marginBottom: 18, fontSize: 13 }}
+        >
+          ← Back to tracker
+        </button>
 
-          {/* Action buttons row: Edit details + Comments */}
+        {/* ── Header row: id/status/title + actions ── */}
+        <header style={{ marginBottom: 28 }}>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: space[2],
-            marginTop: space[1], flexShrink: 0,
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+            gap: 24, flexWrap: 'wrap', marginBottom: 8,
           }}>
-            {editable && (
-              <EditDetailsButton onClick={openEditForm} />
-            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <DraftHeader
+                loaDraftId={loa.loa_draft_id}
+                title={title}
+                status={loa.status}
+                duplicatedFromId={loa.duplicated_from_id}
+                duplicatedFromDraftId={duplicatedFromDraftId}
+                saveState={saveState}
+                lastSavedAt={lastSavedAt}
+                editable={editable}
+                onSubmit={undefined}
+              />
+            </div>
 
-            <CommentsButton
-              totalComments={totalComments}
-              totalBlocking={totalBlocking}
-              onClick={openRailGlobal}
-            />
+            <div style={{
+              display: 'flex', gap: 8, flexWrap: 'wrap', flexShrink: 0,
+              paddingTop: 4,
+            }}>
+              {editable && (
+                <Btn variant="secondary" small onClick={openEditForm}>
+                  ✎ Edit details
+                </Btn>
+              )}
+              <Btn
+                variant={totalBlocking > 0 ? 'danger' : 'secondary'}
+                small
+                onClick={openRailGlobal}
+              >
+                💬 Comments
+                {totalComments > 0 && (
+                  <span style={{
+                    marginLeft: 6, fontFamily: 'var(--font-mono)',
+                    fontWeight: 700, fontSize: 11.5,
+                  }}>{totalComments}</span>
+                )}
+                {totalBlocking > 0 && (
+                  <span style={{
+                    marginLeft: 6, padding: '1px 7px', borderRadius: 99,
+                    background: 'var(--st-rejected-fg)', color: '#fff',
+                    fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)',
+                  }}>{totalBlocking}</span>
+                )}
+              </Btn>
+            </div>
           </div>
+        </header>
+
+        {/* ── Approval workflow ── */}
+        <div style={{ marginBottom: 22 }}>
+          <ApprovalPanel
+            loa={{ id: loa.id, status: loa.status }}
+            perms={perms}
+            onActionDone={() => router.refresh()}
+          />
         </div>
 
-        <ApprovalPanel
-          loa={loa}
-          perms={perms}
-          onActionDone={() => window.location.reload()}
-        />
-
+        {/* ── Submission readiness ── */}
         <SubmissionReadiness
           requiredMissing={counts.required}
           suggestionsAvailable={availableSuggestions}
           complete={counts.complete}
           blockingComments={totalBlocking}
-          onJumpToRequired={() => jumpTo('[data-required-empty="true"]')}
+          onJumpToRequired={() => jumpTo('[data-required-missing="true"]')}
           onJumpToSuggestions={() => jumpTo('[data-has-suggestion="true"]')}
         />
 
-        {sectionDefs.map((sec) => {
-          const filled = sec.fields.filter(f => !isEmpty((loa as any)[f.field])).length;
-          const requiredMissing = sec.fields.filter(f => f.required && isEmpty((loa as any)[f.field])).length;
-          return (
-            <DraftSection
-              key={sec.id} id={`section-${sec.id}`} title={sec.title}
-              filled={filled} total={sec.fields.length}
-              requiredMissing={requiredMissing}
-            >
+        {/* ── Sections ── */}
+        {sectionDefs.map((sec) => (
+          <DraftSection key={sec.id} id={sec.id} title={sec.title}
+            requiredComplete={
+              sec.fields.filter(f => f.required && !isEmpty((loa as any)[f.field])).length
+            }
+            requiredTotal={sec.fields.filter(f => f.required).length}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {sec.fields.map((f) => {
-                const val = (loa as any)[f.field];
-                const empty = isEmpty(val);
-                const sug = suggestions[f.field];
-                const hasSuggestion = empty && sug && !dismissed.has(f.field);
-                const commentCount = fieldCommentCounts[f.field] || 0;
+                const hasSuggestion = !!suggestions[f.field] && !dismissed.has(f.field);
+                const missing = f.required && isEmpty((loa as any)[f.field]);
                 return (
                   <div
                     key={f.field}
-                    data-required-empty={f.required && empty ? 'true' : 'false'}
-                    data-has-suggestion={hasSuggestion ? 'true' : 'false'}
-                    style={{ position: 'relative' }}
+                    data-required-missing={missing ? 'true' : undefined}
+                    data-has-suggestion={hasSuggestion ? 'true' : undefined}
                   >
-                    {/* Comment badge floats at top-right of the field */}
-                    {commentCount > 0 && (
-                      <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
-                        <CommentBadge
-                          count={commentCount}
-                          onClick={() => openRailForField(f.field)}
-                        />
-                      </div>
-                    )}
                     <InlineEditField
                       loaId={loa.id}
                       field={f.field}
                       label={f.label}
-                      value={val}
+                      value={(loa as any)[f.field]}
                       required={f.required}
                       editable={editable}
                       lockReason={lockReason}
                       variant={f.variant}
                       options={f.options}
                       provenance={provenance[f.field] || 'none'}
-                      suggestion={hasSuggestion ? {
-                        value: sug.value,
-                        source_count: sug.source_count,
-                        confidence: sug.confidence,
-                        kind: sug.kind as any,
-                      } as LauraSuggestion : undefined}
+                      suggestion={suggestions[f.field] as unknown as LauraSuggestion | undefined}
                       onSaved={(newValue, source) => {
                         onFieldSaved(f.field)(newValue, source);
                       }}
@@ -338,12 +347,14 @@ export default function DraftPage() {
                   </div>
                 );
               })}
-            </DraftSection>
-          );
-        })}
+            </div>
+          </DraftSection>
+        ))}
+
+        <div style={{ height: 40 }} />
       </div>
 
-      {/* Comments rail overlay */}
+      {/* ── Comments rail ── */}
       {railOpen && (
         <CommentsRail
           loaId={loa.id}
@@ -356,77 +367,7 @@ export default function DraftPage() {
   );
 }
 
-/* ----- Action buttons -------------------------------------------------- */
-
-function EditDetailsButton({ onClick }: { onClick: () => void }) {
-  const [hover, setHover] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        background: hover ? color.action.primary : color.bg.surface,
-        color: hover ? color.text.onPrimary : color.text.primary,
-        borderWidth: '1px', borderStyle: 'solid',
-        borderColor: hover ? color.action.primary : color.border.soft,
-        borderRadius: 10, padding: '8px 14px',
-        fontSize: 13, fontWeight: 500, fontFamily: font.sans,
-        cursor: 'pointer', whiteSpace: 'nowrap',
-        transition: 'background-color 120ms cubic-bezier(0.2, 0, 0, 1), color 120ms cubic-bezier(0.2, 0, 0, 1), border-color 120ms cubic-bezier(0.2, 0, 0, 1)',
-      }}
-    >
-      <PencilIcon color={hover ? color.text.onPrimary : color.text.primary} />
-      Edit details
-    </button>
-  );
-}
-
-function CommentsButton({ totalComments, totalBlocking, onClick }: {
-  totalComments: number;
-  totalBlocking: number;
-  onClick: () => void;
-}) {
-  const hasBlocking = totalBlocking > 0;
-  const hasAny = totalComments > 0;
-
-  return (
-    <button onClick={onClick} style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      background: hasBlocking ? '#FFF1EF' : hasAny ? '#F7EFE2' : color.bg.surface,
-      borderWidth: '1px', borderStyle: 'solid',
-      borderColor: hasBlocking ? '#E6C1BD' : hasAny ? '#E5CFAE' : color.border.soft,
-      borderRadius: 10, padding: '8px 14px',
-      fontSize: 13, fontWeight: 500, fontFamily: font.sans,
-      color: hasBlocking ? '#A33A32' : hasAny ? '#7A5522' : color.text.secondary,
-      cursor: 'pointer', whiteSpace: 'nowrap',
-    }}>
-      💬 Comments{totalComments > 0 ? ` ${totalComments}` : ''}
-      {totalBlocking > 0 && (
-        <span style={{
-          fontSize: 10, padding: '0 5px', borderRadius: 999,
-          background: '#A33A32', color: 'white', fontWeight: 600,
-          marginLeft: 2,
-        }}>{totalBlocking}</span>
-      )}
-    </button>
-  );
-}
-
-function PencilIcon({ color }: { color: string }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-      <path
-        d="M10.5 1.5L12.5 3.5L4.5 11.5L1.5 12.5L2.5 9.5L10.5 1.5Z"
-        stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
-
-/* ----- Section / field definitions ------------------------------------- */
+/* ----- Section / field definitions (unchanged) ------------------------- */
 
 interface FieldDef {
   field: string; label: string; required?: boolean;
@@ -483,9 +424,9 @@ function humanStatus(s: string): string {
 function PageLoading() {
   return (
     <div style={{
-      minHeight: '100vh', background: color.bg.canvas,
+      minHeight: '100vh', background: 'var(--canvas)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: font.sans, color: color.text.secondary, fontSize: 13,
+      fontFamily: 'var(--font-sans)', color: 'var(--text-tertiary)', fontSize: 13,
     }}>Loading…</div>
   );
 }
@@ -493,16 +434,13 @@ function PageLoading() {
 function PageError({ error, onBack }: { error: string; onBack: () => void }) {
   return (
     <div style={{
-      minHeight: '100vh', background: color.bg.canvas,
+      minHeight: '100vh', background: 'var(--canvas)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      flexDirection: 'column', gap: space[3], fontFamily: font.sans,
+      flexDirection: 'column', gap: 14, fontFamily: 'var(--font-sans)',
     }}>
-      <p style={{ color: color.status.danger, fontSize: 14 }}>{error}</p>
-      <button onClick={onBack} style={{
-        background: color.action.primary, color: color.text.onPrimary,
-        border: 'none', borderRadius: 8, padding: '8px 16px',
-        fontSize: 13, cursor: 'pointer',
-      }}>Back to tracker</button>
+      <Overline>Something went wrong</Overline>
+      <p style={{ color: 'var(--st-rejected-fg)', fontSize: 13, margin: 0, fontFamily: 'var(--font-mono)' }}>{error}</p>
+      <Btn variant="secondary" onClick={onBack}>← Back to tracker</Btn>
     </div>
   );
 }

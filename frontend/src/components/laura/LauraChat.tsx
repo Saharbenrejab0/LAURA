@@ -75,20 +75,20 @@ export default function LauraChat() {
         aria-label="Laura"
         style={{
           position: 'fixed',
-          top: '50%', left: '50%',
-          width: 'min(1240px, calc(100vw - 32px))',
-          height: 'min(840px, calc(100vh - 64px))',
-          background: 'var(--laura-bg-surface, #FFFFFF)',
-          borderRadius: 14,
-          boxShadow: '0 24px 80px rgba(10, 10, 10, 0.18), 0 8px 24px rgba(10, 10, 10, 0.08)',
+          top: 0, right: 0, bottom: 0,
+          width: 'min(640px, 96vw)',
+          height: '100vh',
+          background: 'var(--surface-raised, #FFFFFF)',
+          borderLeft: '1px solid var(--border, #E4DFD5)',
+          boxShadow: '-16px 0 48px rgba(10, 10, 10, 0.16)',
           zIndex: 1001,
           overflow: 'hidden',
           display: 'grid',
-          gridTemplateColumns: '280px 1fr',
-          transform: `translate(-50%, -50%) scale(${isOpen ? 1 : 0.985})`,
+          gridTemplateColumns: '196px 1fr',
+          transform: `translateX(${isOpen ? '0' : '24px'})`,
           opacity: isOpen ? 1 : 0,
           pointerEvents: isOpen ? 'all' : 'none',
-          transition: 'transform 160ms cubic-bezier(0.2, 0, 0, 1), opacity 160ms cubic-bezier(0.2, 0, 0, 1)',
+          transition: 'transform 220ms cubic-bezier(0.2, 0, 0, 1), opacity 220ms cubic-bezier(0.2, 0, 0, 1)',
         }}
       >
         <Sidebar

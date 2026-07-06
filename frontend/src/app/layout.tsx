@@ -1,11 +1,11 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import '@/styles/theme.css'
+import '@/styles/redesign.css'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { ToastProvider } from '@/components/Toast'
 import AppShell from '@/components/AppShell'
 import { LauraProvider } from '@/components/laura/LauraProvider'
-import LauraPill from '@/components/laura/LauraPill'
 import LauraChat from '@/components/laura/LauraChat'
 
 export const metadata: Metadata = {
@@ -20,8 +20,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <ToastProvider>
             <LauraProvider>
+              {/* LauraPill now lives INSIDE AppShell as the content-area topbar. */}
               <AppShell>{children}</AppShell>
-              <LauraPill />
               <LauraChat />
             </LauraProvider>
           </ToastProvider>

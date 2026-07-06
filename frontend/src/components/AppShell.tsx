@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
+import LauraPill from '@/components/laura/LauraPill'
 import { layout } from '@/styles/tokens'
+import { useTheme } from '@/lib/theme'
 
 const SIDEBAR_PINNED_KEY = 'laura.sidebar.pinned'
 const SIDEBAR_PIN_EVENT = 'laura:sidebar-pin-change'
@@ -16,6 +18,7 @@ const BARE_ROUTES = ['/login']
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const { theme } = useTheme()
   const [pinned, setPinned] = useState(false)
   const [mounted, setMounted] = useState(false)
 
@@ -32,22 +35,35 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener(SIDEBAR_PIN_EVENT, handler)
   }, [])
 
-  // Bare routes (login): render children full-bleed, no sidebar
+  // Sync the redesign palette (styles/redesign.css) with the app theme.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light')
+  }, [theme])
+
   const isBare = BARE_ROUTES.some(r => pathname?.startsWith(r))
   if (isBare) {
     return <>{children}</>
   }
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--canvas)' }}>
       <Sidebar isAdmin={true} />
       <main style={{
         flex: 1,
         minWidth: 0,
         marginLeft: pinned ? layout.sidebarExpanded : layout.sidebarCollapsed,
         transition: mounted ? 'margin-left 180ms cubic-bezier(0.2,0,0,1)' : 'none',
+        background: 'var(--canvas)',
+        color: 'var(--text-primary)',
+        display: 'flex',
+        flexDirection: 'column',
       }}>
-        {children}
+        {/* Horizontal topbar (replaces the old floating Ask Laura island). */}
+        <LauraPill />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {children}
+        </div>
       </main>
     </div>
   )

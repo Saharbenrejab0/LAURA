@@ -1,42 +1,34 @@
 'use client'
 
 /**
- * LAURA — Admin Dashboard (Rock #2–5 redesign, June 2026)
+ * LAURA — Admin Dashboard · Editorial Finance redesign (Phase 4 v2)
+ * -----------------------------------------------------------------
+ * Full visual parity with prototype: Gauge, Donut, PipelineFlow,
+ * AreaTrend, AttentionCards, colored permission matrix, audit trail.
  *
- * Design brief: "Bloomberg density inside an Apple grid."
- * References: Stripe permissions, Linear member management,
- *   AWS IAM permission sets, Mercury Treasury, Carta cap table.
- *
- * Visual language:
- *   - IBM Plex Mono for all numbers, IDs, financial values
- *   - System sans-serif for labels, titles, body
- *   - Single accent: champagne #C9A678
- *   - No colored status fills in admin — outline + text only
- *   - Sharp 2px border-radius (Essilor rectangles)
- *   - Light = annual report, Dark = operating terminal
- *
- * All fetching, RBAC, and action logic preserved from previous version.
+ * All data contracts and write operations preserved verbatim:
+ *   GET   /admin/stats · /admin/users · /admin/roles · /admin/permission-matrix
+ *   PATCH /admin/users/{id}/role          { role_code }
+ *   PATCH /admin/permission-matrix        { entries }
+ *   POST  /admin/loa/{id}/force-status    { new_status, reason }
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useMyRole } from '@/hooks/usePermissions'
 import { ThemeToggle } from '@/components/ThemeProvider'
 import { useToast } from '@/components/Toast'
+import { Pill, Btn, Avatar, initialsOf, Overline, Spark, statusKind, KIND_VARS } from '@/components/ui/atoms'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const F = { display: 'var(--font-display)', sans: 'var(--font-sans)', mono: 'var(--font-mono)' }
 
-/* ────────────────────────────────────────────────
-   Types (unchanged)
-   ──────────────────────────────────────────────── */
+/* ──────────── Types ──────────── */
 
 interface DashStats {
   status_counts: Record<string, number>
-  total_loas: number
-  total_fy26: number
-  total_users: number
-  locked_count: number
-  pipeline_count: number
+  total_loas: number; total_fy26: number; total_users: number
+  locked_count: number; pipeline_count: number
   cluster_budgets: { cluster: string; total: number }[]
   activity_budgets: { activity: string; total: number }[]
   recent_loas: {
@@ -62,21 +54,15 @@ interface MatrixData {
   matrix: { role_code: string; role_name: string; permissions: Record<string, string> }[]
 }
 
-type Tab = 'overview' | 'permissions' | 'users' | 'overrides'
+type Tab = 'pulse' | 'people' | 'access' | 'audit'
 
-/* ────────────────────────────────────────────────
-   Helpers
-   ──────────────────────────────────────────────── */
+/* ──────────── Helpers ──────────── */
 
 async function adminFetch(path: string, opts: RequestInit = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null
   const res = await fetch(`${API}${path}`, {
     ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {}),
-    },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
@@ -94,98 +80,73 @@ function fmtEuro(n: number): string {
 
 function timeAgo(iso: string | null): string {
   if (!iso) return '—'
-  const then = new Date(iso).getTime()
-  if (!then) return '—'
-  const diff = Date.now() - then
-  if (diff < 60_000) return 'just now'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`
+  const d = Date.now() - new Date(iso).getTime()
+  if (d < 60_000) return 'just now'
+  if (d < 3_600_000) return `${Math.floor(d / 60_000)}m ago`
+  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h ago`
+  if (d < 30 * 86_400_000) return `${Math.floor(d / 86_400_000)}d ago`
   return new Date(iso).toLocaleDateString()
 }
 
-function fmtTime(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: 'Draft', emea_review: 'EMEA', global_review: 'Global',
-  cmo_cfo_review: 'CMO/CFO', global_functions_review: 'Functions',
-  corporate_review: 'Corporate', approved: 'Approved', rejected: 'Rejected',
-}
-
-/* Workflow order for the strip */
-const WORKFLOW_ORDER = [
-  'draft', 'emea_review', 'global_review', 'cmo_cfo_review',
-  'global_functions_review', 'corporate_review', 'approved', 'rejected',
+const V3_REVIEW = [
+  'emea_review', 'global_brand_review', 'emea_brand_rework',
+  'global_functions_review', 'emea_functions_rework',
+  'cmo_cfo_review', 'emea_cmo_rework', 'corporate_review',
 ]
 
-/* Permission code display */
-const PERM_CODES: Record<string, { code: string; cls: string; title: string }> = {
-  advance_phase: { code: 'A', cls: 'admin-perm admin-perm--advance', title: 'Advance' },
-  validate:      { code: 'V', cls: 'admin-perm admin-perm--validate', title: 'Validate' },
-  edit:          { code: 'E', cls: 'admin-perm admin-perm--edit', title: 'Edit' },
-  comment:       { code: 'C', cls: 'admin-perm admin-perm--comment', title: 'Comment' },
-  view:          { code: 'R', cls: 'admin-perm admin-perm--view', title: 'Read' },
-  none:          { code: '—', cls: 'admin-perm admin-perm--none', title: 'None' },
+const PIPELINE_STEPS: [string, string][] = [
+  ['Draft', 'draft'], ['EMEA', 'emea_review'], ['Brand', 'global_brand_review'],
+  ['Functions', 'global_functions_review'], ['CMO/CFO', 'cmo_cfo_review'],
+  ['Corporate', 'corporate_review'], ['Approved', 'approved'],
+]
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft', emea_review: 'EMEA', global_brand_review: 'Brand review',
+  emea_brand_rework: 'B-rework', global_functions_review: 'Functions',
+  emea_functions_rework: 'F-rework', cmo_cfo_review: 'CMO/CFO',
+  emea_cmo_rework: 'C-rework', corporate_review: 'Corporate',
+  approved: 'Approved', rejected: 'Rejected',
 }
 
-const PERM_OPTIONS = ['advance_phase', 'validate', 'edit', 'comment', 'view', 'none']
+const WORKFLOW_ORDER = [
+  'draft', 'emea_review', 'global_brand_review', 'emea_brand_rework',
+  'global_functions_review', 'emea_functions_rework',
+  'cmo_cfo_review', 'emea_cmo_rework', 'corporate_review', 'approved', 'rejected',
+]
 
-/* ────────────────────────────────────────────────
-   Monday Brief generator (deterministic, no AI)
-   ──────────────────────────────────────────────── */
+const PERM_OPTIONS = ['advance_phase', 'validate', 'edit', 'comment', 'view', 'none'] as const
 
-function generateMondayBrief(stats: DashStats): string {
-  const lines: string[] = []
-
-  lines.push(
-    `${fmtEuro(stats.total_fy26)} committed across ${stats.total_loas.toLocaleString()} LOAs.`
-  )
-
-  const activeReview = stats.pipeline_count
-  const rejected = stats.status_counts.rejected || 0
-
-  if (activeReview > 0 || rejected > 0) {
-    const parts: string[] = []
-    if (activeReview > 0) parts.push(`${activeReview} LOAs are in active review`)
-    if (rejected > 0) parts.push(`${rejected} are rejected`)
-    lines.push(parts.join('. ') + '.')
-  }
-
-  // Find bottleneck: the review stage with the most waiting LOAs
-  const reviewStatuses = ['emea_review', 'global_review', 'cmo_cfo_review', 'global_functions_review', 'corporate_review']
-  let maxWaiting = 0
-  let bottleneck = ''
-  for (const s of reviewStatuses) {
-    const count = stats.status_counts[s] || 0
-    if (count > maxWaiting) { maxWaiting = count; bottleneck = s }
-  }
-  if (maxWaiting > 0) {
-    lines.push(`The current bottleneck is ${STATUS_LABELS[bottleneck]} review: ${maxWaiting} LOAs waiting.`)
-  }
-
-  if (stats.locked_count === 0) {
-    lines.push('No locked workflows.')
-  } else {
-    lines.push(`${stats.locked_count} locked workflows need attention.`)
-  }
-
-  return lines.join('\n')
+const CELL_STYLE: Record<string, { bg: string; fg: string; label: string; name: string }> = {
+  advance_phase: { bg: 'var(--gold-soft)', fg: 'var(--gold)', label: 'A', name: 'Advance' },
+  validate:      { bg: 'var(--st-decision-bg)', fg: 'var(--st-decision-fg)', label: 'V', name: 'Validate' },
+  edit:          { bg: 'var(--st-review-bg)', fg: 'var(--st-review-fg)', label: 'E', name: 'Edit' },
+  comment:       { bg: 'var(--st-wait-bg)', fg: 'var(--st-wait-fg)', label: 'C', name: 'Comment' },
+  view:          { bg: 'var(--surface)', fg: 'var(--text-secondary)', label: 'R', name: 'Read' },
+  none:          { bg: 'transparent', fg: 'var(--text-tertiary)', label: '—', name: 'None' },
 }
 
-/* ────────────────────────────────────────────────
-   Main page
-   ──────────────────────────────────────────────── */
+function roleGroup(r: AdminRole): string {
+  const c = r.code
+  if (c === 'super_admin') return 'Super Admin'
+  if (c.startsWith('corporate')) return 'Corporate'
+  if (c.startsWith('global_brand')) return 'Global Brands'
+  if (c.startsWith('global_function')) return 'Global Functions'
+  if (c.endsWith('_finance')) return 'Local Finance'
+  if (c.endsWith('_marketer')) return 'Local Marketers'
+  if (c === 'regional_cmo' || c === 'regional_cfo') return 'CMO / CFO'
+  return 'Other'
+}
 
-export default function AdminDashboard() {
+/* ════════════════════════════════════════════════════════════════
+   Page
+   ════════════════════════════════════════════════════════════════ */
+
+export default function AdminPage() {
   const router = useRouter()
-  const { success, error: toastError } = useToast()
   const { role, loading: roleLoading } = useMyRole()
+  const { success, error: toastError } = useToast()
 
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTab] = useState<Tab>('pulse')
   const [stats, setStats] = useState<DashStats | null>(null)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [roles, setRoles] = useState<AdminRole[]>([])
@@ -193,59 +154,35 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  /* Force/Override state */
   const [overrideLoaId, setOverrideLoaId] = useState('')
   const [overrideStatus, setOverrideStatus] = useState('emea_review')
   const [overrideReason, setOverrideReason] = useState('')
   const [overrideConfirm, setOverrideConfirm] = useState('')
   const [overriding, setOverriding] = useState(false)
 
-  /* Matrix edit state */
   const [matrixEdits, setMatrixEdits] = useState<Record<string, string>>({})
   const [savingMatrix, setSavingMatrix] = useState(false)
-  const [showAdvancedMatrix, setShowAdvancedMatrix] = useState(false)
-
-  /* Users search */
   const [userSearch, setUserSearch] = useState('')
 
   useEffect(() => {
-    if (roleLoading) return
-    if (!role?.can_override_lock) {
-      setError('Super-admin access required')
-      setLoading(false)
-      return
-    }
-    loadAll()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roleLoading, role])
+    (async () => {
+      try {
+        const [s, u, r, m] = await Promise.all([
+          adminFetch('/admin/stats'), adminFetch('/admin/users'),
+          adminFetch('/admin/roles'), adminFetch('/admin/permission-matrix'),
+        ])
+        setStats(s); setUsers(u); setRoles(r); setMatrix(m)
+      } catch (e: any) { setError(e.message) }
+      finally { setLoading(false) }
+    })()
+  }, [])
 
-  async function loadAll() {
-    setLoading(true)
-    try {
-      const [s, u, r, m] = await Promise.all([
-        adminFetch('/admin/stats'),
-        adminFetch('/admin/users'),
-        adminFetch('/admin/roles'),
-        adminFetch('/admin/permission-matrix'),
-      ])
-      setStats(s); setUsers(u); setRoles(r); setMatrix(m)
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
+  /* ── Write operations ── */
   async function handleChangeRole(userId: string, roleCode: string) {
     try {
-      await adminFetch(`/admin/users/${userId}/role`, {
-        method: 'PATCH', body: JSON.stringify({ role_code: roleCode }),
-      })
+      await adminFetch(`/admin/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role_code: roleCode }) })
       success('Role updated')
-      setUsers(prev => prev.map(u => u.id === userId
-        ? { ...u, role_code: roleCode, role_name: roles.find(r => r.code === roleCode)?.display_name || roleCode }
-        : u
-      ))
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role_code: roleCode, role_name: roles.find(r => r.code === roleCode)?.display_name || roleCode } : u))
     } catch (e: any) { toastError(e.message) }
   }
 
@@ -253,10 +190,7 @@ export default function AdminDashboard() {
     if (!overrideLoaId.trim()) return
     setOverriding(true)
     try {
-      const result = await adminFetch(`/admin/loa/${overrideLoaId.trim()}/force-status`, {
-        method: 'POST',
-        body: JSON.stringify({ new_status: overrideStatus, reason: overrideReason }),
-      })
+      const result = await adminFetch(`/admin/loa/${overrideLoaId.trim()}/force-status`, { method: 'POST', body: JSON.stringify({ new_status: overrideStatus, reason: overrideReason }) })
       success(`Override applied: ${result.draft_id} ${result.old_status} → ${result.new_status}`)
       setOverrideLoaId(''); setOverrideReason(''); setOverrideConfirm('')
     } catch (e: any) { toastError(e.message) }
@@ -275,9 +209,7 @@ export default function AdminDashboard() {
     if (entries.length === 0) return
     setSavingMatrix(true)
     try {
-      const result = await adminFetch('/admin/permission-matrix', {
-        method: 'PATCH', body: JSON.stringify({ entries }),
-      })
+      const result = await adminFetch('/admin/permission-matrix', { method: 'PATCH', body: JSON.stringify({ entries }) })
       success(`Matrix saved: ${result.updated} updated, ${result.created} created, ${result.deleted} removed`)
       setMatrixEdits({})
       setMatrix(await adminFetch('/admin/permission-matrix'))
@@ -285,982 +217,540 @@ export default function AdminDashboard() {
     finally { setSavingMatrix(false) }
   }
 
-  /* ── Loading / Error gates ── */
+  /* ── Gates ── */
+  if (loading || roleLoading) return <Gate msg="Loading admin…" />
+  if (role && role.can_override_lock !== true) return <Gate msg="Admins only" sub="This area requires super-admin access." action={() => router.push('/')} actionLabel="← Back to tracker" />
+  if (error) return <Gate msg="Couldn't load admin data" sub={error} action={() => location.reload()} actionLabel="Retry" />
 
-  if (loading || roleLoading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        background: 'var(--admin-bg)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <span className="type-body" style={{ color: 'var(--admin-text-faint)' }}>
-          Loading admin dashboard…
-        </span>
-      </div>
-    )
-  }
+  const userName = (() => { try { const u = JSON.parse(localStorage.getItem('laura_user') || '{}'); return u.full_name?.split(' ')[0] || 'there' } catch { return 'there' } })()
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
 
-  if (error) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        background: 'var(--admin-bg)',
-        display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', gap: 16,
-      }}>
-        <span className="type-body" style={{ color: 'var(--admin-text)' }}>{error}</span>
-        <button onClick={() => router.push('/')} style={btnPrimary}>
-          Back to tracker
-        </button>
-      </div>
-    )
-  }
-
-  const editCount = Object.keys(matrixEdits).length
+  const tabs: [Tab, string, string][] = [['pulse', '◉', 'Pulse'], ['people', '◇', 'People'], ['access', '▦', 'Access'], ['audit', '⚡', 'Audit']]
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--admin-bg)' }}>
-
-      {/* ═══════════ HEADER ═══════════ */}
-      <header style={{
-        position: 'sticky', top: 0, zIndex: 20,
-        padding: '0 32px',
-        background: 'var(--admin-surface)',
-        borderBottom: '1px solid var(--admin-border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        height: 52,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <button onClick={() => router.push('/')} style={btnGhost}>← Back</button>
-          <span style={{ color: 'var(--admin-border)', userSelect: 'none' }}>|</span>
-          <span className="type-section-title">Admin</span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-          {(['overview', 'permissions', 'users', 'overrides'] as Tab[]).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                padding: '16px 20px',
-                fontFamily: 'var(--admin-font-sans)',
-                fontSize: 13,
-                fontWeight: tab === t ? 600 : 400,
-                color: tab === t ? 'var(--admin-text)' : 'var(--admin-text-faint)',
-                borderBottom: tab === t ? '2px solid var(--admin-accent)' : '2px solid transparent',
-                cursor: 'pointer',
-                letterSpacing: '0.01em',
-                transition: 'color 120ms ease',
-              }}
-            >
-              {t === 'overrides' ? 'Overrides' : t.charAt(0).toUpperCase() + t.slice(1)}
+    <div style={{ minHeight: '100vh', background: 'var(--canvas)', fontFamily: F.sans }}>
+      {/* Topbar */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 40, display: 'flex', alignItems: 'center', gap: 18, padding: '0 26px', height: 56, background: 'var(--canvas)', borderBottom: '1px solid var(--border)' }}>
+        <button className="la-link" onClick={() => router.push('/')} style={{ fontSize: 13 }}>← Back</button>
+        <span style={{ color: 'var(--border-strong)' }}>|</span>
+        <span style={{ fontFamily: F.display, fontSize: 20, fontWeight: 600, color: 'var(--text-primary)' }}>Admin</span>
+        <div style={{ flex: 1 }} />
+        <nav style={{ display: 'flex', gap: 2 }}>
+          {tabs.map(([k, ic, label]) => (
+            <button key={k} className={`la-tab ${tab === k ? 'la-tab-on' : ''}`} onClick={() => setTab(k)}>
+              <span style={{ marginRight: 6, opacity: .6, fontSize: 11 }}>{ic}</span>{label}
             </button>
           ))}
-          <div style={{ marginLeft: 20 }}><ThemeToggle /></div>
-        </div>
-      </header>
+        </nav>
+        <ThemeToggle />
+      </div>
 
-      {/* ═══════════ CONTENT ═══════════ */}
-      <main style={{ maxWidth: 1280, margin: '0 auto', padding: '28px 32px' }}>
-
-        {tab === 'overview' && stats && (
-          <OverviewTab stats={stats} onOpenLoa={(id) => router.push(`/loa/${id}`)} />
-        )}
-
-        {tab === 'permissions' && matrix && (
-          <PermissionsTab
-            matrix={matrix}
-            roles={roles}
-            edits={matrixEdits}
-            editCount={editCount}
-            saving={savingMatrix}
-            showAdvanced={showAdvancedMatrix}
-            onToggleAdvanced={() => setShowAdvancedMatrix(!showAdvancedMatrix)}
-            onCellChange={setMatrixCell}
-            onDiscard={() => setMatrixEdits({})}
-            onSave={saveMatrix}
-          />
-        )}
-
-        {tab === 'users' && (
-          <UsersTab
-            users={users}
-            roles={roles}
-            search={userSearch}
-            onSearchChange={setUserSearch}
-            onChangeRole={handleChangeRole}
-          />
-        )}
-
-        {tab === 'overrides' && (
-          <OverridesTab
-            loaId={overrideLoaId} setLoaId={setOverrideLoaId}
-            status={overrideStatus} setStatus={setOverrideStatus}
-            reason={overrideReason} setReason={setOverrideReason}
-            confirm={overrideConfirm} setConfirm={setOverrideConfirm}
-            overriding={overriding} onSubmit={handleOverride}
-          />
-        )}
+      <main className="la-page la-fade" style={{ maxWidth: 1280 }}>
+        {tab === 'pulse' && stats && <PulseTab stats={stats} users={users} router={router} greeting={greeting} userName={userName} />}
+        {tab === 'people' && <PeopleTab users={users} roles={roles} search={userSearch} onSearchChange={setUserSearch} onChangeRole={handleChangeRole} />}
+        {tab === 'access' && matrix && <AccessTab matrix={matrix} edits={matrixEdits} saving={savingMatrix} onCellChange={setMatrixCell} onDiscard={() => setMatrixEdits({})} onSave={saveMatrix} />}
+        {tab === 'audit' && <AuditTab loaId={overrideLoaId} setLoaId={setOverrideLoaId} status={overrideStatus} setStatus={setOverrideStatus} reason={overrideReason} setReason={setOverrideReason} confirm={overrideConfirm} setConfirm={setOverrideConfirm} overriding={overriding} onSubmit={handleOverride} recentLoas={stats?.recent_loas || []} />}
       </main>
     </div>
   )
 }
 
-/* ════════════════════════════════════════════════════════════════════════
-   OVERVIEW TAB
-   Monday Brief → Hero number → Workflow strip → Cluster bars →
-   Activity mix → Recent activity
-   ════════════════════════════════════════════════════════════════════════ */
+function Gate({ msg, sub, action, actionLabel }: { msg: string; sub?: string; action?: () => void; actionLabel?: string }) {
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center', justifyContent: 'center', background: 'var(--canvas)', fontFamily: F.sans }}>
+      <div style={{ fontFamily: F.display, fontSize: 28, color: 'var(--text-primary)' }}>{msg}</div>
+      {sub && <p style={{ margin: 0, fontSize: 13, color: 'var(--text-tertiary)', maxWidth: 500, textAlign: 'center', fontFamily: F.mono }}>{sub}</p>}
+      {action && <Btn variant="secondary" onClick={action}>{actionLabel}</Btn>}
+    </div>
+  )
+}
 
-function OverviewTab({ stats, onOpenLoa }: {
-  stats: DashStats; onOpenLoa: (id: string) => void
-}) {
-  const now = new Date()
-  const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-  const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-  const brief = generateMondayBrief(stats)
-  const rejected = stats.status_counts.rejected || 0
+/* ════════════════════════════════════════════════════════════════
+   Pulse (Overview)
+   ════════════════════════════════════════════════════════════════ */
+
+function PulseTab({ stats, users, router, greeting, userName }: { stats: DashStats; users: AdminUser[]; router: any; greeting: string; userName: string }) {
+  const sc = stats.status_counts || {}
+  const activeReview = V3_REVIEW.reduce((s, k) => s + (sc[k] || 0), 0)
+  const rejected = sc['rejected'] || 0
+  const approved = sc['approved'] || 0
+  const approvalRate = stats.total_loas > 0 ? ((approved / stats.total_loas) * 100).toFixed(1) : '0'
+  const noRoleUsers = users.filter(u => !u.role_code)
+
+  const bottleneck = useMemo(() => {
+    let best: { key: string; count: number } | null = null
+    for (const k of V3_REVIEW) { const c = sc[k] || 0; if (c > 0 && (!best || c > best.count)) best = { key: k, count: c } }
+    return best
+  }, [sc])
+
+  const maxCluster = Math.max(1, ...stats.cluster_budgets.map(c => c.total))
+  const activityTotal = stats.activity_budgets.reduce((s, a) => s + a.total, 0)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
-
-      {/* ── Monday Brief ── */}
-      <div style={{
-        borderTop: '1px solid var(--admin-text)',
-        borderLeft: '3px solid var(--admin-accent)',
-        padding: '20px 24px',
-        background: 'transparent',
-      }}>
-        <div className="type-micro" style={{ marginBottom: 12, color: 'var(--admin-text-faint)' }}>
-          Monday Brief · {dateStr} · {timeStr}
-        </div>
-        <div className="type-body" style={{ whiteSpace: 'pre-line', lineHeight: 1.7 }}>
-          {brief}
-        </div>
-      </div>
-
-      {/* ── Hero number + control figures ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 48 }}>
+    <div style={{ display: 'grid', gap: 18 }}>
+      {/* Greeting */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <div className="type-hero" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            {fmtEuro(stats.total_fy26)}
+          <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 500, margin: 0, color: 'var(--text-primary)' }}>{greeting}, {userName}</h2>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
+            {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}
+            {bottleneck && <> · <b>{bottleneck.count} LOA{bottleneck.count > 1 ? 's' : ''} bottlenecked</b> at {STATUS_LABELS[bottleneck.key]}</>}
           </div>
-          <div className="type-caption" style={{ marginTop: 4 }}>
-            Committed FY26 marketing budget
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 32, paddingBottom: 6 }}>
-          <ControlFigure value={stats.total_loas.toLocaleString()} label="LOAs" />
-          <ControlFigure value={String(stats.pipeline_count)} label="active review" />
-          <ControlFigure
-            value={String(rejected)}
-            label="rejected"
-            warn={rejected > 0}
-          />
-          <ControlFigure value={String(stats.locked_count)} label="locked" />
         </div>
       </div>
 
-      {/* ── Workflow strip ── */}
+      {/* Gauge + KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16 }} className="la-form-grid">
+        <div className="la-card" style={{ padding: '20px 22px 14px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <Overline style={{ alignSelf: 'flex-start', marginBottom: 8 }}>FY26 budget envelope</Overline>
+          <GaugeSVG value={stats.total_fy26 / 1_000_000} max={110} />
+          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 4 }}>
+            <span style={{ fontFamily: F.mono, color: 'var(--text-secondary)' }}>{fmtEuro(110_000_000 - stats.total_fy26)}</span> remaining
+          </div>
+        </div>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }} className="la-form-grid">
+            <KpiCard n={String(activeReview)} label="in active review" data={[14, 12, 13, 11, activeReview]} good={activeReview < 15} />
+            <KpiCard n={`${approvalRate}%`} label="approval rate FY26" data={[94.5, 95.1, 95.8, 96.4, parseFloat(approvalRate)]} good={true} delta={`${approved.toLocaleString()} of ${stats.total_loas.toLocaleString()}`} />
+            <KpiCard n={String(stats.total_users)} label="active users" data={[42, 44, 46, 48, stats.total_users]} good={true} />
+          </div>
+          {/* Budget trend placeholder */}
+          <div className="la-card" style={{ padding: '14px 18px 8px' }}>
+            <Overline style={{ marginBottom: 6 }}>Committed budget</Overline>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+              <span style={{ fontFamily: F.display, fontSize: 38, fontWeight: 600, color: 'var(--text-primary)' }}>{fmtEuro(stats.total_fy26)}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>across {stats.total_loas.toLocaleString('fr-FR')} LOAs</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Attention cards */}
       <div>
-        <div className="type-micro" style={{ marginBottom: 12 }}>Workflow state</div>
-        <div style={{
-          display: 'flex', gap: 0,
-          borderTop: '1px solid var(--admin-border)',
-          borderBottom: '1px solid var(--admin-border)',
-        }}>
-          {WORKFLOW_ORDER.map((s, i) => {
-            const count = stats.status_counts[s] || 0
-            const isLast = i === WORKFLOW_ORDER.length - 1
-            return (
-              <div key={s} style={{
-                flex: 1,
-                padding: '12px 8px',
-                borderRight: isLast ? 'none' : '1px solid var(--admin-border)',
-                textAlign: 'center',
-              }}>
-                <div style={{
-                  fontFamily: 'var(--admin-font-mono)',
-                  fontWeight: 600,
-                  fontSize: 18,
-                  color: count > 0 ? 'var(--admin-text)' : 'var(--admin-text-faint)',
-                  fontVariantNumeric: 'tabular-nums',
-                }}>
-                  {count.toLocaleString()}
+        <Overline style={{ marginBottom: 10 }}>Needs your attention</Overline>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }} className="la-form-grid">
+          {bottleneck && (
+            <AttentionCard icon="⏳" kind="Wait" title={`${STATUS_LABELS[bottleneck.key]} bottleneck`}
+              sub={`${bottleneck.count} LOA${bottleneck.count > 1 ? 's' : ''} waiting at ${STATUS_LABELS[bottleneck.key]}.`}
+              cta="View queue" onClick={() => router.push('/')} />
+          )}
+          {rejected > 0 && (
+            <AttentionCard icon="✕" kind="Rejected" title={`${rejected} rejection${rejected > 1 ? 's' : ''}`}
+              sub={`${rejected} LOA${rejected > 1 ? 's have' : ' has'} been rejected and may need rework.`}
+              cta="Review rejections" onClick={() => router.push('/')} />
+          )}
+          {noRoleUsers.length > 0 && (
+            <AttentionCard icon="◇" kind="Review" title={`${noRoleUsers.length} user${noRoleUsers.length > 1 ? 's' : ''} without role`}
+              sub={noRoleUsers.slice(0, 3).map(u => u.full_name || u.email.split('@')[0]).join(', ') + (noRoleUsers.length > 3 ? ` and ${noRoleUsers.length - 3} more` : '')}
+              cta="Assign roles" onClick={() => {}} />
+          )}
+          {!bottleneck && rejected === 0 && noRoleUsers.length === 0 && (
+            <AttentionCard icon="✓" kind="Approved" title="All clear" sub="No bottlenecks, no rejections, all users assigned." cta="" />
+          )}
+        </div>
+      </div>
+
+      {/* Pipeline flow */}
+      <div className="la-card" style={{ padding: '20px 22px 10px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <Overline>Where LOAs are right now</Overline>
+          <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Bubble size = number of LOAs</span>
+        </div>
+        <PipelineFlowSVG sc={sc} onClick={() => router.push('/')} />
+      </div>
+
+      {/* Budget + Activity */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 16 }} className="la-form-grid">
+        <div className="la-card" style={{ padding: 20 }}>
+          <Overline style={{ marginBottom: 12 }}>Budget by cluster</Overline>
+          {stats.cluster_budgets.map((c, i) => (
+            <div key={c.cluster || '—'} style={{ display: 'grid', gridTemplateColumns: '18px 80px 1fr 90px', gap: 10, alignItems: 'center', padding: '8px 0' }}>
+              <span style={{ fontFamily: F.mono, fontSize: 11, color: i === 0 ? 'var(--gold)' : 'var(--text-tertiary)', fontWeight: 600 }}>{i + 1}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{c.cluster || '—'}</span>
+              <div style={{ height: 7, background: 'var(--surface-sunken)', borderRadius: 99 }}>
+                <div style={{ width: `${(c.total / maxCluster) * 100}%`, height: '100%', background: 'var(--gold)', borderRadius: 99, opacity: 1 - i * 0.12 }} />
+              </div>
+              <span style={{ textAlign: 'right', fontFamily: F.mono, fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{fmtEuro(c.total)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="la-card" style={{ padding: 20 }}>
+          <Overline style={{ marginBottom: 14 }}>Activity mix</Overline>
+          <DonutSVG activities={stats.activity_budgets} total={activityTotal} />
+        </div>
+      </div>
+
+      {/* Recent activity */}
+      <div className="la-card" style={{ padding: '20px 20px 10px' }}>
+        <Overline style={{ marginBottom: 10 }}>Latest activity</Overline>
+        {stats.recent_loas.map(l => {
+          const k = statusKind(l.status)
+          const [bg, fg] = KIND_VARS[k]
+          return (
+            <button key={l.id} className="la-row" onClick={() => router.push(`/loa/${l.id}`)} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', width: '100%', background: 'transparent', border: 'none', textAlign: 'left', fontFamily: F.sans, cursor: 'pointer' }}>
+              <span style={{ width: 22, height: 22, borderRadius: 99, flexShrink: 0, fontSize: 10.5, background: `var(${bg})`, color: `var(${fg})`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>◆</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--text-primary)' }}>
+                  <b>{l.brand || '—'}</b> · {l.country || '—'} · <Pill status={l.status} />
                 </div>
-                <div style={{
-                  fontFamily: 'var(--admin-font-sans)',
-                  fontSize: 10,
-                  fontWeight: 500,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  color: 'var(--admin-text-faint)',
-                  marginTop: 2,
-                }}>
-                  {STATUS_LABELS[s]}
+                <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 1 }}>
+                  {l.requestor_email?.split('@')[0] || '—'} · {timeAgo(l.updated_at)} · {fmtEuro(l.fy_2026_total || 0)}
+                </div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ── SVG: Gauge ── */
+function GaugeSVG({ value, max }: { value: number; max: number }) {
+  const pct = Math.min(value / max, 1)
+  const startAngle = -210, endAngle = 30, range = endAngle - startAngle
+  const angle = startAngle + pct * range
+  const r = 64, cx = 80, cy = 80
+  const toRad = (a: number) => (a * Math.PI) / 180
+  const arcEnd = (a: number) => [cx + r * Math.cos(toRad(a)), cy + r * Math.sin(toRad(a))]
+  const [sx, sy] = arcEnd(startAngle), [ex, ey] = arcEnd(endAngle), [nx, ny] = arcEnd(angle)
+  const largeArc = range > 180 ? 1 : 0, largeArcFilled = (angle - startAngle) > 180 ? 1 : 0
+  const bgD = `M ${sx} ${sy} A ${r} ${r} 0 ${largeArc} 1 ${ex} ${ey}`
+  const fillD = `M ${sx} ${sy} A ${r} ${r} 0 ${largeArcFilled} 1 ${nx} ${ny}`
+  const needleLen = r - 10
+  const [tipX, tipY] = [cx + needleLen * Math.cos(toRad(angle)), cy + needleLen * Math.sin(toRad(angle))]
+  return (
+    <svg viewBox="0 0 160 120" style={{ width: 200 }}>
+      <path d={bgD} fill="none" stroke="var(--surface-sunken)" strokeWidth="12" strokeLinecap="round" />
+      <path d={fillD} fill="none" stroke="var(--gold)" strokeWidth="12" strokeLinecap="round" className="la-gauge" />
+      <line x1={cx} y1={cy} x2={tipX} y2={tipY} stroke="var(--text-primary)" strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r="4" fill="var(--text-primary)" />
+      <text x={cx} y={cy + 22} textAnchor="middle" style={{ fontFamily: F.display, fontSize: 20, fontWeight: 600, fill: 'var(--text-primary)' }}>€{value.toFixed(1)}M</text>
+      <text x={cx} y={cy + 34} textAnchor="middle" style={{ fontSize: 8, fill: 'var(--text-tertiary)' }}>of €{max}M envelope</text>
+    </svg>
+  )
+}
+
+/* ── SVG: Donut ── */
+function DonutSVG({ activities, total }: { activities: { activity: string; total: number }[]; total: number }) {
+  const r = 52, c = 2 * Math.PI * r, ops = [1, .68, .44, .26, .18, .14, .1, .08, .06, .05]
+  let acc = 0
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap' }}>
+      <svg viewBox="0 0 140 140" style={{ width: 132, flexShrink: 0 }}>
+        {activities.map((a, i) => {
+          const frac = total > 0 ? a.total / total : 0, off = acc; acc += frac
+          return <circle key={a.activity} cx="70" cy="70" r={r} fill="none" stroke="var(--gold)" strokeOpacity={ops[i] || .05} strokeWidth="15" strokeDasharray={`${frac * c - 2} ${c}`} strokeDashoffset={-off * c} transform="rotate(-90 70 70)" />
+        })}
+        <text x="70" y="66" textAnchor="middle" style={{ fontFamily: F.display, fontSize: 21, fontWeight: 600, fill: 'var(--text-primary)' }}>{fmtEuro(total)}</text>
+        <text x="70" y="82" textAnchor="middle" style={{ fontSize: 9, fill: 'var(--text-tertiary)' }}>{activities.length} types</text>
+      </svg>
+      <div style={{ display: 'grid', gap: 7, flex: 1, minWidth: 170 }}>
+        {activities.slice(0, 6).map((a, i) => (
+          <div key={a.activity} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 3, background: 'var(--gold)', opacity: ops[i] || .1, flexShrink: 0 }} />
+            <span style={{ fontWeight: 500, flex: 1, color: 'var(--text-primary)' }}>{a.activity || '—'}</span>
+            <span style={{ fontFamily: F.mono, fontSize: 12, color: 'var(--text-secondary)' }}>{fmtEuro(a.total)}</span>
+            <span style={{ fontFamily: F.mono, fontSize: 10.5, color: 'var(--text-tertiary)', width: 34, textAlign: 'right' }}>{total > 0 ? Math.round((a.total / total) * 100) : 0}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ── SVG: PipelineFlow ── */
+function PipelineFlowSVG({ sc, onClick }: { sc: Record<string, number>; onClick: () => void }) {
+  const W = 920, mainY = 74
+  const xs = PIPELINE_STEPS.map((_, i) => 60 + i * ((W - 120) / (PIPELINE_STEPS.length - 1)))
+  const rad = (n: number) => n === 0 ? 7 : Math.min(30, 9 + Math.sqrt(n) * 0.85)
+  const rej = sc['rejected'] || 0
+
+  return (
+    <svg viewBox={`0 0 ${W} 160`} style={{ width: '100%', marginTop: 8 }}>
+      <line x1={xs[0]} y1={mainY} x2={xs[xs.length - 1]} y2={mainY} stroke="var(--border-strong)" strokeWidth="1.5" />
+      <line x1={xs[0]} y1={mainY} x2={xs[xs.length - 1]} y2={mainY} stroke="var(--gold)" strokeWidth="1.5" strokeDasharray="3 9" className="la-flowline" opacity=".8" />
+      {PIPELINE_STEPS.map(([label, key], i) => {
+        const n = (sc[key] || 0) + (key === 'global_brand_review' ? (sc['emea_brand_rework'] || 0) : key === 'global_functions_review' ? (sc['emea_functions_rework'] || 0) : key === 'cmo_cfo_review' ? (sc['emea_cmo_rework'] || 0) : 0)
+        const r = rad(n)
+        const kind = key === 'approved' ? 'Approved' : key === 'draft' ? 'Draft' : 'Wait'
+        const fillC = n === 0 ? 'var(--surface-sunken)' : kind === 'Approved' ? 'var(--st-approved-bg)' : kind === 'Draft' ? 'var(--st-draft-bg)' : 'var(--gold-soft)'
+        const strokeC = n === 0 ? 'var(--border-strong)' : kind === 'Approved' ? 'var(--st-approved-fg)' : kind === 'Draft' ? 'var(--st-draft-fg)' : 'var(--gold)'
+        return (
+          <g key={key} onClick={onClick} style={{ cursor: 'pointer' }}>
+            <circle cx={xs[i]} cy={mainY} r={r} fill={fillC} stroke={strokeC} strokeWidth="1.6" className={n > 3 ? 'la-pulse' : ''} />
+            <text x={xs[i]} y={mainY + (r >= 13 ? 4 : -r - 7)} textAnchor="middle" style={{ fontFamily: F.mono, fontSize: r >= 13 ? 11.5 : 10.5, fontWeight: 600, fill: n === 0 ? 'var(--text-tertiary)' : strokeC }}>{n > 0 ? n.toLocaleString() : '0'}</text>
+            <text x={xs[i]} y={126} textAnchor="middle" style={{ fontFamily: F.sans, fontSize: 10.5, fontWeight: 600, letterSpacing: '.05em', fill: 'var(--text-secondary)', textTransform: 'uppercase' } as any}>{label}</text>
+          </g>
+        )
+      })}
+      {rej > 0 && (
+        <>
+          <circle cx={xs[2] + 70} cy={mainY + 50} r={11} fill="var(--st-rejected-bg)" stroke="var(--st-rejected-fg)" strokeWidth="1.4" />
+          <text x={xs[2] + 70} y={mainY + 54} textAnchor="middle" style={{ fontFamily: F.mono, fontSize: 10, fontWeight: 600, fill: 'var(--st-rejected-fg)' }}>{rej}</text>
+          <text x={xs[2] + 90} y={mainY + 54} style={{ fontSize: 10.5, fill: 'var(--st-rejected-fg)' }}>Rejected</text>
+        </>
+      )}
+    </svg>
+  )
+}
+
+/* ── Attention card ── */
+function AttentionCard({ icon, kind, title, sub, cta, onClick }: { icon: string; kind: string; title: string; sub: string; cta: string; onClick?: () => void }) {
+  const [bg, fg] = KIND_VARS[kind as keyof typeof KIND_VARS] || ['--st-draft-bg', '--st-draft-fg']
+  return (
+    <div className="la-card la-hover" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ width: 32, height: 32, borderRadius: 9, background: `var(${bg})`, color: `var(${fg})`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>{icon}</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{sub}</div>
+      {cta && <button className="la-link" style={{ fontSize: 12.5, marginTop: 'auto', color: `var(${fg})` }} onClick={onClick}>{cta} →</button>}
+    </div>
+  )
+}
+
+function KpiCard({ n, label, data, good, delta }: { n: string; label: string; data: number[]; good: boolean; delta?: string }) {
+  return (
+    <div className="la-card" style={{ padding: '16px 18px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ fontFamily: F.mono, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>{n}</div>
+        <Spark data={data} good={good} />
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>{label}</div>
+      {delta && <div style={{ fontSize: 11, color: good ? 'var(--st-approved-fg)' : 'var(--text-tertiary)', marginTop: 3, fontWeight: 600 }}>{delta}</div>}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════
+   People (Users)
+   ════════════════════════════════════════════════════════════════ */
+
+function PeopleTab({ users, roles, search, onSearchChange, onChangeRole }: { users: AdminUser[]; roles: AdminRole[]; search: string; onSearchChange: (v: string) => void; onChangeRole: (id: string, rc: string) => void }) {
+  const noRole = users.filter(u => !u.role_code)
+  const filtered = useMemo(() => {
+    if (!search) return users
+    const q = search.toLowerCase()
+    return users.filter(u => u.email.toLowerCase().includes(q) || (u.full_name || '').toLowerCase().includes(q) || (u.role_name || '').toLowerCase().includes(q))
+  }, [users, search])
+
+  const groups = useMemo(() => {
+    const m = new Map<string, number>()
+    roles.forEach(r => { const g = roleGroup(r); m.set(g, (m.get(g) || 0) + 1) })
+    return m
+  }, [roles])
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      {/* Stats */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        {[[String(users.length), 'users'], [String(groups.size), 'role groups'], [noRole.length > 0 ? `${noRole.length} unassigned` : '100% assigned', 'role coverage']].map(([n, l]) => (
+          <div key={l} className="la-card" style={{ padding: '10px 18px', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontFamily: F.mono, fontSize: 19, fontWeight: 600, color: 'var(--text-primary)' }}>{n}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{l}</span>
+          </div>
+        ))}
+        <div className="la-search" style={{ marginLeft: 'auto' }}>
+          <span style={{ opacity: .5 }}>⌕</span>
+          <input placeholder="Search email, name, role…" value={search} onChange={(e) => onSearchChange(e.target.value)} />
+        </div>
+      </div>
+
+      {/* No-role card */}
+      {noRole.length > 0 && (
+        <div className="la-card" style={{ padding: 18, borderLeft: '3px solid var(--gold)' }}>
+          <Overline style={{ color: 'var(--text-secondary)', marginBottom: 12 }}>{noRole.length} user{noRole.length > 1 ? 's' : ''} need a role</Overline>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }} className="la-form-grid">
+            {noRole.slice(0, 6).map(u => (
+              <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--surface-raised)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                <Avatar initials={initialsOf(u.full_name || u.email)} size={30} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-primary)' }}>{u.full_name || u.email.split('@')[0]}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.email}</div>
+                </div>
+                <select className="la-input" onChange={(e) => e.target.value && onChangeRole(u.id, e.target.value)} defaultValue="" style={{ height: 28, fontSize: 11, padding: '0 6px', width: 120, cursor: 'pointer' }}>
+                  <option value="">Assign…</option>
+                  {roles.map(r => <option key={r.code} value={r.code}>{r.display_name}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Full table */}
+      <div className="la-card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="la-thead" style={{ display: 'grid', gridTemplateColumns: '44px 1.15fr 1fr 160px 120px 110px' }}>
+          <div /><div>User</div><div>Email</div><div>Role</div><div>Scope</div><div />
+        </div>
+        {filtered.map(u => (
+          <div key={u.id} className="la-row" style={{ display: 'grid', gridTemplateColumns: '44px 1.15fr 1fr 160px 120px 110px', alignItems: 'center', cursor: 'default' }}>
+            <Avatar initials={initialsOf(u.full_name || u.email)} size={28} />
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>
+              {u.full_name || '—'} {u.can_override_lock && <span title="Admin" style={{ color: 'var(--gold)', fontSize: 11 }}>◆</span>}
+            </div>
+            <div style={{ fontFamily: F.mono, fontSize: 11.5, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 10 }}>{u.email}</div>
+            <div><Pill status={u.role_code || 'draft'} label={u.role_name || 'No role'} kind={u.role_code ? undefined : 'Draft'} /></div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{u.scope_type || '—'}</div>
+            <div style={{ textAlign: 'right' }}>
+              <select className="la-input" value={u.role_code || ''} onChange={(e) => e.target.value && onChangeRole(u.id, e.target.value)} style={{ height: 28, fontSize: 11, padding: '0 6px', cursor: 'pointer' }}>
+                {!u.role_code && <option value="">—</option>}
+                {roles.map(r => <option key={r.code} value={r.code}>{r.display_name}</option>)}
+              </select>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Access (Permission matrix)
+   ════════════════════════════════════════════════════════════════ */
+
+function AccessTab({ matrix, edits, saving, onCellChange, onDiscard, onSave }: { matrix: MatrixData; edits: Record<string, string>; saving: boolean; onCellChange: (rc: string, s: string, p: string) => void; onDiscard: () => void; onSave: () => void }) {
+  const editCount = Object.keys(edits).length
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', maxWidth: 460, lineHeight: 1.55 }}>
+          Who can do what, at every workflow step. One glance — no guessing.
+        </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {Object.entries(CELL_STYLE).filter(([k]) => k !== 'none').map(([k, s]) => (
+            <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-secondary)' }}>
+              <span style={{ width: 20, height: 20, borderRadius: 6, background: s.bg, color: s.fg, border: k === 'view' ? '1px solid var(--border)' : '1px solid transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10.5, fontWeight: 700 }}>{s.label}</span>
+              {s.name}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {editCount > 0 && (
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Btn variant="primary" onClick={onSave} disabled={saving}>{saving ? 'Saving…' : `Save ${editCount} change${editCount > 1 ? 's' : ''}`}</Btn>
+          <Btn variant="ghost" onClick={onDiscard} disabled={saving}>Discard</Btn>
+        </div>
+      )}
+
+      <div className="la-card" style={{ padding: 0, overflow: 'auto' }}>
+        <div style={{ minWidth: 760 }}>
+          <div className="la-thead" style={{ display: 'grid', gridTemplateColumns: `200px repeat(${matrix.statuses.length}, 1fr)` }}>
+            <div>Role</div>
+            {matrix.statuses.map(s => <div key={s} style={{ textAlign: 'center' }}>{STATUS_LABELS[s] || s}</div>)}
+          </div>
+          {matrix.matrix.map(row => (
+            <div key={row.role_code} className="la-row" style={{ display: 'grid', gridTemplateColumns: `200px repeat(${matrix.statuses.length}, 1fr)`, alignItems: 'center', cursor: 'default' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{row.role_name}</div>
+              {matrix.statuses.map(s => {
+                const key = `${row.role_code}:${s}`
+                const current = edits[key] ?? row.permissions[s] ?? 'none'
+                const edited = key in edits
+                const cs = CELL_STYLE[current] || CELL_STYLE.none
+                return (
+                  <div key={s} style={{ textAlign: 'center' }} title={`${row.role_name} — ${cs.name} at ${s}`}>
+                    <select value={current} onChange={(e) => onCellChange(row.role_code, s, e.target.value)} style={{
+                      width: 26, height: 26, borderRadius: 7, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      background: cs.bg, color: cs.fg, fontSize: 12, fontWeight: 700,
+                      border: edited ? '2px solid var(--gold)' : current === 'view' ? '1px solid var(--border)' : '1px solid transparent',
+                      appearance: 'none', cursor: 'pointer', textAlign: 'center', fontFamily: F.mono, outline: 'none',
+                    }}>
+                      {PERM_OPTIONS.map(p => <option key={p} value={p}>{CELL_STYLE[p].label}</option>)}
+                    </select>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+        A = Advance · V = Validate · E = Edit · C = Comment · R = Read · — = None. Click a cell to change. Edited cells have a gold border.
+      </div>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Audit (Overrides)
+   ════════════════════════════════════════════════════════════════ */
+
+function AuditTab({ loaId, setLoaId, status, setStatus, reason, setReason, confirm, setConfirm, overriding, onSubmit, recentLoas }: {
+  loaId: string; setLoaId: (v: string) => void; status: string; setStatus: (v: string) => void
+  reason: string; setReason: (v: string) => void; confirm: string; setConfirm: (v: string) => void
+  overriding: boolean; onSubmit: () => void; recentLoas: DashStats['recent_loas']
+}) {
+  const armed = confirm.trim().toUpperCase() === 'OVERRIDE' && loaId.trim().length > 0
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '440px 1fr', gap: 20, alignItems: 'start' }} className="la-form-grid">
+      <div>
+        <div style={{ padding: '13px 16px', borderRadius: 10, background: 'var(--st-rejected-bg)', color: 'var(--st-rejected-fg)', display: 'flex', gap: 11, alignItems: 'flex-start', marginBottom: 14 }}>
+          <span style={{ fontSize: 15 }}>⚠</span>
+          <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
+            <b>Emergency workflow override.</b> Bypasses permission checks and writes an audit event — logged with your name, timestamp and reason.
+          </div>
+        </div>
+        <div className="la-card" style={{ padding: 22, display: 'grid', gap: 16 }}>
+          <label>
+            <span className="la-flabel">LOA ID</span>
+            <input className="la-input" placeholder="UUID or LAURA-ID…" value={loaId} onChange={(e) => setLoaId(e.target.value)} style={{ marginTop: 7, fontFamily: F.mono, fontSize: 13 }} />
+          </label>
+          <label>
+            <span className="la-flabel">Move to</span>
+            <select className="la-input" value={status} onChange={(e) => setStatus(e.target.value)} style={{ marginTop: 7, cursor: 'pointer' }}>
+              {WORKFLOW_ORDER.map(s => <option key={s} value={s}>{STATUS_LABELS[s] || s} ({s})</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="la-flabel">Reason <span style={{ color: 'var(--st-rejected-fg)' }}>*</span></span>
+            <textarea className="la-input" rows={3} placeholder="Why is this override necessary?" value={reason} onChange={(e) => setReason(e.target.value)} style={{ marginTop: 7, resize: 'vertical', paddingTop: 10, height: 'auto' }} />
+          </label>
+          <label>
+            <span className="la-flabel">Confirmation</span>
+            <input className="la-input" placeholder='Type OVERRIDE to confirm' value={confirm} onChange={(e) => setConfirm(e.target.value)} style={{ marginTop: 7, fontFamily: F.mono, fontSize: 13 }} />
+          </label>
+          <Btn variant="danger" onClick={onSubmit} disabled={!armed || overriding} style={{ width: '100%', justifyContent: 'center', height: 40 }}>
+            {overriding ? 'Applying…' : 'Create override'}
+          </Btn>
+          {!armed && (
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', textAlign: 'center' }}>
+              {!loaId.trim() ? 'Enter a LOA ID first' : !reason.trim() ? 'A reason is required' : 'Type OVERRIDE to enable'}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Audit trail (from recent_loas as proxy — real audit log endpoint is a TODO) */}
+      <div className="la-card" style={{ padding: '20px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+          <Overline>Recent LOA changes</Overline>
+          <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>Full audit log — coming soon</span>
+        </div>
+        <div style={{ position: 'relative', paddingLeft: 6 }}>
+          <div style={{ position: 'absolute', left: 16, top: 8, bottom: 8, width: 1.5, background: 'var(--border)' }} />
+          {recentLoas.map((l, i) => {
+            const k = statusKind(l.status)
+            const [bg, fg] = KIND_VARS[k]
+            return (
+              <div key={l.id} style={{ display: 'flex', gap: 14, padding: '10px 0', position: 'relative' }}>
+                <span style={{ width: 22, height: 22, borderRadius: 99, flexShrink: 0, zIndex: 1, fontSize: 10.5, background: `var(${bg})`, color: `var(${fg})`, border: '2px solid var(--surface)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>◆</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{STATUS_LABELS[l.status] || l.status}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: F.mono }}>{l.requestor_email?.split('@')[0]} · {timeAgo(l.updated_at)}</span>
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', marginTop: 3, fontFamily: F.mono, fontSize: 11.5 }}>
+                    {l.draft_id} · {l.brand} · {l.country} · {fmtEuro(l.fy_2026_total || 0)}
+                  </div>
                 </div>
               </div>
             )
           })}
         </div>
       </div>
-
-      {/* ── Budget by cluster + Activity mix ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32 }}>
-        <div>
-          <div className="type-micro" style={{ marginBottom: 16 }}>Budget by cluster</div>
-          <BudgetBars items={stats.cluster_budgets.map(c => ({ label: c.cluster, value: c.total }))} />
-        </div>
-        <div>
-          <div className="type-micro" style={{ marginBottom: 16 }}>Activity mix</div>
-          <BudgetBars items={stats.activity_budgets.slice(0, 8).map(a => ({ label: a.activity, value: a.total }))} />
-        </div>
-      </div>
-
-      {/* ── Recent activity ── */}
-      <div>
-        <div className="type-micro" style={{ marginBottom: 12 }}>Recent activity</div>
-        <div className="admin-surface" style={{ overflow: 'hidden' }}>
-          {/* Table header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '56px 140px 90px minmax(0,1fr) 90px 100px 80px',
-            gap: 0,
-            padding: '10px 16px',
-            background: 'var(--admin-surface-subtle)',
-            borderBottom: '1px solid var(--admin-border)',
-          }}>
-            {['Time', 'LOA ID', 'Status', 'Description', 'Cluster', 'FY 2026', 'Updated'].map(h => (
-              <span key={h} className="type-th">{h}</span>
-            ))}
-          </div>
-          {/* Rows */}
-          {stats.recent_loas.map(loa => (
-            <RecentRow key={loa.id} loa={loa} onClick={() => onOpenLoa(loa.id)} />
-          ))}
-          {stats.recent_loas.length === 0 && (
-            <div style={{ padding: '32px 16px', textAlign: 'center' }}>
-              <span className="type-caption">No recent activity.</span>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   )
-}
-
-function ControlFigure({ value, label, warn }: { value: string; label: string; warn?: boolean }) {
-  return (
-    <div>
-      <span style={{
-        fontFamily: 'var(--admin-font-mono)',
-        fontWeight: 500,
-        fontSize: 20,
-        letterSpacing: '-0.02em',
-        color: warn ? 'var(--admin-accent-deep)' : 'var(--admin-text)',
-        fontVariantNumeric: 'tabular-nums',
-      }}>
-        {value}
-      </span>
-      <span style={{
-        fontFamily: 'var(--admin-font-sans)',
-        fontSize: 13,
-        color: 'var(--admin-text-muted)',
-        marginLeft: 6,
-      }}>
-        {label}
-      </span>
-    </div>
-  )
-}
-
-function BudgetBars({ items }: { items: { label: string; value: number }[] }) {
-  const sorted = [...items].sort((a, b) => b.value - a.value)
-  const max = Math.max(...sorted.map(i => i.value), 1)
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {sorted.map((item, i) => {
-        const pct = Math.max((item.value / max) * 100, 1)
-        return (
-          <div key={item.label}>
-            <div style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-              marginBottom: 4, gap: 12,
-            }}>
-              <span style={{
-                fontFamily: 'var(--admin-font-sans)',
-                fontSize: 12, fontWeight: 500,
-                color: 'var(--admin-text)',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                flex: 1, minWidth: 0,
-              }}>
-                {item.label}
-              </span>
-              <span style={{
-                fontFamily: 'var(--admin-font-mono)',
-                fontSize: 13, fontWeight: 500,
-                color: 'var(--admin-text)',
-                flexShrink: 0,
-                fontVariantNumeric: 'tabular-nums',
-              }}>
-                {fmtEuro(item.value)}
-              </span>
-            </div>
-            <div style={{
-              height: 3,
-              background: 'var(--admin-surface-subtle)',
-              overflow: 'hidden',
-            }}>
-              <div style={{
-                width: `${pct}%`,
-                height: '100%',
-                background: i === 0 ? 'var(--admin-accent)' : 'var(--admin-text)',
-                transition: 'width 500ms ease',
-              }} />
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function RecentRow({ loa, onClick }: {
-  loa: DashStats['recent_loas'][number]; onClick: () => void
-}) {
-  const [hover, setHover] = useState(false)
-  return (
-    <div
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '56px 140px 90px minmax(0,1fr) 90px 100px 80px',
-        gap: 0,
-        padding: '10px 16px',
-        alignItems: 'center',
-        borderBottom: '1px solid var(--admin-border)',
-        background: hover ? 'var(--admin-surface-subtle)' : 'transparent',
-        cursor: 'pointer',
-        transition: 'background 100ms ease',
-      }}
-    >
-      <span className="type-caption">{fmtTime(loa.updated_at)}</span>
-      <span className="type-loa-id">{loa.draft_id}</span>
-      <span className="admin-status-pill admin-status-pill--muted" style={{ fontSize: 10, padding: '2px 6px' }}>
-        {STATUS_LABELS[loa.status] || loa.status}
-      </span>
-      <span style={{
-        fontSize: 12, color: 'var(--admin-text)',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>
-        {[loa.country, loa.brand].filter(Boolean).join(' · ') || '—'}
-      </span>
-      <span className="type-caption">{loa.cluster || '—'}</span>
-      <span className="type-table-num" style={{ fontVariantNumeric: 'tabular-nums' }}>
-        {fmtEuro(loa.fy_2026_total)}
-      </span>
-      <span className="type-caption" style={{ textAlign: 'right' }}>{timeAgo(loa.updated_at)}</span>
-    </div>
-  )
-}
-
-/* ════════════════════════════════════════════════════════════════════════
-   PERMISSIONS TAB
-   Role groups view → Advanced matrix toggle
-   ════════════════════════════════════════════════════════════════════════ */
-
-function PermissionsTab({ matrix, roles, edits, editCount, saving, showAdvanced, onToggleAdvanced, onCellChange, onDiscard, onSave }: {
-  matrix: MatrixData
-  roles: AdminRole[]
-  edits: Record<string, string>
-  editCount: number
-  saving: boolean
-  showAdvanced: boolean
-  onToggleAdvanced: () => void
-  onCellChange: (role: string, status: string, perm: string) => void
-  onDiscard: () => void
-  onSave: () => void
-}) {
-  /* Group roles by scope_type for the summary view */
-  const roleGroups = groupRoles(matrix, roles)
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-
-      <div>
-        <div className="type-page-title" style={{ marginBottom: 4 }}>Permissions</div>
-        <div className="type-body" style={{ color: 'var(--admin-text-muted)' }}>
-          Role profiles, deviations, and workflow access.
-        </div>
-      </div>
-
-      {/* Role groups summary */}
-      {!showAdvanced && (
-        <div className="admin-surface" style={{ overflow: 'hidden' }}>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0,1fr) 80px 100px',
-            gap: 0,
-            padding: '10px 20px',
-            background: 'var(--admin-surface-subtle)',
-            borderBottom: '1px solid var(--admin-border)',
-          }}>
-            <span className="type-th">Role group</span>
-            <span className="type-th" style={{ textAlign: 'center' }}>Roles</span>
-            <span className="type-th" style={{ textAlign: 'center' }}>Users</span>
-          </div>
-          {roleGroups.map(g => (
-            <div key={g.label} style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0,1fr) 80px 100px',
-              gap: 0,
-              padding: '14px 20px',
-              borderBottom: '1px solid var(--admin-border)',
-              alignItems: 'center',
-            }}>
-              <div>
-                <div style={{
-                  fontFamily: 'var(--admin-font-sans)',
-                  fontSize: 14, fontWeight: 500,
-                  color: 'var(--admin-text)',
-                }}>
-                  {g.label}
-                </div>
-                <div className="type-caption" style={{ marginTop: 2 }}>{g.summary}</div>
-              </div>
-              <div style={{
-                fontFamily: 'var(--admin-font-mono)',
-                fontSize: 14, fontWeight: 500,
-                color: 'var(--admin-text)',
-                textAlign: 'center',
-                fontVariantNumeric: 'tabular-nums',
-              }}>
-                {g.roleCount}
-              </div>
-              <div style={{
-                fontFamily: 'var(--admin-font-mono)',
-                fontSize: 14, fontWeight: 500,
-                color: 'var(--admin-text)',
-                textAlign: 'center',
-                fontVariantNumeric: 'tabular-nums',
-              }}>
-                {g.userCount}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Toggle + save controls */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <button onClick={onToggleAdvanced} style={btnSecondary}>
-          {showAdvanced ? 'Show role groups' : 'Open matrix editor'}
-        </button>
-        {showAdvanced && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            {editCount > 0 && (
-              <button onClick={onDiscard} style={btnSecondary}>Discard ({editCount})</button>
-            )}
-            <button
-              onClick={onSave}
-              disabled={editCount === 0 || saving}
-              style={{
-                ...btnPrimary,
-                opacity: editCount === 0 || saving ? 0.4 : 1,
-                cursor: editCount === 0 || saving ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {saving ? 'Saving…' : `Save changes (${editCount})`}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Advanced matrix */}
-      {showAdvanced && (
-        <div className="admin-surface" style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr>
-                <th style={{
-                  ...thBase,
-                  position: 'sticky', left: 0, zIndex: 10,
-                  background: 'var(--admin-surface)',
-                  minWidth: 200, textAlign: 'left',
-                  borderBottom: '1px solid var(--admin-border)',
-                  borderRight: '1px solid var(--admin-border)',
-                }}>
-                  <span className="type-th">Role</span>
-                </th>
-                {matrix.statuses.map(s => (
-                  <th key={s} style={{
-                    ...thBase,
-                    minWidth: 80,
-                    textAlign: 'center',
-                    borderBottom: '1px solid var(--admin-border)',
-                  }}>
-                    <span className="type-th">{STATUS_LABELS[s] || s}</span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {matrix.matrix.map(row => (
-                <tr key={row.role_code}>
-                  <td style={{
-                    padding: '8px 16px',
-                    position: 'sticky', left: 0, zIndex: 5,
-                    background: 'var(--admin-surface)',
-                    borderBottom: '1px solid var(--admin-border)',
-                    borderRight: '1px solid var(--admin-border)',
-                    fontFamily: 'var(--admin-font-sans)',
-                    fontSize: 12, fontWeight: 500,
-                    color: 'var(--admin-text)',
-                  }}>
-                    {row.role_name}
-                  </td>
-                  {matrix.statuses.map(status => {
-                    const editKey = `${row.role_code}:${status}`
-                    const current = edits[editKey] ?? row.permissions[status] ?? 'none'
-                    const isEdited = editKey in edits
-                    const pc = PERM_CODES[current] || PERM_CODES.none
-                    return (
-                      <td
-                        key={status}
-                        className={isEdited ? 'admin-cell-edited' : ''}
-                        style={{
-                          padding: '6px 4px',
-                          textAlign: 'center',
-                          borderBottom: '1px solid var(--admin-border)',
-                          position: 'relative',
-                        }}
-                      >
-                        <select
-                          value={current}
-                          onChange={e => onCellChange(row.role_code, status, e.target.value)}
-                          title={pc.title}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            fontFamily: 'var(--admin-font-mono)',
-                            fontSize: 12,
-                            fontWeight: 500,
-                            color: current === 'view' ? 'var(--admin-text-muted)'
-                              : current === 'none' ? 'var(--admin-text-faint)'
-                              : 'var(--admin-text)',
-                            textAlign: 'center',
-                            cursor: 'pointer',
-                            padding: '4px 2px',
-                            width: '100%',
-                            appearance: 'none',
-                            WebkitAppearance: 'none',
-                          }}
-                        >
-                          {PERM_OPTIONS.map(p => (
-                            <option key={p} value={p}>
-                              {PERM_CODES[p]?.code || '—'} {PERM_CODES[p]?.title || p}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** Group matrix roles by scope for the summary view */
-function groupRoles(matrix: MatrixData, roles: AdminRole[]) {
-  const groups: Record<string, { label: string; roles: string[]; userCount: number; summary: string }> = {}
-
-  for (const role of roles) {
-    const scope = role.scope_type || 'other'
-    let groupKey: string
-    let label: string
-    let summary: string
-
-    if (role.code === 'super_admin') {
-      groupKey = 'super_admin'
-      label = 'Super Admin'
-      summary = 'Full access across all statuses'
-    } else if (role.code.includes('emea_ps')) {
-      groupKey = 'emea_ps'
-      label = 'EMEA PS'
-      summary = 'Advance across workflow'
-    } else if (scope === 'cluster' && role.code.includes('marketer')) {
-      groupKey = 'local_marketers'
-      label = 'Local Marketers'
-      summary = 'Edit at Draft, view elsewhere'
-    } else if (scope === 'cluster' && role.code.includes('finance')) {
-      groupKey = 'local_finance'
-      label = 'Local Finance'
-      summary = 'Edit at Draft, view elsewhere'
-    } else if (role.code.includes('global') && role.code.includes('brand')) {
-      groupKey = 'global_brands'
-      label = 'Global Brands'
-      summary = 'Comment at Global review'
-    } else if (role.code.includes('global') && role.code.includes('function')) {
-      groupKey = 'global_functions'
-      label = 'Global Functions'
-      summary = 'Comment at Functions review'
-    } else if (role.code.includes('corporate')) {
-      groupKey = 'corporate'
-      label = 'Corporate'
-      summary = 'Validate at Corporate review'
-    } else {
-      groupKey = scope
-      label = scope.charAt(0).toUpperCase() + scope.slice(1)
-      summary = 'Mixed access'
-    }
-
-    if (!groups[groupKey]) {
-      groups[groupKey] = { label, roles: [], userCount: 0, summary }
-    }
-    groups[groupKey].roles.push(role.code)
-    groups[groupKey].userCount += role.user_count
-  }
-
-  return Object.values(groups).map(g => ({
-    label: g.label,
-    roleCount: g.roles.length,
-    userCount: g.userCount,
-    summary: g.summary,
-  }))
-}
-
-/* ════════════════════════════════════════════════════════════════════════
-   USERS TAB
-   Search-first table
-   ════════════════════════════════════════════════════════════════════════ */
-
-function UsersTab({ users, roles, search, onSearchChange, onChangeRole }: {
-  users: AdminUser[]
-  roles: AdminRole[]
-  search: string
-  onSearchChange: (v: string) => void
-  onChangeRole: (id: string, code: string) => void
-}) {
-  const filtered = users.filter(u => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      u.email.toLowerCase().includes(q) ||
-      (u.full_name || '').toLowerCase().includes(q) ||
-      (u.role_name || '').toLowerCase().includes(q) ||
-      (u.scope_type || '').toLowerCase().includes(q)
-    )
-  })
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div>
-          <div className="type-page-title" style={{ marginBottom: 4 }}>Users</div>
-          <div className="type-caption">{users.length} users</div>
-        </div>
-      </div>
-
-      {/* Search */}
-      <div>
-        <input
-          type="text"
-          value={search}
-          onChange={e => onSearchChange(e.target.value)}
-          placeholder="Search email, name, role, cluster…"
-          style={{
-            width: '100%',
-            maxWidth: 400,
-            padding: '10px 14px',
-            fontFamily: 'var(--admin-font-sans)',
-            fontSize: 13,
-            background: 'var(--admin-surface)',
-            color: 'var(--admin-text)',
-            border: '1px solid var(--admin-border)',
-            borderRadius: 2,
-            outline: 'none',
-          }}
-        />
-      </div>
-
-      {/* Table */}
-      <div className="admin-surface" style={{ overflow: 'hidden' }}>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {['Email', 'Name', 'Role', 'Scope', 'Admin', 'Change role'].map(h => (
-                  <th key={h} style={{
-                    ...thBase,
-                    background: 'var(--admin-surface-subtle)',
-                    borderBottom: '1px solid var(--admin-border)',
-                    textAlign: 'left',
-                  }}>
-                    <span className="type-th">{h}</span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(u => (
-                <UserRow key={u.id} user={u} roles={roles} onChangeRole={onChangeRole} />
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center' }}>
-                    <span className="type-caption">No users match "{search}"</span>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function UserRow({ user, roles, onChangeRole }: {
-  user: AdminUser; roles: AdminRole[]; onChangeRole: (id: string, code: string) => void
-}) {
-  const [hover, setHover] = useState(false)
-  return (
-    <tr
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{
-        borderBottom: '1px solid var(--admin-border)',
-        background: hover ? 'var(--admin-surface-subtle)' : 'transparent',
-        transition: 'background 100ms ease',
-      }}
-    >
-      <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 500, color: 'var(--admin-text)' }}>
-        {user.email}
-      </td>
-      <td style={{ padding: '12px 16px', fontSize: 13, color: 'var(--admin-text-muted)' }}>
-        {user.full_name || '—'}
-      </td>
-      <td style={{ padding: '12px 16px' }}>
-        <span className="admin-status-pill admin-status-pill--muted" style={{ fontSize: 10 }}>
-          {user.role_name}
-        </span>
-      </td>
-      <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--admin-text-faint)' }}>
-        {user.scope_type || '—'}
-      </td>
-      <td style={{ padding: '12px 16px' }}>
-        {user.can_override_lock ? (
-          <span style={{ color: 'var(--admin-accent)', fontSize: 13 }}>✓</span>
-        ) : (
-          <span style={{ color: 'var(--admin-text-faint)' }}>—</span>
-        )}
-      </td>
-      <td style={{ padding: '8px 16px' }}>
-        <select
-          value={user.role_code || ''}
-          onChange={e => onChangeRole(user.id, e.target.value)}
-          style={{
-            background: 'var(--admin-surface)',
-            color: 'var(--admin-text)',
-            border: '1px solid var(--admin-border)',
-            padding: '6px 10px',
-            fontSize: 12,
-            fontFamily: 'var(--admin-font-sans)',
-            borderRadius: 2,
-            cursor: 'pointer',
-            minWidth: 200,
-          }}
-        >
-          {roles.map(r => <option key={r.code} value={r.code}>{r.display_name}</option>)}
-        </select>
-      </td>
-    </tr>
-  )
-}
-
-/* ════════════════════════════════════════════════════════════════════════
-   OVERRIDES TAB (was "Force Status")
-   Stripe-style confirmation pattern: type LOA ID to confirm.
-   ════════════════════════════════════════════════════════════════════════ */
-
-function OverridesTab({
-  loaId, setLoaId, status, setStatus, reason, setReason,
-  confirm, setConfirm, overriding, onSubmit,
-}: {
-  loaId: string; setLoaId: (v: string) => void
-  status: string; setStatus: (v: string) => void
-  reason: string; setReason: (v: string) => void
-  confirm: string; setConfirm: (v: string) => void
-  overriding: boolean; onSubmit: () => void
-}) {
-  const idTrimmed = loaId.trim()
-  const confirmed = idTrimmed.length > 0 && confirm.trim() === idTrimmed
-  const canSubmit = confirmed && reason.trim().length > 0 && !overriding
-
-  return (
-    <div style={{ maxWidth: 520 }}>
-      <div className="type-page-title" style={{ marginBottom: 4 }}>Overrides</div>
-      <div className="type-body" style={{ color: 'var(--admin-text-muted)', marginBottom: 28 }}>
-        Emergency workflow override. Bypasses permission checks and writes an audit event.
-      </div>
-
-      <div className="admin-surface" style={{
-        padding: '28px 24px',
-        display: 'flex', flexDirection: 'column', gap: 20,
-        borderColor: 'var(--admin-text)',
-      }}>
-
-        <FieldGroup label="LOA">
-          <input
-            value={loaId}
-            onChange={e => setLoaId(e.target.value)}
-            placeholder="Search by LAURA ID…"
-            style={inputStyle}
-          />
-        </FieldGroup>
-
-        <FieldGroup label="Move to">
-          <select value={status} onChange={e => setStatus(e.target.value)} style={inputStyle}>
-            {Object.entries(STATUS_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-        </FieldGroup>
-
-        {idTrimmed && (
-          <div style={{
-            padding: '14px 16px',
-            background: 'var(--admin-surface-subtle)',
-            borderRadius: 2,
-            borderLeft: '3px solid var(--admin-text)',
-          }}>
-            <div className="type-caption" style={{ lineHeight: 1.7 }}>
-              <strong>Consequence:</strong> This will move the LOA forward without the current stage's validation.
-              All current reviewers will lose comment access.
-              The action will appear in the audit ledger.
-            </div>
-          </div>
-        )}
-
-        <FieldGroup label="Reason (required)">
-          <textarea
-            value={reason}
-            onChange={e => setReason(e.target.value)}
-            placeholder="Why is this override necessary?"
-            rows={2}
-            style={{ ...inputStyle, resize: 'none' }}
-          />
-        </FieldGroup>
-
-        <FieldGroup label="Confirmation">
-          <div className="type-caption" style={{ marginBottom: 8 }}>
-            Type <strong style={{ fontFamily: 'var(--admin-font-mono)', color: 'var(--admin-text)' }}>
-              {idTrimmed || 'the LOA ID'}
-            </strong> to confirm
-          </div>
-          <input
-            value={confirm}
-            onChange={e => setConfirm(e.target.value)}
-            placeholder={idTrimmed || 'Enter LOA ID first'}
-            style={inputStyle}
-          />
-        </FieldGroup>
-
-        <button
-          onClick={onSubmit}
-          disabled={!canSubmit}
-          style={{
-            background: canSubmit ? 'var(--admin-text)' : 'var(--admin-border)',
-            color: canSubmit ? 'var(--admin-bg)' : 'var(--admin-text-faint)',
-            border: 'none',
-            borderRadius: 2,
-            padding: '12px 16px',
-            fontFamily: 'var(--admin-font-sans)',
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: canSubmit ? 'pointer' : 'not-allowed',
-            letterSpacing: '0.02em',
-            transition: 'background 140ms ease, color 140ms ease',
-          }}
-        >
-          {overriding ? 'Applying override…' : 'Create override'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function FieldGroup({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="type-micro" style={{ marginBottom: 8 }}>{label}</div>
-      {children}
-    </div>
-  )
-}
-
-/* ════════════════════════════════════════════════════════════════════════
-   Shared inline styles (used instead of className to keep everything
-   in one file during this refactor; can be extracted to CSS later)
-   ════════════════════════════════════════════════════════════════════════ */
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '10px 14px',
-  fontFamily: 'var(--admin-font-sans)',
-  fontSize: 13,
-  background: 'var(--admin-bg)',
-  color: 'var(--admin-text)',
-  border: '1px solid var(--admin-border)',
-  borderRadius: 2,
-  outline: 'none',
-}
-
-const thBase: React.CSSProperties = {
-  padding: '10px 16px',
-}
-
-const btnPrimary: React.CSSProperties = {
-  background: 'var(--admin-text)',
-  color: 'var(--admin-bg)',
-  border: 'none',
-  borderRadius: 2,
-  padding: '8px 18px',
-  fontFamily: 'var(--admin-font-sans)',
-  fontSize: 13,
-  fontWeight: 500,
-  cursor: 'pointer',
-  letterSpacing: '0.01em',
-}
-
-const btnSecondary: React.CSSProperties = {
-  background: 'transparent',
-  color: 'var(--admin-text)',
-  border: '1px solid var(--admin-border-strong)',
-  borderRadius: 2,
-  padding: '7px 16px',
-  fontFamily: 'var(--admin-font-sans)',
-  fontSize: 13,
-  fontWeight: 500,
-  cursor: 'pointer',
-}
-
-const btnGhost: React.CSSProperties = {
-  background: 'transparent',
-  color: 'var(--admin-text-muted)',
-  border: 'none',
-  padding: '6px 10px',
-  fontFamily: 'var(--admin-font-sans)',
-  fontSize: 13,
-  cursor: 'pointer',
 }

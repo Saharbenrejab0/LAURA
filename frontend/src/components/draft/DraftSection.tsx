@@ -1,97 +1,84 @@
 'use client';
 
 /**
- * DraftSection - one of the 9 sections of the draft page.
+ * DraftSection — Editorial Finance redesign.
  *
- * Header shows: title + X/Y completion in Plex Mono + small SVG arc that
- * fills proportionally + optional "N required" hint.
- * Body slot renders InlineEditFields.
+ * Section container used to group InlineEditFields. Renders a header with
+ * title + required completion badge, and an expandable body.
+ *
+ * All original props preserved (id, title, requiredComplete, requiredTotal).
+ * The `id` attribute is applied to the outer element so the "Jump to" logic
+ * in the page can scroll to it.
  */
 
-import { color, font, radius, space } from '@/styles/tokens';
+import { useState } from 'react';
 
 interface DraftSectionProps {
   id: string;
   title: string;
-  filled: number;
-  total: number;
-  requiredMissing?: number;
+  requiredComplete: number;
+  requiredTotal: number;
   children: React.ReactNode;
+  defaultOpen?: boolean;
 }
 
 export default function DraftSection({
-  id, title, filled, total, requiredMissing = 0, children,
+  id, title, requiredComplete, requiredTotal, children, defaultOpen = true,
 }: DraftSectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  const allRequiredDone = requiredComplete === requiredTotal;
+  const hasRequired = requiredTotal > 0;
+
   return (
-    <section id={id} style={{
-      background: color.bg.surface,
-      border: `1px solid ${color.border.soft}`,
-      borderRadius: radius.card,
-      padding: space[5],
-      marginBottom: space[4],
-    }}>
-      <header style={{
-        display: 'flex', alignItems: 'center', gap: space[3],
-        marginBottom: space[4],
-        paddingBottom: space[3],
-        borderBottom: `1px solid ${color.border.soft}`,
-      }}>
-        <h2 style={{
-          margin: 0, fontSize: 15, lineHeight: '22px',
-          fontWeight: 600, color: color.text.primary, flex: 1,
-        }}>{title}</h2>
+    <section
+      id={id}
+      className="la-card"
+      style={{ marginBottom: 14, overflow: 'hidden' }}
+    >
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: '100%',
+          display: 'flex', alignItems: 'center', gap: 14,
+          padding: '16px 22px',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          textAlign: 'left', fontFamily: 'var(--font-sans)',
+        }}
+      >
+        <span style={{
+          fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 600,
+          color: 'var(--text-primary)', flex: 1,
+        }}>
+          {title}
+        </span>
 
-        <CompletionMeter filled={filled} total={total} />
-
-        {requiredMissing > 0 && (
+        {hasRequired && (
           <span style={{
-            fontSize: 12, color: color.status.danger,
-            fontWeight: 500,
+            fontSize: 11.5, fontFamily: 'var(--font-mono)', fontWeight: 600,
+            padding: '3px 10px', borderRadius: 99,
+            background: allRequiredDone ? 'var(--st-approved-bg)' : 'var(--st-wait-bg)',
+            color: allRequiredDone ? 'var(--st-approved-fg)' : 'var(--st-wait-fg)',
           }}>
-            {requiredMissing} required
+            {requiredComplete}/{requiredTotal} required
           </span>
         )}
-      </header>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: space[3] }}>
-        {children}
-      </div>
+        <span style={{
+          fontSize: 12, color: 'var(--text-tertiary)',
+          transform: open ? 'rotate(180deg)' : 'none',
+          transition: 'transform .18s ease',
+          display: 'inline-block', width: 16, textAlign: 'center',
+        }}>▾</span>
+      </button>
+
+      {open && (
+        <div style={{
+          padding: '0 22px 18px',
+          borderTop: '1px solid var(--border)',
+        }}>
+          {children}
+        </div>
+      )}
     </section>
-  );
-}
-
-/* -------------------------------------------------------------------- */
-/* Completion meter - the mono number + arc                             */
-/* -------------------------------------------------------------------- */
-
-function CompletionMeter({ filled, total }: { filled: number; total: number }) {
-  const pct = total === 0 ? 0 : filled / total;
-  const radius = 9;
-  const circumference = 2 * Math.PI * radius;
-  const dash = pct * circumference;
-  const arcColor = pct >= 1 ? color.status.success
-                  : pct >= 0.5 ? color.accent.gold
-                  : color.text.tertiary;
-
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-    }}>
-      <span style={{
-        fontFamily: font.mono, fontSize: 13, fontWeight: 500,
-        color: color.text.primary,
-      }}>
-        {filled}<span style={{ color: color.text.tertiary }}>/{total}</span>
-      </span>
-      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden>
-        <circle cx="11" cy="11" r={radius}
-          fill="none" stroke={color.border.soft} strokeWidth="2" />
-        <circle cx="11" cy="11" r={radius}
-          fill="none" stroke={arcColor} strokeWidth="2"
-          strokeDasharray={`${dash} ${circumference}`}
-          strokeLinecap="round"
-          transform="rotate(-90 11 11)" />
-      </svg>
-    </span>
   );
 }

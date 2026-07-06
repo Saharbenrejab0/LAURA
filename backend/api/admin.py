@@ -114,8 +114,9 @@ async def get_dashboard_stats(
     locked_count = db.query(sql_func.count(LOA.id)).filter(LOA.is_locked == True).scalar() or 0
 
     # Pipeline: LOAs in active review (not draft, not terminal)
-    active_statuses = ['emea_review', 'global_review', 'cmo_cfo_review',
-                       'global_functions_review', 'corporate_review']
+    active_statuses = ['emea_review', 'global_brand_review', 'emea_brand_rework',
+                       'global_functions_review', 'emea_functions_rework',
+                       'cmo_cfo_review', 'emea_cmo_rework', 'corporate_review']
     pipeline_count = (
         db.query(sql_func.count(LOA.id))
         .filter(LOA.status.in_(active_statuses))

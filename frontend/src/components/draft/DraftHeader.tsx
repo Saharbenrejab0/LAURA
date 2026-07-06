@@ -1,21 +1,19 @@
 'use client';
 
 /**
- * DraftHeader - top of the LOA detail page.
- *   - LOA ID (Plex Mono) + status badge + origin badge
- *   - Title (the campaign description headline)
- *   - Autosave indicator (right side)
- *   - Submit button (when editable + not yet submitted)
+ * DraftHeader — Editorial Finance redesign.
  *
- * Origin badge behavior:
- *   draft / rejected -> "Duplicated from"
- *   under review     -> "Based on"
- *   approved         -> hidden (the artifact is its own thing)
+ * Kept as a standalone atom used by app/loa/[id]/page.tsx. Renders:
+ *   - Overline "LOA <draft_id>"
+ *   - Big Cormorant title (the description headline)
+ *   - Status pill + optional "duplicated from" chip
+ *   - Autosave indicator (right side)
+ *   - Optional Submit button (visible only when draft + editable)
+ *
+ * All original props preserved.
  */
 
-import StatusBadge from '@/components/StatusBadge';
-import OriginBadge from '@/components/OriginBadge';
-import { color, font, space, type } from '@/styles/tokens';
+import { Pill, Overline } from '@/components/ui/atoms';
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -32,99 +30,112 @@ interface DraftHeaderProps {
 }
 
 export default function DraftHeader({
-  loaDraftId, title, status, duplicatedFromId, duplicatedFromDraftId,
+  loaDraftId, title, status, duplicatedFromDraftId,
   saveState, lastSavedAt, editable, onSubmit,
 }: DraftHeaderProps) {
   return (
-    <header style={{ marginBottom: space[6] }}>
-      {/* Top row: id chips + autosave + submit */}
+    <div>
+      {/* Overline: LOA id + status pill */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: space[3],
-        marginBottom: space[3], flexWrap: 'wrap',
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        marginBottom: 8,
       }}>
-        <span style={{
-          fontFamily: font.mono, fontSize: 13, fontWeight: 500,
-          color: color.text.primary,
-        }}>{loaDraftId}</span>
-
-        <StatusBadge status={status} />
-
+        <Overline style={{
+          fontFamily: 'var(--font-mono)', fontSize: 11.5,
+          color: 'var(--text-secondary)', letterSpacing: '.06em',
+        }}>
+          {loaDraftId}
+        </Overline>
+        <Pill status={status} />
         {duplicatedFromDraftId && (
-          <OriginBadge sourceId={duplicatedFromDraftId} status={status} />
+          <span style={{
+            fontSize: 11, color: 'var(--text-tertiary)',
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+          }}>
+            <span style={{ opacity: 0.6 }}>↳</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>
+              {status === 'draft' || status === 'rejected' ? 'from ' : 'based on '}
+              {duplicatedFromDraftId}
+            </span>
+          </span>
         )}
-
         <div style={{ flex: 1 }} />
-
         <AutosaveIndicator saveState={saveState} lastSavedAt={lastSavedAt} />
-
-        {editable && status === 'draft' && onSubmit && (
-          <button onClick={onSubmit} style={{
-            background: color.action.primary, color: color.text.onPrimary,
-            border: 'none', borderRadius: 10, height: 36,
-            padding: '0 16px', fontFamily: font.sans,
-            fontSize: 13, fontWeight: 600, cursor: 'pointer',
-          }}>Submit LOA</button>
-        )}
       </div>
 
       {/* Title */}
       <h1 style={{
         margin: 0,
-        fontSize: type.h1.size, lineHeight: `${type.h1.line}px`,
-        fontWeight: type.h1.weight, color: color.text.primary,
-      }}>{title || 'Untitled LOA'}</h1>
+        fontFamily: 'var(--font-display)',
+        fontSize: 34, fontWeight: 600,
+        lineHeight: 1.15, letterSpacing: '-0.01em',
+        color: 'var(--text-primary)',
+      }}>
+        {title}
+      </h1>
 
-      {!editable && (
-        <p style={{
-          margin: `${space[2]}px 0 0`,
-          fontSize: 12, color: color.text.tertiary, fontStyle: 'italic',
-        }}>
-          Read-only at this step. Editing resumes if returned for revisions.
-        </p>
+      {editable && status === 'draft' && onSubmit && (
+        <button
+          onClick={onSubmit}
+          style={{
+            marginTop: 16,
+            height: 38, padding: '0 20px', borderRadius: 8,
+            background: 'var(--ink)', color: 'var(--ink-text)',
+            border: 'none', cursor: 'pointer',
+            fontSize: 13.5, fontWeight: 600,
+            fontFamily: 'var(--font-sans)',
+          }}
+        >
+          Submit for review
+        </button>
       )}
-    </header>
+    </div>
   );
 }
 
-/* -------------------------------------------------------------------- */
-/* Autosave                                                             */
-/* -------------------------------------------------------------------- */
+function AutosaveIndicator({ saveState, lastSavedAt }: { saveState: SaveState; lastSavedAt?: Date | null }) {
+  if (saveState === 'idle' && !lastSavedAt) return null;
 
-function AutosaveIndicator({ saveState, lastSavedAt }: {
-  saveState: SaveState; lastSavedAt?: Date | null;
-}) {
-  const { dot, label } = (() => {
-    if (saveState === 'saving') return { dot: color.text.tertiary, label: 'Saving…' };
-    if (saveState === 'error')  return { dot: color.status.danger,  label: "Couldn't save" };
-    if (saveState === 'saved' && lastSavedAt) {
-      return { dot: color.status.success, label: `Saved ${formatRelative(lastSavedAt)}` };
-    }
-    return { dot: 'transparent', label: '' };
-  })();
+  const dotStyle = (bg: string): React.CSSProperties => ({
+    display: 'inline-block', width: 6, height: 6, borderRadius: 999,
+    background: bg, marginRight: 6, flexShrink: 0,
+  });
 
-  if (!label) return null;
+  if (saveState === 'saving') {
+    return (
+      <span style={indicatorStyle('var(--text-tertiary)')}>
+        <span style={dotStyle('var(--text-tertiary)')} /> Saving…
+      </span>
+    );
+  }
+  if (saveState === 'error') {
+    return (
+      <span style={indicatorStyle('var(--st-rejected-fg)')}>
+        <span style={dotStyle('var(--st-rejected-fg)')} /> Save failed
+      </span>
+    );
+  }
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      fontSize: 12, color: saveState === 'error' ? color.status.danger : color.text.secondary,
-      fontFamily: font.sans,
-    }}>
-      <span style={{
-        display: 'inline-block', width: 6, height: 6, borderRadius: 999,
-        background: dot, animation: saveState === 'saving' ? 'laura-pulse 900ms ease-in-out infinite' : 'none',
-      }} />
-      {label}
-      <style>{`@keyframes laura-pulse { 0%,100% { opacity:1 } 50% { opacity:0.3 } }`}</style>
+    <span style={indicatorStyle('var(--st-approved-fg)')}>
+      <span style={dotStyle('var(--st-approved-fg)')} />
+      Saved {lastSavedAt ? relativeTime(lastSavedAt) : ''}
     </span>
   );
 }
 
-function formatRelative(d: Date): string {
-  const diffMs = Date.now() - d.getTime();
-  const s = Math.round(diffMs / 1000);
-  if (s < 5) return 'just now';
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function indicatorStyle(color: string): React.CSSProperties {
+  return {
+    display: 'inline-flex', alignItems: 'center',
+    fontSize: 11.5, color,
+    fontFamily: 'var(--font-sans)',
+    whiteSpace: 'nowrap',
+  };
+}
+
+function relativeTime(d: Date): string {
+  const diff = Date.now() - d.getTime();
+  if (diff < 5_000) return 'just now';
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }

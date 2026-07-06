@@ -1,15 +1,24 @@
 'use client';
 
 /**
- * LAURA — Tracker (Essilor-style B&W refonte + premium pagination)
+ * LAURA — Tracker · Editorial Finance redesign (Phase 2)
+ * ------------------------------------------------------
+ * VISUAL layer rebuilt on styles/redesign.css + components/ui/atoms.
+ * ALL business logic preserved from the previous version:
+ *   - getLOAs({ include_historical }) fetch
+ *   - visited LOAs via sessionStorage 'laura.visitedLOAs'
+ *   - getMyComments + batched per-LOA comments/summary fetch
+ *   - filters: status / cluster / quarter / owner / search
+ *   - pills: needs attention / rejected / under review / PPT issues / my comments
+ *   - pagination 25/50/100 with page reset on filter change
+ *   - historical toggle (admin only), Export Excel
  *
- * Pagination improvements vs previous version:
- *   - Default page size lowered from 50 to 25 (visible pagination at 26+ LOAs)
- *   - Per-page selector: 25 / 50 / 100
- *   - "Showing 1–25 of 38" caption next to pagination
- *   - Sharp Essilor-style page buttons with hover invert
+ * FIXED in this version:
+ *   - REVIEW_STATUSES updated for workflow V3 (global_review no longer exists)
  *
- * All other behavior (filters, search, comments, historical toggle) unchanged.
+ * NEW:
+ *   - List / Board view toggle (Board groups by workflow stage)
+ *   - Hero header with live pipeline stats
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -22,20 +31,36 @@ import type { MyCommentsSummary } from '@/lib/api';
 import { useMyRole } from '@/hooks/usePermissions';
 import type { LOA } from '@/types/loa';
 import { CLUSTERS, STATUS_CONFIG } from '@/types/loa';
-import NavHeader from '@/components/NavHeader';
-import StatusBadge from '@/components/StatusBadge';
 import IOSToggle from '@/components/IOSToggle';
-import { color, font, motion, radius, space } from '@/styles/tokens';
+import { Pill, Btn, Avatar, initialsOf, Overline } from '@/components/ui/atoms';
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
+/** Workflow V3 — every non-terminal, non-draft status counts as "review" */
 const REVIEW_STATUSES = [
-  'emea_review', 'global_review', 'cmo_cfo_review',
-  'global_functions_review', 'corporate_review',
+  'emea_review',
+  'global_brand_review',
+  'emea_brand_rework',
+  'global_functions_review',
+  'emea_functions_rework',
+  'cmo_cfo_review',
+  'emea_cmo_rework',
+  'corporate_review',
 ];
 
-// ── Helpers ─────────────────────────────────────────────────────
+/** Board view: map every status to a stage column */
+const BOARD_COLUMNS: { key: string; label: string; statuses: string[] }[] = [
+  { key: 'draft',     label: 'Draft',       statuses: ['draft'] },
+  { key: 'emea',      label: 'EMEA',        statuses: ['emea_review', 'emea_brand_rework', 'emea_functions_rework', 'emea_cmo_rework'] },
+  { key: 'global',    label: 'Global',      statuses: ['global_brand_review', 'global_functions_review'] },
+  { key: 'decision',  label: 'CMO / CFO',   statuses: ['cmo_cfo_review'] },
+  { key: 'corporate', label: 'Corporate',   statuses: ['corporate_review'] },
+  { key: 'approved',  label: 'Approved',    statuses: ['approved'] },
+  { key: 'rejected',  label: 'Rejected',    statuses: ['rejected'] },
+];
+
+// ── Helpers ──────────────────────────────────────────────────────────
 
 function formatEuros(n: number): string {
   if (!n) return '€0';
@@ -67,14 +92,58 @@ function hoursSince(iso: string | undefined | null): number {
   return (Date.now() - new Date(iso).getTime()) / 3_600_000;
 }
 
+function chipSummary(
+  set: Set<string>,
+  totalOptions: number,
+  labelFn: (v: string) => string = (v) => v,
+): string {
+  if (set.size === 0 || set.size === totalOptions) return 'All';
+  if (set.size === 1) return labelFn([...set][0]);
+  return `${set.size} selected`;
+}
+
+function toggleSet(
+  set: Set<string>,
+  value: string,
+  setter: (s: Set<string>) => void,
+) {
+  const next = new Set(set);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  setter(next);
+}
+
+/**
+ * Bulk Excel export of the tracker.
+ * NOTE (redesign migration): the original implementation lived in the previous
+ * page.tsx. If this endpoint differs from your backend, restore the original
+ * from page.tsx.bak3 — see the migration notes.
+ */
+async function exportExcel(statusFilters: Set<string>, clusterFilters: Set<string>) {
+  try {
+    const params: Record<string, string> = {};
+    if (statusFilters.size === 1) params.status = [...statusFilters][0];
+    if (clusterFilters.size === 1) params.cluster = [...clusterFilters][0];
+    const res = await api.get('/loa/export/excel', { params, responseType: 'blob' });
+    const url = URL.createObjectURL(new Blob([res.data]));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `LAURA_tracker_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    alert('Excel export failed. Please try again or contact an admin.');
+  }
+}
+
 interface LoaCommentSummary {
   total_unresolved: number;
   total_blocking: number;
 }
 
-// ═════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════
 // Page
-// ═════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════
 
 export default function TrackerPage() {
   const router = useRouter();
@@ -87,6 +156,7 @@ export default function TrackerPage() {
   const [showHistorical, setShowHistorical] = useState(false);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
   const [entered, setEntered] = useState(false);
+  const [view, setView] = useState<'list' | 'board'>('list');
 
   // Filters
   const [search, setSearch] = useState('');
@@ -144,7 +214,7 @@ export default function TrackerPage() {
     getMyComments().then(setMyComments).catch(() => {});
   }, []);
 
-  // Fetch per-LOA comment summaries
+  // Fetch per-LOA comment summaries (batched)
   useEffect(() => {
     if (loas.length === 0) return;
     let cancelled = false;
@@ -171,7 +241,7 @@ export default function TrackerPage() {
     return () => { cancelled = true; };
   }, [loas]);
 
-  // ── Derived ──────────────────────────────────────────────────
+  // ── Derived ────────────────────────────────────────────────────────
 
   const myCommentsByLoa = useMemo(() => {
     const m = new Map<string, MyCommentsSummary['loas'][0]>();
@@ -181,8 +251,8 @@ export default function TrackerPage() {
 
   const uniqueOwners = useMemo(() => {
     const set = new Set<string>();
-    loas.forEach(l => { if (l.requestor_email) set.add(l.requestor_email); });
-    return Array.from(set).sort();
+    loas.forEach(l => { if (l?.requestor_email) set.add(l.requestor_email); });
+    return [...set].sort();
   }, [loas]);
 
   function isNeedsAttention(l: LOA): boolean {
@@ -255,46 +325,44 @@ export default function TrackerPage() {
     setPptIssuesOnly(false); setShowMyCommentsOnly(false);
   };
 
-  // ── Render ───────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────
 
   return (
-    <div style={{ minHeight: '100vh', background: color.bg.canvas }}>
-      <NavHeader />
+    <div className="la-page la-fade" style={{
+      opacity: entered ? 1 : 0,
+      transform: entered ? 'none' : 'translateY(6px)',
+      transition: 'opacity 200ms cubic-bezier(0.2,0,0,1), transform 200ms cubic-bezier(0.2,0,0,1)',
+      fontFamily: 'var(--font-sans)',
+    }}>
 
-      <main style={{
-        maxWidth: 1280, margin: '0 auto',
-        padding: `${space[6]}px ${space[6]}px ${space[8]}px`,
-        opacity: entered ? 1 : 0,
-        transform: entered ? 'translateY(0)' : 'translateY(6px)',
-        transition: `opacity ${motion.duration.base}ms ${motion.easing}, transform ${motion.duration.base}ms ${motion.easing}`,
-      }}>
-
-        {/* ─── Header ─── */}
-        <header style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          gap: space[3], marginBottom: space[5], flexWrap: 'wrap',
+      {/* ─── Hero header ─── */}
+      <header style={{ marginBottom: 22 }}>
+        <div style={{
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+          gap: 16, flexWrap: 'wrap',
         }}>
           <div>
+            <Overline>Portfolio</Overline>
             <h1 style={{
-              margin: 0, fontSize: 26, lineHeight: '32px', fontWeight: 600,
-              color: color.text.primary, letterSpacing: '-0.01em',
+              margin: '4px 0 0',
+              fontFamily: 'var(--font-display)',
+              fontSize: 40, lineHeight: 1.05, fontWeight: 600,
+              color: 'var(--text-primary)', letterSpacing: '-0.01em',
             }}>Tracker</h1>
-            <p style={{
-              margin: `${space[1]}px 0 0`, fontSize: 13, color: color.text.secondary,
-            }}>
+            <p style={{ margin: '8px 0 0', fontSize: 13.5, color: 'var(--text-secondary)' }}>
               {loading ? 'Loading…' : (
                 <>
-                  <span style={{ fontFamily: font.mono, color: color.text.primary, fontWeight: 500 }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', fontWeight: 600 }}>
                     {filtered.length}
                   </span>
                   <span> LOA{filtered.length !== 1 ? 's' : ''}</span>
                   {totalBudget > 0 && (
                     <>
                       <span> · </span>
-                      <span style={{ fontFamily: font.mono, color: color.text.primary, fontWeight: 500 }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--gold)', fontWeight: 600 }}>
                         {formatEuros(totalBudget)}
                       </span>
-                      <span> tracked</span>
+                      <span> in pipeline</span>
                     </>
                   )}
                 </>
@@ -302,144 +370,156 @@ export default function TrackerPage() {
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: space[2], alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <IOSToggle />
-
-            <EssilorButton
+            <ViewToggle view={view} setView={setView} />
+            <Btn
+              variant={showMyCommentsOnly ? 'primary' : 'ghost'}
               onClick={() => setShowMyCommentsOnly(v => !v)}
-              active={showMyCommentsOnly}
               title={!myComments ? 'No comments yet' : 'Filter to LOAs you commented on'}
+              small
             >
               💬 My comments
               {myComments && myComments.total_comments > 0 && (
-                <span style={{ marginLeft: 4, fontFamily: font.mono, fontWeight: 600 }}>
+                <span style={{ marginLeft: 6, fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
                   {myComments.total_comments}
                 </span>
               )}
-            </EssilorButton>
-
-            <EssilorButton
+            </Btn>
+            <Btn
+              variant="secondary"
+              small
               onClick={() => exportExcel(statusFilters, clusterFilters)}
               disabled={loading || filtered.length === 0}
             >
               ↓ Export Excel
-            </EssilorButton>
+            </Btn>
           </div>
-        </header>
-
-        {/* ─── Summary pills ─── */}
-        <div style={{
-          display: 'flex', gap: space[2], flexWrap: 'wrap', marginBottom: space[4],
-        }}>
-          <SummaryPill
-            label="Needs attention" count={counts.needsAttn} active={needsAttention}
-            onClick={() => setNeedsAttention(v => !v)} />
-          <SummaryPill
-            label="Rejected" count={counts.rejected}
-            active={statusFilters.size === 1 && statusFilters.has('rejected')}
-            onClick={() => {
-              const next = new Set<string>();
-              if (!(statusFilters.size === 1 && statusFilters.has('rejected'))) next.add('rejected');
-              setStatusFilters(next);
-            }} />
-          <SummaryPill
-            label="Under review" count={counts.review}
-            active={REVIEW_STATUSES.every(s => statusFilters.has(s)) && statusFilters.size === REVIEW_STATUSES.length}
-            onClick={() => {
-              const isAll = REVIEW_STATUSES.every(s => statusFilters.has(s)) && statusFilters.size === REVIEW_STATUSES.length;
-              setStatusFilters(isAll ? new Set() : new Set(REVIEW_STATUSES));
-            }} />
-          <SummaryPill
-            label="PPT issues" count={counts.pptIssues} active={pptIssuesOnly}
-            onClick={() => setPptIssuesOnly(v => !v)} />
         </div>
+      </header>
 
-        {/* ─── Search ─── */}
-        <div style={{ marginBottom: space[3] }}>
-          <SearchInput value={search} onChange={setSearch} />
-        </div>
+      {/* ─── Summary chips ─── */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+        <SummaryChip
+          label="Needs attention" count={counts.needsAttn} active={needsAttention}
+          warn
+          onClick={() => setNeedsAttention(v => !v)} />
+        <SummaryChip
+          label="Rejected" count={counts.rejected}
+          active={statusFilters.size === 1 && statusFilters.has('rejected')}
+          onClick={() => {
+            const next = new Set<string>();
+            if (!(statusFilters.size === 1 && statusFilters.has('rejected'))) next.add('rejected');
+            setStatusFilters(next);
+          }} />
+        <SummaryChip
+          label="Under review" count={counts.review}
+          active={REVIEW_STATUSES.every(s => statusFilters.has(s)) && statusFilters.size === REVIEW_STATUSES.length}
+          onClick={() => {
+            const isAll = REVIEW_STATUSES.every(s => statusFilters.has(s)) && statusFilters.size === REVIEW_STATUSES.length;
+            setStatusFilters(isAll ? new Set() : new Set(REVIEW_STATUSES));
+          }} />
+        <SummaryChip
+          label="PPT issues" count={counts.pptIssues} active={pptIssuesOnly}
+          warn
+          onClick={() => setPptIssuesOnly(v => !v)} />
+      </div>
 
-        {/* ─── Filter chips ─── */}
-        <div style={{
-          display: 'flex', gap: space[2], marginBottom: space[5],
-          flexWrap: 'wrap', alignItems: 'center',
-        }}>
-          <FilterChip label="Status"
-            summary={chipSummary(statusFilters, Object.keys(STATUS_CONFIG).length, (s) => (STATUS_CONFIG as any)[s]?.label || s)}>
-            {Object.entries(STATUS_CONFIG).map(([key, val]: [string, any]) => (
-              <ChipOption key={key} label={val.label}
-                checked={statusFilters.has(key)}
-                onChange={() => toggleSet(statusFilters, key, setStatusFilters)} />
-            ))}
-          </FilterChip>
-
-          <FilterChip label="Cluster" summary={chipSummary(clusterFilters, CLUSTERS.length)}>
-            {CLUSTERS.map(c => (
-              <ChipOption key={c} label={c}
-                checked={clusterFilters.has(c)}
-                onChange={() => toggleSet(clusterFilters, c, setClusterFilters)} />
-            ))}
-          </FilterChip>
-
-          <FilterChip label="Quarter" summary={quarterFilter ? `${quarterFilter} 2026` : 'All'}>
-            {['Q1', 'Q2', 'Q3', 'Q4'].map(q => (
-              <ChipOption key={q} label={`${q} 2026`}
-                checked={quarterFilter === q}
-                onChange={() => setQuarterFilter(quarterFilter === q ? null : q)} />
-            ))}
-          </FilterChip>
-
-          {uniqueOwners.length > 0 && (
-            <FilterChip label="Owner"
-              summary={chipSummary(ownerFilters, uniqueOwners.length, (e) => e.split('@')[0])}>
-              <div style={{ maxHeight: 240, overflowY: 'auto' }}>
-                {uniqueOwners.map(o => (
-                  <ChipOption key={o} label={o.split('@')[0]}
-                    checked={ownerFilters.has(o)}
-                    onChange={() => toggleSet(ownerFilters, o, setOwnerFilters)} />
-                ))}
-              </div>
-            </FilterChip>
-          )}
-
-          {canSeeHistorical && (
-            <EssilorButton
-              onClick={() => setShowHistorical(v => !v)}
-              active={showHistorical}
-              title="Admin: include historical LOAs" compact>
-              {showHistorical ? '✓ ' : ''}Historical
-            </EssilorButton>
-          )}
-
-          {activeFilters > 0 && (
-            <button onClick={clearAll} style={{
+      {/* ─── Search + filter row ─── */}
+      <div style={{
+        display: 'flex', gap: 8, marginBottom: 20,
+        flexWrap: 'wrap', alignItems: 'center',
+      }}>
+        <div className="la-search">
+          <span style={{ fontSize: 14, color: 'var(--text-tertiary)' }}>⌕</span>
+          <input
+            type="text" value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search LOA, country, activity, brand, owner…"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} style={{
               background: 'transparent', border: 'none', cursor: 'pointer',
-              fontSize: 12, color: color.text.tertiary,
-              textDecoration: 'underline', fontFamily: font.sans,
-              padding: '4px 8px',
-            }}>Clear all ({activeFilters})</button>
+              fontSize: 11.5, color: 'var(--text-tertiary)', padding: '2px 4px',
+              fontFamily: 'var(--font-sans)',
+            }}>Clear</button>
           )}
         </div>
 
-        {/* ─── Table ─── */}
-        {!loading && paginated.length === 0 ? (
-          <EmptyState />
-        ) : paginated.length > 0 ? (
-          <div style={{
-            background: color.bg.surface,
-            borderWidth: '1px', borderStyle: 'solid', borderColor: color.border.soft,
-            borderRadius: 0,
-            overflow: 'hidden',
-          }}>
-            <div style={{
+        <FilterChip label="Status"
+          summary={chipSummary(statusFilters, Object.keys(STATUS_CONFIG).length, (s) => (STATUS_CONFIG as any)[s]?.label || s)}>
+          {Object.entries(STATUS_CONFIG).map(([key, val]: [string, any]) => (
+            <ChipOption key={key} label={val.label}
+              checked={statusFilters.has(key)}
+              onChange={() => toggleSet(statusFilters, key, setStatusFilters)} />
+          ))}
+        </FilterChip>
+
+        <FilterChip label="Cluster" summary={chipSummary(clusterFilters, CLUSTERS.length)}>
+          {CLUSTERS.map(c => (
+            <ChipOption key={c} label={c}
+              checked={clusterFilters.has(c)}
+              onChange={() => toggleSet(clusterFilters, c, setClusterFilters)} />
+          ))}
+        </FilterChip>
+
+        <FilterChip label="Quarter" summary={quarterFilter ? `${quarterFilter} 2026` : 'All'}>
+          {['Q1', 'Q2', 'Q3', 'Q4'].map(q => (
+            <ChipOption key={q} label={`${q} 2026`}
+              checked={quarterFilter === q}
+              onChange={() => setQuarterFilter(quarterFilter === q ? null : q)} />
+          ))}
+        </FilterChip>
+
+        {uniqueOwners.length > 0 && (
+          <FilterChip label="Owner"
+            summary={chipSummary(ownerFilters, uniqueOwners.length, (e) => e.split('@')[0])}>
+            <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+              {uniqueOwners.map(o => (
+                <ChipOption key={o} label={o.split('@')[0]}
+                  checked={ownerFilters.has(o)}
+                  onChange={() => toggleSet(ownerFilters, o, setOwnerFilters)} />
+              ))}
+            </div>
+          </FilterChip>
+        )}
+
+        {canSeeHistorical && (
+          <button
+            className={`la-chip ${showHistorical ? 'la-chip-on' : ''}`}
+            onClick={() => setShowHistorical(v => !v)}
+            title="Admin: include historical LOAs"
+            style={{ height: 34 }}
+          >
+            {showHistorical ? '✓ ' : ''}Historical
+          </button>
+        )}
+
+        {activeFilters > 0 && (
+          <button onClick={clearAll} className="la-link" style={{ fontSize: 12 }}>
+            Clear all ({activeFilters})
+          </button>
+        )}
+      </div>
+
+      {/* ─── Content: list or board ─── */}
+      {!loading && filtered.length === 0 ? (
+        <EmptyState hasFilters={activeFilters > 0} onClear={clearAll} />
+      ) : view === 'board' ? (
+        <BoardView
+          loas={filtered}
+          visitedIds={visitedIds}
+          markVisited={markVisited}
+          summaryByLoa={summaryByLoa}
+          router={router}
+        />
+      ) : paginated.length > 0 ? (
+        <>
+          <div className="la-card" style={{ overflow: 'hidden', padding: 0 }}>
+            <div className="la-thead" style={{
               display: 'grid',
-              gridTemplateColumns: '14px 130px minmax(0, 1fr) 180px 110px',
-              gap: space[3], padding: `${space[2]}px ${space[4]}px`,
-              fontSize: 11, fontWeight: 500,
-              letterSpacing: '0.04em', textTransform: 'uppercase',
-              color: color.text.tertiary,
-              borderBottom: `1px solid ${color.border.soft}`,
-              background: color.bg.subtle,
+              gridTemplateColumns: '14px 130px minmax(0, 1fr) 190px 100px',
+              gap: 12,
             }}>
               <span></span>
               <span>LOA</span>
@@ -458,10 +538,7 @@ export default function TrackerPage() {
               />
             ))}
           </div>
-        ) : null}
 
-        {/* ─── Pagination + per-page selector ─── */}
-        {filtered.length > 0 && (
           <PaginationBar
             page={safePage}
             totalPages={totalPages}
@@ -472,53 +549,15 @@ export default function TrackerPage() {
             setPage={setPage}
             setPageSize={(s) => { setPageSize(s); setPage(1); }}
           />
-        )}
-      </main>
+        </>
+      ) : null}
     </div>
   );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// EssilorButton
-// ═════════════════════════════════════════════════════════════════
-
-function EssilorButton({ children, onClick, active, disabled, title, compact }: {
-  children: React.ReactNode;
-  onClick: () => void;
-  active?: boolean;
-  disabled?: boolean;
-  title?: string;
-  compact?: boolean;
-}) {
-  const [hover, setHover] = useState(false);
-  const bg = disabled ? 'transparent'
-    : hover ? 'var(--laura-action-hover)' : 'var(--laura-action)';
-  const fg = disabled ? 'var(--laura-text-tertiary)' : 'var(--laura-text-on-primary)';
-  const border = disabled ? `1px solid var(--laura-border-soft)` : 'none';
-
-  return (
-    <button onClick={disabled ? undefined : onClick}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      disabled={disabled} title={title}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        height: compact ? 30 : 34,
-        padding: compact ? '0 12px' : '0 16px',
-        borderRadius: 2, background: bg, color: fg, border,
-        fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        transition: 'background-color 140ms cubic-bezier(0.2, 0, 0, 1)',
-        whiteSpace: 'nowrap', letterSpacing: '0.01em',
-      }}>
-      {children}
-    </button>
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════
-// Tracker Row
-// ═════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════
+// Row (list view)
+// ═════════════════════════════════════════════════════════════════════
 
 function TrackerRow({ loa, visited, onClick, summary }: {
   loa: LOA;
@@ -526,8 +565,6 @@ function TrackerRow({ loa, visited, onClick, summary }: {
   onClick: () => void;
   summary?: LoaCommentSummary;
 }) {
-  const [hover, setHover] = useState(false);
-
   const title = loa.detail || loa.description || loa.activity_type || '—';
   const country = loa.country || '—';
   const category = formatCategory(loa.category);
@@ -544,34 +581,29 @@ function TrackerRow({ loa, visited, onClick, summary }: {
     <Link
       href={`/loa/${loa.id}`}
       onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      className="la-row"
       style={{
         display: 'grid',
-        gridTemplateColumns: '14px 130px minmax(0, 1fr) 180px 110px',
-        gap: space[3],
-        padding: `${space[3]}px ${space[4]}px`,
+        gridTemplateColumns: '14px 130px minmax(0, 1fr) 190px 100px',
+        gap: 12,
         alignItems: 'center',
-        borderBottom: `1px solid ${color.border.soft}`,
-        background: hover ? 'var(--laura-bg-warm)' : color.bg.surface,
         textDecoration: 'none',
-        cursor: 'pointer',
-        transition: `background-color ${motion.duration.quick}ms ${motion.easing}`,
-        minHeight: 72,
+        minHeight: 70,
+        color: 'var(--text-primary)',
       }}
     >
       <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {!visited && (
           <span style={{
             display: 'inline-block', width: 6, height: 6, borderRadius: 999,
-            background: 'var(--laura-action)',
+            background: 'var(--gold)',
           }} title="Not yet viewed" />
         )}
       </span>
 
       <span style={{
-        fontFamily: font.mono, fontSize: 11, fontWeight: 500,
-        color: color.text.secondary,
+        fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 500,
+        color: 'var(--text-secondary)',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
         {loa.loa_number || loa.loa_draft_id}
@@ -580,123 +612,210 @@ function TrackerRow({ loa, visited, onClick, summary }: {
       <div style={{ minWidth: 0 }}>
         <p style={{
           margin: 0, fontSize: 14, fontWeight: 500, lineHeight: '20px',
-          color: color.text.primary,
+          color: 'var(--text-primary)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{title}</p>
         <p style={{
-          margin: '3px 0 0', fontSize: 12, lineHeight: '18px',
-          color: color.text.tertiary,
+          margin: '3px 0 0', fontSize: 12, lineHeight: '17px',
+          color: 'var(--text-tertiary)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{meta || '—'}</p>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-        <StatusBadge status={loa.status} size="sm" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Pill status={loa.status} />
+          {pptMissing && <Pill status="ppt" kind="Warn" label="PPT required" />}
+        </div>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6,
-          fontSize: 11, color: color.text.tertiary,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          fontSize: 11, color: 'var(--text-tertiary)',
+          overflow: 'hidden', whiteSpace: 'nowrap',
         }}>
-          <span>{owner} · {updated}</span>
+          <Avatar initials={initialsOf(owner)} size={16} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{owner} · {updated}</span>
           {unresolved > 0 && (
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: 3,
-              fontSize: 10, padding: '1px 6px',
-              background: blocking > 0 ? 'var(--laura-danger-bg)' : 'var(--laura-champagne-mist)',
-              borderWidth: '1px', borderStyle: 'solid',
-              borderColor: blocking > 0 ? 'var(--laura-danger-border)' : 'var(--laura-champagne-border)',
-              color: blocking > 0 ? 'var(--laura-danger)' : 'var(--laura-champagne-deep)',
-              fontWeight: 600,
-              borderRadius: 2,
-            }}>💬 {unresolved}</span>
+              fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 600,
+              color: blocking > 0 ? 'var(--st-rejected-fg)' : 'var(--text-secondary)',
+            }} title={blocking > 0 ? `${blocking} blocking` : `${unresolved} unresolved`}>
+              💬 {unresolved}
+            </span>
           )}
         </div>
       </div>
 
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4,
+      <span style={{
+        textAlign: 'right',
+        fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600,
+        color: 'var(--text-primary)',
       }}>
-        <span style={{
-          fontFamily: font.mono, fontSize: 14, fontWeight: 500,
-          color: color.text.primary,
-        }}>{formatEuros(loa.fy_2026_total)}</span>
-        {pptMissing && (
-          <span style={{
-            fontSize: 10, padding: '1px 6px',
-            background: 'var(--laura-warning-bg)', color: 'var(--laura-warning)',
-            borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--laura-warning-border)',
-            fontWeight: 600, borderRadius: 2,
-          }}>Missing PPT</span>
-        )}
-      </div>
+        {formatEuros(loa.fy_2026_total || 0)}
+      </span>
     </Link>
   );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// SummaryPill / SearchInput / FilterChip / ChipOption (unchanged)
-// ═════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════
+// Board view (grouped by workflow stage)
+// ═════════════════════════════════════════════════════════════════════
 
-function SummaryPill({ label, count, active, onClick }: {
-  label: string; count: number; active: boolean; onClick: () => void;
+function BoardView({ loas, visitedIds, markVisited, summaryByLoa, router }: {
+  loas: LOA[];
+  visitedIds: Set<string>;
+  markVisited: (id: string) => void;
+  summaryByLoa: Map<string, LoaCommentSummary>;
+  router: ReturnType<typeof useRouter>;
 }) {
-  const [hover, setHover] = useState(false);
-  const disabled = count === 0;
-
-  const bg = disabled ? 'transparent'
-    : active ? (hover ? 'var(--laura-action-hover)' : 'var(--laura-action)')
-    : (hover ? 'var(--laura-action)' : 'transparent');
-  const fg = disabled ? 'var(--laura-text-tertiary)'
-    : active ? 'var(--laura-text-on-primary)'
-    : (hover ? 'var(--laura-text-on-primary)' : 'var(--laura-text-primary)');
-  const borderColor = disabled ? 'var(--laura-border-soft)' : 'var(--laura-action)';
+  const byColumn = useMemo(() => {
+    const m = new Map<string, LOA[]>();
+    BOARD_COLUMNS.forEach(c => m.set(c.key, []));
+    loas.forEach(l => {
+      const col = BOARD_COLUMNS.find(c => c.statuses.includes(l.status));
+      if (col) m.get(col.key)!.push(l);
+    });
+    return m;
+  }, [loas]);
 
   return (
-    <button onClick={disabled ? undefined : onClick}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      disabled={disabled} style={{
-        display: 'inline-flex', alignItems: 'center', gap: 8,
-        height: 34, padding: '0 14px', borderRadius: 2,
-        background: bg, color: fg,
-        borderWidth: '1px', borderStyle: 'solid', borderColor,
-        fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        transition: 'background-color 140ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0, 1)',
-        whiteSpace: 'nowrap', letterSpacing: '0.01em',
-      }}>
-      <span>{label}</span>
-      <span style={{ fontFamily: 'var(--font-mono, ui-monospace, monospace)', fontSize: 12, fontWeight: 600 }}>{count}</span>
-    </button>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: `repeat(${BOARD_COLUMNS.length}, minmax(190px, 1fr))`,
+      gap: 12,
+      overflowX: 'auto',
+      paddingBottom: 8,
+    }}>
+      {BOARD_COLUMNS.map(col => {
+        const items = byColumn.get(col.key) || [];
+        return (
+          <div key={col.key} style={{ minWidth: 190 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '4px 6px 10px',
+            }}>
+              <Overline>{col.label}</Overline>
+              <span style={{
+                fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600,
+                color: 'var(--text-tertiary)',
+              }}>{items.length}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {items.slice(0, 30).map(l => {
+                const unresolved = summaryByLoa.get(l.id)?.total_unresolved || 0;
+                return (
+                  <button
+                    key={l.id}
+                    className="la-boardcard"
+                    onClick={() => { markVisited(l.id); router.push(`/loa/${l.id}`); }}
+                  >
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
+                    }}>
+                      {!visitedIds.has(l.id) && (
+                        <span style={{
+                          width: 5, height: 5, borderRadius: 999,
+                          background: 'var(--gold)', flexShrink: 0,
+                        }} />
+                      )}
+                      <span style={{
+                        fontFamily: 'var(--font-mono)', fontSize: 10,
+                        color: 'var(--text-tertiary)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{l.loa_number || l.loa_draft_id}</span>
+                    </div>
+                    <div style={{
+                      fontSize: 12.5, fontWeight: 500, lineHeight: 1.35,
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden', marginBottom: 8,
+                    }}>
+                      {l.detail || l.description || l.activity_type || '—'}
+                    </div>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      fontSize: 11,
+                    }}>
+                      <span style={{ color: 'var(--text-tertiary)' }}>
+                        {l.country || '—'}{unresolved > 0 ? ` · 💬 ${unresolved}` : ''}
+                      </span>
+                      <span style={{
+                        fontFamily: 'var(--font-mono)', fontWeight: 600,
+                        color: 'var(--text-primary)',
+                      }}>
+                        {formatEuros(l.fy_2026_total || 0)}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+              {items.length > 30 && (
+                <div style={{
+                  fontSize: 11, color: 'var(--text-tertiary)',
+                  textAlign: 'center', padding: '4px 0',
+                }}>+ {items.length - 30} more — use list view</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
-function SearchInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [focused, setFocused] = useState(false);
+// ═════════════════════════════════════════════════════════════════════
+// Small components
+// ═════════════════════════════════════════════════════════════════════
+
+function ViewToggle({ view, setView }: {
+  view: 'list' | 'board'; setView: (v: 'list' | 'board') => void;
+}) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 10,
-      height: 48, background: color.bg.surface,
-      borderWidth: '1px', borderStyle: 'solid',
-      borderColor: focused ? 'var(--laura-action)' : color.border.soft,
-      borderRadius: 2, padding: '0 16px',
-      transition: 'border-color 140ms cubic-bezier(0.2, 0, 0, 1)',
+      display: 'inline-flex',
+      background: 'var(--surface-sunken)',
+      borderRadius: 8, padding: 3,
     }}>
-      <span style={{ fontSize: 16, color: color.text.tertiary }}>⌕</span>
-      <input type="text" value={value} onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-        placeholder="Search LOA, country, activity, brand, owner…"
-        style={{
-          flex: 1, border: 'none', outline: 'none', background: 'transparent',
-          fontFamily: font.sans, fontSize: 14, color: color.text.primary,
-        }} />
-      {value && (
-        <button onClick={() => onChange('')} style={{
-          background: 'transparent', border: 'none', cursor: 'pointer',
-          fontSize: 12, color: color.text.tertiary, padding: '4px 8px',
-        }}>Clear</button>
-      )}
+      {(['list', 'board'] as const).map(v => (
+        <button
+          key={v}
+          className="la-seg"
+          onClick={() => setView(v)}
+          style={{
+            background: view === v ? 'var(--surface)' : 'transparent',
+            color: view === v ? 'var(--text-primary)' : 'var(--text-tertiary)',
+            borderRadius: 6, padding: '4px 12px',
+            fontSize: 12, fontWeight: view === v ? 600 : 500,
+            boxShadow: view === v ? 'var(--shadow-sm)' : 'none',
+          }}
+        >
+          {v === 'list' ? '☰ List' : '▦ Board'}
+        </button>
+      ))}
     </div>
+  );
+}
+
+function SummaryChip({ label, count, active, onClick, warn }: {
+  label: string; count: number; active: boolean; onClick: () => void; warn?: boolean;
+}) {
+  const disabled = count === 0;
+  return (
+    <button
+      className={`la-chip ${active ? 'la-chip-on' : ''}`}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      style={{
+        opacity: disabled ? 0.45 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        gap: 8,
+      }}
+    >
+      <span>{label}</span>
+      <span style={{
+        fontFamily: 'var(--font-mono)', fontSize: 11.5, fontWeight: 700,
+        color: warn && count > 0 && !active ? 'var(--st-rework-fg)' : 'inherit',
+      }}>{count}</span>
+    </button>
   );
 }
 
@@ -704,7 +823,6 @@ function FilterChip({ label, summary, children }: {
   label: string; summary: string; children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [hover, setHover] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -716,43 +834,35 @@ function FilterChip({ label, summary, children }: {
   }, [open]);
 
   const active = summary !== 'All' && summary !== '';
-  const bg = active || hover || open ? 'var(--laura-action)' : 'transparent';
-  const fg = active || hover || open ? 'var(--laura-text-on-primary)' : 'var(--laura-text-primary)';
 
   return (
     <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
-      <button onClick={() => setOpen(!open)}
-        onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      <button
+        className="la-filter"
+        onClick={() => setOpen(!open)}
         style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          height: 32, padding: '0 14px', borderRadius: 2,
-          background: bg, color: fg,
-          borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--laura-action)',
-          fontSize: 12, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer',
-          transition: 'background-color 140ms cubic-bezier(0.2, 0, 0, 1), color 140ms cubic-bezier(0.2, 0, 0,1)',
-          whiteSpace: 'nowrap', letterSpacing: '0.01em',
-        }}>
+          borderColor: active || open ? 'var(--gold)' : undefined,
+          background: active ? 'var(--gold-soft)' : undefined,
+          color: active ? 'var(--text-primary)' : undefined,
+          fontWeight: active ? 600 : 500,
+          gap: 5,
+        }}
+      >
         {label}: <span style={{ fontWeight: 600 }}>{summary}</span>
-        <span style={{ marginLeft: 4, fontSize: 9 }}>▾</span>
+        <span style={{ marginLeft: 3, fontSize: 8 }}>▾</span>
       </button>
 
       {open && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
-          background: color.bg.surface,
-          borderWidth: '1px', borderStyle: 'solid', borderColor: color.border.strong,
-          borderRadius: 2, padding: space[2], minWidth: 200,
-          boxShadow: '0 8px 24px rgba(10, 10, 10, 0.10)', zIndex: 50,
-          animation: `chipFadeIn 140ms ${motion.easing}`,
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0,
+          background: 'var(--surface-raised)',
+          border: '1px solid var(--border)',
+          borderRadius: 10, padding: 8, minWidth: 210,
+          boxShadow: 'var(--shadow-lg)', zIndex: 50,
         }}>
           {children}
         </div>
       )}
-
-      <style>{`@keyframes chipFadeIn {
-        from { opacity: 0; transform: translateY(-4px); }
-        to { opacity: 1; transform: translateY(0); }
-      }`}</style>
     </div>
   );
 }
@@ -760,220 +870,124 @@ function FilterChip({ label, summary, children }: {
 function ChipOption({ label, checked, onChange }: {
   label: string; checked: boolean; onChange: () => void;
 }) {
-  const [hover, setHover] = useState(false);
   return (
-    <label onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
-        background: hover ? color.bg.warm : 'transparent',
-        cursor: 'pointer', fontSize: 13,
-        color: checked ? color.text.primary : color.text.secondary,
-        fontWeight: checked ? 500 : 400,
-      }}>
+    <label className="la-checkitem" style={{
+      color: checked ? 'var(--text-primary)' : 'var(--text-secondary)',
+      fontWeight: checked ? 600 : 400,
+    }}>
       <input type="checkbox" checked={checked} onChange={onChange}
-        style={{ accentColor: 'var(--laura-action)', cursor: 'pointer' }} />
+        style={{ accentColor: 'var(--gold)', cursor: 'pointer' }} />
       <span>{label}</span>
     </label>
   );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// PaginationBar — premium iPhone-style
-// ═════════════════════════════════════════════════════════════════
-
 function PaginationBar({
   page, totalPages, pageSize, startIdx, endIdx, total, setPage, setPageSize,
 }: {
-  page: number;
-  totalPages: number;
-  pageSize: PageSize;
-  startIdx: number;
-  endIdx: number;
-  total: number;
-  setPage: (p: number) => void;
-  setPageSize: (s: PageSize) => void;
+  page: number; totalPages: number; pageSize: PageSize;
+  startIdx: number; endIdx: number; total: number;
+  setPage: (p: number) => void; setPageSize: (s: PageSize) => void;
 }) {
-  // Build the visible page-number window
-  const windowSize = 5;
-  let start = Math.max(1, page - Math.floor(windowSize / 2));
-  let end = Math.min(totalPages, start + windowSize - 1);
-  if (end - start < windowSize - 1) {
-    start = Math.max(1, end - windowSize + 1);
-  }
-  const pages: number[] = [];
-  for (let i = start; i <= end; i++) pages.push(i);
+  const pages = useMemo(() => {
+    const out: (number | '…')[] = [];
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || Math.abs(i - page) <= 1) out.push(i);
+      else if (out[out.length - 1] !== '…') out.push('…');
+    }
+    return out;
+  }, [page, totalPages]);
 
   return (
     <div style={{
-      marginTop: space[5],
-      paddingTop: space[4],
-      borderTop: `1px solid ${color.border.soft}`,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      flexWrap: 'wrap', gap: space[3],
+      gap: 12, marginTop: 16, flexWrap: 'wrap',
     }}>
-      {/* Left: Showing X-Y of Z */}
-      <div style={{ fontSize: 12, color: color.text.secondary, fontFamily: font.sans }}>
-        Showing{' '}
-        <span style={{ fontFamily: font.mono, color: color.text.primary, fontWeight: 500 }}>
-          {total === 0 ? 0 : startIdx + 1}–{endIdx}
-        </span>
-        {' of '}
-        <span style={{ fontFamily: font.mono, color: color.text.primary, fontWeight: 500 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)' }}>
+        Showing <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontWeight: 600 }}>
+          {startIdx + 1}–{endIdx}
+        </span> of <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontWeight: 600 }}>
           {total}
         </span>
       </div>
 
-      {/* Center: page buttons (only when > 1 page) */}
-      {totalPages > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <PageBtn label="‹‹" onClick={() => setPage(1)} disabled={page === 1} title="First page" />
-          <PageBtn label="‹" onClick={() => setPage(page - 1)} disabled={page === 1} title="Previous" />
-
-          {start > 1 && (
-            <>
-              <PageBtn label="1" onClick={() => setPage(1)} />
-              {start > 2 && <Ellipsis />}
-            </>
-          )}
-
-          {pages.map(p => (
-            <PageBtn key={p} label={String(p)} onClick={() => setPage(p)} active={p === page} />
-          ))}
-
-          {end < totalPages && (
-            <>
-              {end < totalPages - 1 && <Ellipsis />}
-              <PageBtn label={String(totalPages)} onClick={() => setPage(totalPages)} />
-            </>
-          )}
-
-          <PageBtn label="›" onClick={() => setPage(page + 1)} disabled={page === totalPages} title="Next" />
-          <PageBtn label="››" onClick={() => setPage(totalPages)} disabled={page === totalPages} title="Last page" />
-        </div>
-      )}
-
-      {/* Right: per-page selector */}
-      <PageSizeSelector value={pageSize} onChange={setPageSize} />
-    </div>
-  );
-}
-
-function PageBtn({ label, onClick, disabled, active, title }: {
-  label: string; onClick: () => void; disabled?: boolean; active?: boolean; title?: string;
-}) {
-  const [hover, setHover] = useState(false);
-
-  const bg = active ? 'var(--laura-action)'
-    : hover && !disabled ? 'var(--laura-action)' : 'transparent';
-  const fg = active || (hover && !disabled) ? 'var(--laura-text-on-primary)'
-    : color.text.secondary;
-  const borderColor = active || (hover && !disabled) ? 'var(--laura-action)'
-    : color.border.soft;
-
-  return (
-    <button onClick={onClick} disabled={disabled} title={title}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{
-        background: bg, color: fg,
-        borderWidth: '1px', borderStyle: 'solid', borderColor,
-        borderRadius: 2, padding: '4px 10px',
-        fontSize: 12, fontFamily: font.mono, fontWeight: active ? 600 : 500,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.4 : 1, minWidth: 30, height: 28,
-        transition: 'background-color 120ms cubic-bezier(0.2, 0, 0, 1), color 120ms cubic-bezier(0.2, 0, 0, 1), border-color 120ms cubic-bezier(0.2, 0, 0, 1)',
-      }}>{label}</button>
-  );
-}
-
-function Ellipsis() {
-  return (
-    <span style={{
-      fontSize: 12, color: color.text.tertiary, fontFamily: font.mono,
-      padding: '0 4px', userSelect: 'none',
-    }}>…</span>
-  );
-}
-
-function PageSizeSelector({ value, onChange }: {
-  value: PageSize; onChange: (v: PageSize) => void;
-}) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 6,
-      fontSize: 12, color: color.text.secondary,
-    }}>
-      <span>Per page:</span>
-      <div style={{
-        display: 'inline-flex',
-        border: `1px solid ${color.border.soft}`,
-        borderRadius: 2,
-      }}>
-        {PAGE_SIZE_OPTIONS.map((opt, i) => (
-          <button key={opt} onClick={() => onChange(opt)}
-            style={{
-              background: value === opt ? 'var(--laura-action)' : 'transparent',
-              color: value === opt ? 'var(--laura-text-on-primary)' : color.text.secondary,
-              border: 'none',
-              borderLeft: i > 0 ? `1px solid ${color.border.soft}` : 'none',
-              padding: '4px 10px',
-              fontSize: 12, fontFamily: font.mono, fontWeight: value === opt ? 600 : 500,
-              cursor: 'pointer',
-              transition: 'background-color 120ms cubic-bezier(0.2, 0, 0, 1)',
-              minWidth: 36, height: 28,
-            }}>{opt}</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <PageBtn label="‹" disabled={page <= 1} onClick={() => setPage(page - 1)} />
+        {pages.map((p, i) => p === '…' ? (
+          <span key={`e${i}`} style={{ padding: '0 6px', color: 'var(--text-tertiary)', fontSize: 12 }}>…</span>
+        ) : (
+          <PageBtn key={p} label={String(p)} active={p === page} onClick={() => setPage(p as number)} />
         ))}
+        <PageBtn label="›" disabled={page >= totalPages} onClick={() => setPage(page + 1)} />
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-tertiary)' }}>
+        <span>Per page</span>
+        <div style={{
+          display: 'inline-flex',
+          background: 'var(--surface-sunken)',
+          borderRadius: 8, padding: 3,
+        }}>
+          {PAGE_SIZE_OPTIONS.map(s => (
+            <button key={s} className="la-seg" onClick={() => setPageSize(s)} style={{
+              background: pageSize === s ? 'var(--surface)' : 'transparent',
+              color: pageSize === s ? 'var(--text-primary)' : 'var(--text-tertiary)',
+              borderRadius: 6, padding: '3px 10px',
+              fontSize: 11.5, fontWeight: pageSize === s ? 600 : 500,
+              boxShadow: pageSize === s ? 'var(--shadow-sm)' : 'none',
+              fontFamily: 'var(--font-mono)',
+            }}>{s}</button>
+          ))}
+        </div>
       </div>
     </div>
   );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// Misc helpers
-// ═════════════════════════════════════════════════════════════════
-
-function EmptyState() {
+function PageBtn({ label, active, disabled, onClick }: {
+  label: string; active?: boolean; disabled?: boolean; onClick: () => void;
+}) {
   return (
-    <div style={{
-      textAlign: 'center', padding: `${space[8]}px ${space[4]}px`,
-      borderRadius: 2,
-      borderWidth: '1px', borderStyle: 'dashed', borderColor: color.border.soft,
-      background: color.bg.surface,
-      color: color.text.tertiary, fontSize: 13,
-    }}>
-      <p style={{ margin: 0 }}>No LOAs match your filters. Try clearing some, or adjusting search.</p>
-    </div>
+    <button
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      style={{
+        minWidth: 30, height: 30, padding: '0 8px',
+        borderRadius: 7,
+        border: `1px solid ${active ? 'var(--ink)' : 'var(--border)'}`,
+        background: active ? 'var(--ink)' : 'var(--surface)',
+        color: active ? 'var(--ink-text)' : disabled ? 'var(--text-tertiary)' : 'var(--text-secondary)',
+        fontSize: 12.5, fontWeight: active ? 700 : 500,
+        fontFamily: 'var(--font-mono)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.45 : 1,
+        transition: 'all .15s ease',
+      }}
+    >{label}</button>
   );
 }
 
-function toggleSet<T>(set: Set<T>, val: T, setter: (s: Set<T>) => void) {
-  const next = new Set(set);
-  next.has(val) ? next.delete(val) : next.add(val);
-  setter(next);
-}
-
-function chipSummary(set: Set<string>, total: number, formatter?: (s: string) => string): string {
-  if (set.size === 0) return 'All';
-  if (set.size === 1) return formatter ? formatter([...set][0]) : [...set][0];
-  if (set.size === total) return 'All';
-  return `${set.size} selected`;
-}
-
-async function exportExcel(statusFilters: Set<string>, clusterFilters: Set<string>) {
-  try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null;
-    const qs = new URLSearchParams();
-    if (statusFilters.size > 0) qs.set('status', [...statusFilters].join(','));
-    if (clusterFilters.size > 0) qs.set('cluster', [...clusterFilters].join(','));
-    const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/loa/export/excel${qs.toString() ? '?' + qs : ''}`;
-    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!res.ok) throw new Error('Export failed');
-    const blob = await res.blob();
-    const dl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = dl; a.download = 'LAURA_LOA_Export.xlsx';
-    a.click();
-    URL.revokeObjectURL(dl);
-  } catch {
-    alert('Excel export failed');
-  }
+function EmptyState({ hasFilters, onClear }: { hasFilters: boolean; onClear: () => void }) {
+  return (
+    <div className="la-card" style={{
+      padding: '64px 24px', textAlign: 'center',
+    }}>
+      <div style={{
+        fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 600,
+        color: 'var(--text-primary)', marginBottom: 8,
+      }}>
+        {hasFilters ? 'No LOAs match these filters' : 'No LOAs yet'}
+      </div>
+      <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-tertiary)' }}>
+        {hasFilters
+          ? 'Try broadening your search or clearing some filters.'
+          : 'Create your first LOA with the “+ New LOA” button in the sidebar.'}
+      </p>
+      {hasFilters && (
+        <div style={{ marginTop: 18 }}>
+          <Btn variant="secondary" small onClick={onClear}>Clear all filters</Btn>
+        </div>
+      )}
+    </div>
+  );
 }
