@@ -571,3 +571,113 @@
 .recording {
   animation: recordPulse 1.2s ease infinite;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   EDITORIAL FINANCE REMAP  ·  New LOA form → redesign.css palette
+   -------------------------------------------------------------------
+   The New LOA form (app/loa/new/page.tsx) is styled with the legacy
+   globals.css variables (--bg-base, --accent, --card, .input, .btn-*).
+   This block re-points those variables onto the unified Editorial
+   Finance tokens defined in styles/redesign.css (--canvas, --gold,
+   --surface, --ink, --st-*), for BOTH light and dark themes.
+
+   Appended last so it wins the cascade. Zero changes to page.tsx.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Light (default) — redesign.css sets [data-theme="light"] on <html> */
+:root,
+[data-theme="light"] {
+  --bg-base:        var(--canvas);
+  --bg-primary:     var(--canvas);
+  --bg-surface:     var(--surface, #FFFFFF);
+  --bg-elevated:    var(--surface-raised, #FFFFFF);
+  --bg-input:       var(--surface, #FFFFFF);
+
+  --border:         var(--border, #E7E2D8);
+  --border-strong:  var(--border-strong, #D8D2C6);
+
+  --text-primary:   var(--text-primary, #211E1A);
+  --text-secondary: var(--text-secondary, #5C574F);
+  --text-muted:     var(--text-tertiary, #8B857A);
+
+  /* Primary action = ink black w/ cream text (prototype "Review & submit") */
+  --accent:         var(--ink, #211E1A);
+  --accent-hover:   #34302A;
+  --accent-text:    var(--ink-text, #F4EEDF);
+
+  /* Semantic families → map onto Editorial status tokens */
+  --green:        var(--st-approved-fg, #3F7D5B);
+  --green-bg:     var(--st-approved-bg, #E7F0E9);
+  --green-border: var(--st-approved-fg, #3F7D5B);
+  --green-text:   var(--st-approved-fg, #3F7D5B);
+
+  --red:        var(--st-rejected-fg, #A5453B);
+  --red-bg:     var(--st-rejected-bg, #F4E3E0);
+  --red-border: var(--st-rejected-fg, #A5453B);
+  --red-text:   var(--st-rejected-fg, #A5453B);
+
+  --amber:        var(--gold, #B08D2F);
+  --amber-bg:     var(--gold-soft, #F3EAD3);
+  --amber-border: var(--gold, #B08D2F);
+  --amber-text:   var(--gold, #B08D2F);
+
+  --blue:        var(--st-review-fg, #3E5C86);
+  --blue-bg:     var(--st-review-bg, #E4EAF3);
+  --blue-border: var(--st-review-fg, #3E5C86);
+  --blue-text:   var(--st-review-fg, #3E5C86);
+}
+
+/* Dark — redesign.css sets [data-theme="dark"] on <html> */
+[data-theme="dark"] {
+  --bg-base:        var(--canvas);
+  --bg-primary:     var(--canvas);
+  --bg-surface:     var(--surface);
+  --bg-elevated:    var(--surface-raised);
+  --bg-input:       var(--surface);
+
+  --border:         var(--border);
+  --border-strong:  var(--border-strong);
+
+  --text-primary:   var(--text-primary);
+  --text-secondary: var(--text-secondary);
+  --text-muted:     var(--text-tertiary);
+
+  /* In dark, the ink surface is light — use gold as the primary action
+     so buttons stay legible and on-brand. */
+  --accent:         var(--gold);
+  --accent-hover:   var(--gold-strong, #D9B968);
+  --accent-text:    #1A1712;
+}
+
+/* Accent-tinted helpers referenced by the form’s Laura hints */
+:root .bg-tint,
+[data-theme="light"] .bg-tint { background: var(--gold-soft); }
+
+/* Card polish to match .la-card (rounded, soft border, cream surface) */
+.card {
+  background: var(--surface, #FFFFFF) !important;
+  border: 1px solid var(--border, #E7E2D8) !important;
+  border-radius: 16px !important;
+}
+
+/* Section heading uses the Editorial overline treatment */
+.section-heading {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  color: var(--text-tertiary, #8B857A) !important;
+}
+
+/* Primary/secondary buttons pick up the remapped --accent automatically;
+   just refine radius + weight to match the redesign buttons. */
+.btn-primary, .btn-secondary, .btn-ghost {
+  border-radius: 9px !important;
+  font-weight: 600 !important;
+}
+
+/* Inputs: gold focus ring instead of the old accent ring */
+.input:focus {
+  border-color: var(--gold, #B08D2F) !important;
+  box-shadow: 0 0 0 3px var(--gold-soft, #F3EAD3) !important;
+}
