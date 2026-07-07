@@ -60,3 +60,8 @@ docker-compose.override.yml
 # === Client data (NEVER commit EL data) ===
 *.csv
 uploads/
+# Backup files from live editing
+*.bak
+*.bak2
+*.bak3
+*.bak_predetail
