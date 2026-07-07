@@ -180,6 +180,7 @@ function CalcField({ label, value, highlight }: { label: string; value: string; 
 
 function SectionCard({ number, title, children }: { number: number; title: string; children: React.ReactNode }) {
   return (
+    <div id={`sec-${number}`} style={{ scrollMarginTop: 76 }}>
     <div className="card p-5">
       <div className="flex items-center gap-2.5 mb-5" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
         <div className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0" style={{ background: 'var(--accent)', color: 'var(--accent-text)' }}>{number}</div>
@@ -187,7 +188,8 @@ function SectionCard({ number, title, children }: { number: number; title: strin
       </div>
       {children}
     </div>
-  )
+  </div>
+    )
 }
 
 function LeaveDialog({ onStay, onLeave }: { onStay: () => void; onLeave: () => void }) {
@@ -510,7 +512,18 @@ export default function NewLOAPage() {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-[1fr_320px] gap-6">
+      <div className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-[150px_1fr_320px] gap-6">
+          <nav className="hidden lg:grid gap-0.5 sticky self-start" style={{ top: 76 }}>
+            {([[1,'Location'],[2,'Classification'],[3,'Product'],[4,'Investment'],[5,'Budget'],[6,'Dates'],[7,'Description'],[8,'Requestor']] as [number,string][]).map(([n,t]) => (
+              <button key={n} type="button" onClick={() => document.getElementById(`sec-${n}`)?.scrollIntoView({behavior:'smooth',block:'start'})}
+                style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:8, border:'none', background:'transparent', cursor:'pointer', textAlign:'left', fontFamily:'var(--font-sans)', fontSize:12.5, color:'var(--text-secondary)' }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--surface-sunken)'}
+                onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                <span style={{ fontFamily:'var(--font-mono)', fontSize:10.5, width:14, color:'var(--text-tertiary)' }}>{n}</span>
+                <span>{t}</span>
+              </button>
+            ))}
+          </nav>
         <div className="space-y-4">
           <SectionCard number={1} title="Location">
             <div className="grid grid-cols-2 gap-4">
