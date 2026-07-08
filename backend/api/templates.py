@@ -16,6 +16,7 @@ POST /loa/templates/search
       2. Budget total (highest first) as tiebreaker for same score
 """
 from __future__ import annotations
+import json
 
 from typing import Any
 
@@ -67,41 +68,58 @@ def _template_dto(loa: LOA, match_score: int | None = None,
 # Scope: which LOAs is the caller allowed to see as templates?
 # ---------------------------------------------------------------------------
 
-def _scope_query(db: Session, user: User):
-    """Return a query already filtered to what the user is allowed to browse."""
-    q = db.query(LOA)
+def _extract_scope_values(scope_value) -> list[str]:
+    """Normalise scope_value (JSON array or string) into a Python list."""
+    if scope_value is None:
+        return []
+    if isinstance(scope_value, list):
+        return [str(v) for v in scope_value if v]
+    if isinstance(scope_value, str):
+        try:
+            parsed = json.loads(scope_value)
+            if isinstance(parsed, list):
+                return [str(v) for v in parsed if v]
+            return [str(parsed)] if parsed else []
+        except (json.JSONDecodeError, TypeError):
+            return [scope_value] if scope_value.strip() else []
+    return []
 
+
+def _scope_query(db: Session, user: User):
+    """
+    STRICT Past Campaigns access rule:
+      - Super-Admin (can_override_lock=True) ? sees all
+      - Marketer (role code ends with '_marketer') ? sees their cluster(s)
+      - Everyone else ? sees nothing
+    """
+    q = db.query(LOA)
     role = user.role_obj
     if not role:
         return q.filter(LOA.id == None)  # noqa: E711
-
     if role.can_override_lock:
         return q
-
-    if (role.scope_type or "").lower() == "cluster" and role.scope_value:
-        return q.filter(LOA.cluster == role.scope_value)
-
-    if (role.scope_type or "").lower() == "country" and role.scope_value:
-        return q.filter(LOA.country == role.scope_value)
-
+    if (role.code or "").endswith("_marketer"):
+        clusters = _extract_scope_values(role.scope_value)
+        if not clusters:
+            return q.filter(LOA.id == None)  # noqa: E711
+        return q.filter(LOA.cluster.in_(clusters))
     return q.filter(LOA.id == None)  # noqa: E711
 
 
 def _get_scope_sql_conditions(user: User) -> tuple[list[str], dict]:
-    """Return SQL WHERE conditions + params matching user scope for raw SQL queries."""
+    """SQL WHERE conditions matching Past Campaigns access rule."""
     role = user.role_obj
     if not role:
-        return ["1 = 0"], {}  # empty result
-
+        return ["1 = 0"], {}
     if role.can_override_lock:
-        return [], {}  # no restrictions
-
-    scope_type = (role.scope_type or "").lower()
-    if scope_type == "cluster" and role.scope_value:
-        return ["cluster = :scope_val"], {"scope_val": role.scope_value}
-    if scope_type == "country" and role.scope_value:
-        return ["country = :scope_val"], {"scope_val": role.scope_value}
-
+        return [], {}
+    if (role.code or "").endswith("_marketer"):
+        clusters = _extract_scope_values(role.scope_value)
+        if not clusters:
+            return ["1 = 0"], {}
+        placeholders = ", ".join(f":scope_c{i}" for i in range(len(clusters)))
+        params = {f"scope_c{i}": v for i, v in enumerate(clusters)}
+        return [f"cluster IN ({placeholders})"], params
     return ["1 = 0"], {}
 
 

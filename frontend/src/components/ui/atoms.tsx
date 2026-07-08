@@ -220,10 +220,17 @@ export function Avatar({ initials, size = 24 }: { initials: string; size?: numbe
 /** Derive initials from a full name or email */
 export function initialsOf(nameOrEmail?: string | null): string {
   if (!nameOrEmail) return '?';
-  const clean = nameOrEmail.split('@')[0].replace(/[._-]+/g, ' ').trim();
-  const parts = clean.split(/\s+/);
+  // 1) drop anything after '(' or '@'  → "Justine (Meta Marketer)" → "Justine"
+  const base = nameOrEmail.split('(')[0].split('@')[0].trim();
+  // 2) normalise separators
+  const clean = base.replace(/[._\-]+/g, ' ').trim();
+  if (!clean) return '?';
+  // 3) letters only, take first letter of each token
+  const parts = clean.split(/\s+/).filter(p => /[A-Za-zÀ-ÿ]/.test(p));
+  if (parts.length === 0) return '?';
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return clean.slice(0, 2).toUpperCase();
+  const single = parts[0];
+  return (single.length >= 2 ? single.slice(0, 2) : single).toUpperCase();
 }
 
 /* ----------------------------- Overline ---------------------------- */

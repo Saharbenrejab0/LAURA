@@ -206,8 +206,12 @@ export default function Sidebar({ isAdmin = false }: SidebarProps) {
         <SectionLabel expanded={expanded}>Work</SectionLabel>
         <NavItem expanded={expanded} icon="▤" label="Tracker"
           active={active === 'tracker'} onClick={() => router.push('/')} />
-        <NavItem expanded={expanded} icon="◷" label="Past Campaigns"
+        {(role?.can_override_lock || (role?.role_code || '').endsWith('_marketer')) && (
+
+          <NavItem expanded={expanded} icon="◷" label="Past Campaigns"
           active={active === 'past-campaigns'} onClick={() => router.push('/past-campaigns')} />
+
+        )}
 
         {isAdmin && (
           <>

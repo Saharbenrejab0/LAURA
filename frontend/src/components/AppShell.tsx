@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
+import { useMyRole } from '@/hooks/usePermissions'
 import LauraPill from '@/components/laura/LauraPill'
 import { layout } from '@/styles/tokens'
 import { useTheme } from '@/lib/theme'
@@ -18,6 +19,7 @@ const BARE_ROUTES = ['/login']
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const { role } = useMyRole()
   const { theme } = useTheme()
   const [pinned, setPinned] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -48,7 +50,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--canvas)' }}>
-      <Sidebar isAdmin={true} />
+      <Sidebar isAdmin={!!role?.can_override_lock} />
       <main style={{
         flex: 1,
         minWidth: 0,
