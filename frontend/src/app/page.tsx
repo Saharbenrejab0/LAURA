@@ -565,7 +565,7 @@ function TrackerRow({ loa, visited, onClick, summary }: {
   onClick: () => void;
   summary?: LoaCommentSummary;
 }) {
-  const title = loa.detail || loa.description || loa.activity_type || '—';
+  const title = loa.display_title || loa.detail || loa.description || loa.activity_type || '—';
   const country = loa.country || '—';
   const category = formatCategory(loa.category);
   const activity = loa.activity_type;

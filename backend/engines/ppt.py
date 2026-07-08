@@ -33,6 +33,7 @@ import io
 import os
 from datetime import datetime
 from pptx import Presentation
+from backend.engines.loa_display import compute_display_title
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
@@ -359,6 +360,9 @@ def _render_category_tag(slide, loa):
 # ════════════════════════════════════════════════════════════════════════
 
 def _slide_title(loa) -> str:
+    return compute_display_title(loa)
+
+def _slide_title_LEGACY(loa) -> str:
     """
     Title construction per gold deck rules:
       - Coop Advertising:  '{Customer} · {Activity}' (customer first)

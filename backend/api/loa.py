@@ -33,6 +33,7 @@ import shutil
 
 from backend.models.database import get_db
 from backend.models.loa import LOA, LOAStatus
+from backend.engines.loa_display import compute_display_title
 
 
 # Where does a LOA go when rejected at each step?
@@ -353,6 +354,16 @@ def _resolve_next_status(loa: LOA, current_status: str, db: Session) -> tuple[st
 # ROUTES — order matters: /export/* BEFORE /{loa_id} to avoid UUID parse
 # ════════════════════════════════════════════════════════════════════════
 
+
+
+def _with_display_title(loa):
+    """Serialize an ORM LOA to dict + inject display_title."""
+    if loa is None:
+        return None
+    data = {c.name: getattr(loa, c.name) for c in loa.__table__.columns}
+    data["display_title"] = compute_display_title(loa)
+    return data
+
 @router.get("")
 async def get_loas(
     status: Optional[str] = None,
@@ -395,7 +406,7 @@ async def get_loas(
             (LOA.status != 'draft') | (LOA.requestor_email == user.email)
         )
 
-    return query.all()
+    return [_with_display_title(loa) for loa in query.all()]
 
 
 # ── Excel export (BEFORE /{loa_id} routes) ──────────────────────────────
@@ -507,7 +518,7 @@ async def get_loa(
         if not role.matches_loa(loa):
             raise HTTPException(status_code=403, detail="LOA outside your scope")
 
-    return loa
+    return _with_display_title(loa)
 
 
 @router.patch("/{loa_id}")
@@ -536,7 +547,7 @@ async def update_loa(
     loa.calculate_totals()
     db.commit()
     db.refresh(loa)
-    return loa
+    return _with_display_title(loa)
 
 
 # ── Excel single-row download (detail page button) ─────────────────────

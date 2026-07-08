@@ -397,7 +397,7 @@ function ArchiveRow({ template, onSelect, onUse, disabled }: {
           margin: 0, fontSize: 14, fontWeight: 500, lineHeight: '20px',
           color: color.text.primary,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{template.title}</p>
+        }}>{template.display_title || template.title}</p>
       </div>
 
       {/* Tags column */}
@@ -476,7 +476,7 @@ function PreviewContent({ template, onUse, onClose, disabled }: {
             margin: `${space[1]}px 0 ${space[3]}px`,
             fontSize: 20, lineHeight: '26px', fontWeight: 600,
             color: color.text.primary,
-          }}>{template.title}</h2>
+          }}>{template.display_title || template.title}</h2>
           <StatusBadge status={template.status} />
         </div>
         <button onClick={onClose} aria-label="Close" style={{

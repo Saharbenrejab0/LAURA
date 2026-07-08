@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from backend.api.auth import get_current_user
 from backend.models.database import get_db
 from backend.models.loa import LOA
+from backend.engines.loa_display import compute_display_title
 from backend.models.user import User
 
 router = APIRouter()
@@ -49,6 +50,7 @@ def _template_dto(loa: LOA, match_score: int | None = None,
         "id":             str(loa.id),
         "loa_draft_id":   loa.loa_draft_id,
         "title":          title[:120],
+        "display_title":  compute_display_title(loa),
         "status":         loa.status,
         "cluster":        loa.cluster,
         "country":        loa.country,

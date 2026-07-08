@@ -226,6 +226,8 @@ export default function NewLOAPage() {
   const [errors, setErrors]       = useState<Record<string, string>>({})
   const [isDirty, setIsDirty]     = useState(false)
   const [showLeave, setShowLeave] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
   const [pendingLeave, setPendingLeave] = useState<string | null>(null)
   const [showPreview, setShowPreview]   = useState(false)
   const [autoSaveAt, setAutoSaveAt]     = useState<string | null>(null)
@@ -743,6 +745,7 @@ export default function NewLOAPage() {
           <div className="card overflow-hidden order-0">
             <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}><span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Completion checklist</span></div>
             {(() => {
+              if (!mounted) return null
               const items: { label: string; done: boolean }[] = [
                 { label: 'Cluster', done: !!cluster },{ label: 'Country', done: !!country },
                 { label: 'Activity Type', done: !!activityType },{ label: 'COT', done: !!cot },

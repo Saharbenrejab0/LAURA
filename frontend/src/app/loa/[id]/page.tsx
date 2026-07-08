@@ -219,7 +219,7 @@ export default function DraftPage() {
     router.push(`/loa/new?edit=${loa.id}`);
   };
 
-  const title = loa.description || loa.detail || 'Untitled LOA';
+  const title = loa.display_title || loa.description || loa.detail || 'Untitled LOA';
 
   return (
     <div style={{
