@@ -7,17 +7,15 @@
 
 // aligné sur backend WORKFLOW_TRANSITIONS (8 statuts) ────────
 export type LOAStatus =
-  | 'draft'                    // author creates the LOA
-  | 'emea_review'              // EMEA PS reviews XLS & PPT (advance_phase)
-  | 'global_brand_review'      // Global Brands review
-  | 'emea_brand_rework'        // EMEA checks brand comments, can edit or send back
+  | 'draft'
+  | 'emea_review'
+  | 'global_review'
+  | 'emea_post_global_review'
   | 'cmo_cfo_review'
-  | 'emea_cmo_rework'          // EMEA checks CMO/CFO comments, can edit or send back           // Alexandra OR Giulia validates (validate)
-  | 'global_functions_review'  // PR/Medical/Trade review
-  | 'emea_functions_rework'    // EMEA checks functions comments, can edit or send back
-  | 'corporate_review'         // Paola/Diana — final gate (validate)
-  | 'approved'                 // terminal ✓ — Teams notif fires
-  | 'rejected'                 // terminal ✗ (resubmittable)
+  | 'emea_final_review'
+  | 'corporate_review'
+  | 'approved'
+  | 'rejected'
 
 export type ActivityType =
   | 'Permanent Visibility'
@@ -298,14 +296,12 @@ export const BRAND_OPTIONS = Array.from(
 // ── APRÈS — 8 statuts, classes badge alignées sur globals.css ──────────
 export const STATUS_CONFIG: Record<LOAStatus, { label: string; cls: string }> = {
   draft:                    { label: 'Draft',              cls: 'badge-draft' },
-  emea_review:              { label: 'EMEA review',        cls: 'badge-emea-review' },
-  global_brand_review:      { label: 'Brand review',       cls: 'badge-global-review' },
-  emea_brand_rework:        { label: 'EMEA rework',        cls: 'badge-emea-review' },
-  cmo_cfo_review:           { label: 'CMO / CFO review',   cls: 'badge-cmo-cfo-review' },
-  emea_cmo_rework:          { label: 'EMEA review',        cls: 'badge-emea-review' },
-  global_functions_review:  { label: 'Functions review',   cls: 'badge-global-functions-review' },
-  emea_functions_rework:    { label: 'EMEA final check',   cls: 'badge-emea-review' },
-  corporate_review:         { label: 'Corporate review',   cls: 'badge-corporate-review' },
+  emea_review:              { label: 'EMEA Review',        cls: 'badge-emea-review' },
+  global_review:            { label: 'Global Review',      cls: 'badge-global-review' },
+  emea_post_global_review:  { label: 'EMEA Post-Review',   cls: 'badge-emea-review' },
+  cmo_cfo_review:           { label: 'CMO / CFO Review',   cls: 'badge-cmo-cfo-review' },
+  emea_final_review:        { label: 'EMEA Final Review',  cls: 'badge-emea-review' },
+  corporate_review:         { label: 'Corporate Review',   cls: 'badge-corporate-review' },
   approved:                 { label: 'Approved',           cls: 'badge-approved' },
   rejected:                 { label: 'Rejected',           cls: 'badge-rejected' },
 }

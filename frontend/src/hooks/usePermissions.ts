@@ -14,6 +14,8 @@ export interface LOAPermissions {
   can_edit: boolean
   can_comment: boolean
   can_validate: boolean
+  can_delete: boolean
+  can_duplicate: boolean
   can_override_lock: boolean
 }
 

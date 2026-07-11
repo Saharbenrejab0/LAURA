@@ -64,15 +64,16 @@ export const color = {
  * Labels remain static strings.
  */
 export const statusBadge = {
-  draft:             { text: 'var(--laura-text-secondary)', bg: 'var(--laura-bg-subtle)',    border: 'var(--laura-border-soft)',     label: 'Draft' },
-  emea_review:       { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',      border: 'var(--laura-info-border)',     label: 'EMEA review' },
-  global_review:     { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',      border: 'var(--laura-info-border)',     label: 'Global review' },
-  global_functions:  { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',      border: 'var(--laura-info-border)',     label: 'Global functions' },
-  cmo_cfo_review:    { text: 'var(--laura-champagne-deep)',  bg: 'var(--laura-champagne-mist)', border: 'var(--laura-champagne-border)', label: 'CMO/CFO review' },
-  corporate_review:  { text: 'var(--laura-champagne-deep)',  bg: 'var(--laura-champagne-mist)', border: 'var(--laura-champagne-border)', label: 'Corporate review' },
-  approved:          { text: 'var(--laura-text-on-primary)', bg: 'var(--laura-action)',       border: 'var(--laura-action)',          label: 'Approved' },
-  rejected:          { text: 'var(--laura-danger)',          bg: 'var(--laura-danger-bg)',    border: 'var(--laura-danger-border)',   label: 'Rejected' },
-  closed:            { text: 'var(--laura-text-secondary)',  bg: 'var(--laura-bg-subtle)',    border: 'var(--laura-border-soft)',     label: 'Closed' },
+  draft:                   { text: 'var(--laura-text-secondary)', bg: 'var(--laura-bg-subtle)',       border: 'var(--laura-border-soft)',      label: 'Draft' },
+  emea_review:             { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',         border: 'var(--laura-info-border)',      label: 'EMEA Review' },
+  global_review:           { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',         border: 'var(--laura-info-border)',      label: 'Global Review' },
+  emea_post_global_review: { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',         border: 'var(--laura-info-border)',      label: 'EMEA Post-Review' },
+  cmo_cfo_review:          { text: 'var(--laura-champagne-deep)',  bg: 'var(--laura-champagne-mist)', border: 'var(--laura-champagne-border)', label: 'CMO / CFO Review' },
+  emea_final_review:       { text: 'var(--laura-champagne-deep)',  bg: 'var(--laura-champagne-mist)', border: 'var(--laura-champagne-border)', label: 'EMEA Final Review' },
+  corporate_review:        { text: 'var(--laura-champagne-deep)',  bg: 'var(--laura-champagne-mist)', border: 'var(--laura-champagne-border)', label: 'Corporate Review' },
+  approved:                { text: 'var(--laura-text-on-primary)', bg: 'var(--laura-action)',          border: 'var(--laura-action)',           label: 'Approved' },
+  rejected:                { text: 'var(--laura-danger)',          bg: 'var(--laura-danger-bg)',       border: 'var(--laura-danger-border)',    label: 'Rejected' },
+  closed:                  { text: 'var(--laura-text-secondary)',  bg: 'var(--laura-bg-subtle)',       border: 'var(--laura-border-soft)',      label: 'Closed' },
 } as const;
 
 export const originBadge = {
