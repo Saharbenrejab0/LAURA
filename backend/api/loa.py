@@ -36,16 +36,10 @@ from backend.models.loa import LOA, LOAStatus
 from backend.engines.loa_display import compute_display_title
 
 
-# Where does a LOA go when rejected at each step?
-REJECT_DESTINATIONS = {
-    "emea_review":              "draft",                # back to marketer
-    "global_brand_review":      "emea_review",          # EMEA fixes brand feedback
-    "emea_brand_rework":        "draft",                # EMEA sends back to marketer
-    "global_functions_review":  "emea_brand_rework",    # EMEA fixes functions feedback
-    "emea_functions_rework":    "draft",                # EMEA sends back to marketer
-    "cmo_cfo_review":           "emea_functions_rework", # EMEA handles CMO/CFO feedback
-    "corporate_review":         "emea_functions_rework", # EMEA handles corporate feedback
-}
+# -- Rejection rule (Rock 3) --
+# Rejection at any step -> status becomes "rejected".
+# Marketer re-edits and re-submits -> goes back to emea_review.
+
 from backend.models.permission import Permission, implies
 from backend.models.role_permission import RolePermission
 from backend.reference_data import (
@@ -229,20 +223,30 @@ class SuggestRequest(BaseModel):
         return list(v)
 
 
-# ── Workflow state machine ──────────────────────────────────────────────
+# -- Workflow state machine (Rock 3 -- 9 statuses, parallel gates) ----------
+
+# Linear transition map (for non-parallel-gate steps)
 WORKFLOW_TRANSITIONS = {
-    "emea_review":             "global_brand_review",
-    "global_brand_review":           "cmo_cfo_review",
-    "cmo_cfo_review":          "global_functions_review",
-    "global_functions_review": "corporate_review",
+    "emea_review":             "global_review",
+    "global_review":           "emea_post_global_review",
+    "emea_post_global_review": "cmo_cfo_review",
+    "cmo_cfo_review":          "emea_final_review",
+    "emea_final_review":       "corporate_review",
     "corporate_review":        "approved",
 }
 
+# Display order (used for rollback dropdown)
+WORKFLOW_ORDER = [
+    "draft", "emea_review", "global_review", "emea_post_global_review",
+    "cmo_cfo_review", "emea_final_review", "corporate_review", "approved",
+]
+
+# Statuses requiring 'validate' permission (approval decisions)
 VALIDATION_STATUSES = {"cmo_cfo_review", "corporate_review"}
 
-ADVANCE_PHASE_STATUSES = {
-    "emea_review", "global_brand_review", "global_functions_review",
-}
+# Statuses requiring 'advance_phase' permission (EMEA orchestration)
+ADVANCE_PHASE_STATUSES = {"emea_review", "emea_post_global_review", "emea_final_review"}
+
 
 
 # ── Scope filter helper (shared by get_loas and export_excel) ───────────
@@ -263,93 +267,53 @@ def _apply_scope_filter(query, user: User):
     elif role.scope_type == 'author_only':
         query = query.filter(LOA.requestor_email == user.email)
     return query
+# -- Parallel gate helpers (Rock 3) ----------------------------------------
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Sprint 5 — Skip helper for orphan workflow steps
-# ─────────────────────────────────────────────────────────────────────────────
-# If a LOA reaches global_review or global_functions_review but no active
-# reviewer is assigned for its brand/category, we skip the step automatically
-# instead of letting the LOA hang forever.
-
-def _has_reviewer_for_step(loa: LOA, target_status: str, db: Session) -> bool:
-    """
-    Returns True if at least one active user has comment rights at
-    `target_status` AND a scope matching this LOA. False otherwise.
-    """
-    from backend.models.role import Role, RolePermission
-    from backend.models.permission import Permission
-
-    # Find all roles with `comment` permission at the target status.
-    comment_perm = db.query(Permission).filter(Permission.code == "comment").first()
-    if not comment_perm:
-        return True  # safety: if permission system is misconfigured, do not skip
-
-    roles_with_comment = (
-        db.query(Role)
-        .join(RolePermission, RolePermission.role_id == Role.id)
-        .filter(RolePermission.permission_id == comment_perm.id)
-        .filter(RolePermission.status == target_status)
-        .all()
-    )
-
-    if not roles_with_comment:
+def _has_brand_reviewer(loa: LOA, db: Session) -> bool:
+    """Check if any global_brand_* role with active users matches this LOA's brand."""
+    from backend.models.role import Role
+    if not loa.brand:
         return False
-
-    # For each candidate role, check if at least one user fits the LOA's scope
-    for role in roles_with_comment:
-        users_in_role = db.query(User).filter(User.role_id == role.id).all()
-        if not users_in_role:
-            continue
-
-        # Scope check:
-        #   - "all" scope → any user matches
-        #   - "brand" scope → user.role.scope_value must include the LOA's brand
-        #   - "function" scope → user.role.scope_value must include a LOA category
-        #   - "cluster" scope → user.role.scope_value must include the LOA's cluster
-        scope_type = role.scope_type
+    brand_roles = db.query(Role).filter(Role.scope_type == 'brand').all()
+    for role in brand_roles:
         scope_values = role.scope_value or []
-
-        if scope_type == "all":
-            return True
-
-        if scope_type == "brand" and loa.brand:
-            if any(loa.brand.lower() in (sv or "").lower() or (sv or "").lower() in loa.brand.lower() for sv in scope_values):
+        if loa.brand in scope_values:
+            user_count = db.query(User).filter(User.role_id == role.id).count()
+            if user_count > 0:
                 return True
-
-        if scope_type == "function" and loa.category:
-            cats = loa.category if isinstance(loa.category, list) else [loa.category]
-            for cat in cats:
-                if any((cat or "").lower() in (sv or "").lower() or (sv or "").lower() in (cat or "").lower() for sv in scope_values):
-                    return True
-
-        if scope_type == "cluster" and loa.cluster:
-            if any(loa.cluster.lower() == (sv or "").lower() for sv in scope_values):
-                return True
-
     return False
 
 
-# Status steps that we may skip if no reviewer is available
-SKIPPABLE_STATUSES = {"global_brand_review", "global_functions_review"}
+def _has_function_reviewer(loa: LOA, db: Session) -> bool:
+    """Check if any global_function_* role with active users matches this LOA's activity_type."""
+    from backend.models.role import Role
+    if not loa.activity_type:
+        return False
+    func_roles = db.query(Role).filter(Role.scope_type == 'function').all()
+    for role in func_roles:
+        scope_values = role.scope_value or []
+        if loa.activity_type in scope_values:
+            user_count = db.query(User).filter(User.role_id == role.id).count()
+            if user_count > 0:
+                return True
+    return False
 
 
-def _resolve_next_status(loa: LOA, current_status: str, db: Session) -> tuple[str, list[str]]:
-    """
-    Compute the next status, skipping orphan steps.
-    Returns (final_status, list_of_skipped_steps).
-    """
-    skipped: list[str] = []
-    next_status = WORKFLOW_TRANSITIONS.get(current_status)
+def _compute_skip_flags(loa: LOA, db: Session) -> None:
+    """Set brand/function skip flags. Called when EMEA advances from emea_review."""
+    has_brand = _has_brand_reviewer(loa, db)
+    has_func = _has_function_reviewer(loa, db)
 
-    while next_status in SKIPPABLE_STATUSES:
-        if _has_reviewer_for_step(loa, next_status, db):
-            break  # someone can review here, stop and use this status
-        skipped.append(next_status)
-        next_status = WORKFLOW_TRANSITIONS.get(next_status)
-        if next_status is None:
-            break
+    loa.brand_review_skipped = not has_brand
+    loa.brand_review_done = not has_brand      # pre-mark done if skipped
+    loa.function_review_skipped = not has_func
+    loa.function_review_done = not has_func    # pre-mark done if skipped
 
-    return next_status or "approved", skipped
+
+def _is_global_review_complete(loa: LOA) -> bool:
+    """Check if both brand and function gates are satisfied (done or skipped)."""
+    return loa.brand_review_done and loa.function_review_done
+
 # ════════════════════════════════════════════════════════════════════════
 # ROUTES — order matters: /export/* BEFORE /{loa_id} to avoid UUID parse
 # ════════════════════════════════════════════════════════════════════════
@@ -631,9 +595,13 @@ async def submit_loa(
     return loa
 
 
-# ── Workflow validation / advance ───────────────────────────────────────
+# -- Workflow permission check (Rock 3) ------------------------------------
 
 def _check_workflow_permission(user: User, loa: LOA, db: Session) -> str:
+    """
+    Verify user has the required permission to act on this LOA.
+    Returns permission code used. Raises HTTPException if denied.
+    """
     current_status = loa.status
 
     if current_status in VALIDATION_STATUSES:
@@ -650,33 +618,33 @@ def _check_workflow_permission(user: User, loa: LOA, db: Session) -> str:
     if not role:
         raise HTTPException(status_code=403, detail="No role assigned")
 
-    rp = (
-        db.query(RolePermission, Permission)
-        .join(Permission, RolePermission.permission_id == Permission.id)
+    # Get ALL permissions this role has at this status
+    perms = (
+        db.query(Permission.code)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
         .filter(
             RolePermission.role_id == role.id,
             RolePermission.loa_status == current_status,
         )
-        .first()
+        .all()
     )
-    actual_permission = rp[1].code if rp else None
+    perm_codes = {p[0] for p in perms}
 
-    if not actual_permission or not implies(actual_permission, required_permission):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                'error': 'Permission denied',
-                'required_permission': required_permission,
-                'user_role': role.code,
-                'loa_status': current_status,
-                'message': (
-                    f"Your role '{role.code}' cannot perform "
-                    f"'{required_permission}' on a LOA in status '{current_status}'."
-                ),
-            },
-        )
+    if not perm_codes:
+        raise HTTPException(status_code=403, detail="No access at this workflow stage.")
 
-    return required_permission
+    # advance_phase implies all others
+    if 'advance_phase' in perm_codes:
+        return 'advance_phase'
+    if required_permission in perm_codes:
+        return required_permission
+
+    raise HTTPException(
+        status_code=403,
+        detail=f"You need '{required_permission}' permission. "
+               f"You have: {', '.join(sorted(perm_codes))}",
+    )
+
 
 
 @router.post("/{loa_id}/validate")
@@ -690,22 +658,27 @@ async def validate_workflow_step(
         raise HTTPException(status_code=404, detail="LOA not found")
 
     if loa.is_locked:
-        raise HTTPException(
-            status_code=423,
-            detail="LOA is locked by a super-admin. It must be unlocked first.",
-        )
+        raise HTTPException(status_code=423, detail="LOA is locked by a super-admin.")
 
     current_status = loa.status
+
+    # global_review advances automatically via comments, not via /validate
+    if current_status == "global_review":
+        raise HTTPException(
+            status_code=400,
+            detail="global_review advances automatically when reviewers comment.",
+        )
+
     if current_status not in WORKFLOW_TRANSITIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot validate a LOA in status '{current_status}'. "
-                   f"Valid statuses: {list(WORKFLOW_TRANSITIONS.keys())}",
+            detail=f"Cannot advance a LOA in status '{current_status}'.",
         )
 
     permission_used = _check_workflow_permission(user, loa, db)
+    skipped = []
 
-    # Double validation for CMO/CFO step
+    # -- CMO/CFO parallel gate --
     if current_status == "cmo_cfo_review":
         role = user.role_obj
         role_code = role.code if role else ""
@@ -715,21 +688,40 @@ async def validate_workflow_step(
         elif role_code == "regional_cfo":
             loa.cfo_approved = True
         else:
+            # Super-admin or advance_phase holder: approve both
             loa.cmo_approved = True
             loa.cfo_approved = True
 
         if loa.cmo_approved and loa.cfo_approved:
             new_status = WORKFLOW_TRANSITIONS[current_status]
-            skipped = []
             loa.status = new_status
         else:
+            # One side approved, waiting for the other
             db.commit()
             db.refresh(loa)
             return loa
+
+    # -- EMEA review -> global_review (with skip detection) --
+    elif current_status == "emea_review":
+        _compute_skip_flags(loa, db)
+        if loa.brand_review_done and loa.function_review_done:
+            # Both skipped -> jump past global_review
+            loa.status = "emea_post_global_review"
+            skipped.append("global_review")
+        else:
+            loa.status = "global_review"
+
+    # -- All other steps: linear advance --
     else:
-        new_status = WORKFLOW_TRANSITIONS[current_status]
-        skipped = []
+        new_status = WORKFLOW_TRANSITIONS.get(current_status)
+        if not new_status:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No transition defined from status '{current_status}'.",
+            )
         loa.status = new_status
+
+    new_status = loa.status
 
     if new_status == "approved":
         loa.approved_at = datetime.utcnow()
@@ -750,7 +742,6 @@ async def validate_workflow_step(
         "fy_total": loa.fy_2026_total,
     })
 
-    # When approved, fire a separate event for n8n to regenerate Excel
     if new_status == "approved":
         await notify_n8n("loa_approved", str(loa_id), {
             "requestor_email": loa.requestor_email,
@@ -776,8 +767,6 @@ async def approve_loa(
     return await validate_workflow_step(loa_id, db, user)
 
 
-# ── Reject ──────────────────────────────────────────────────────────────
-
 @router.post("/{loa_id}/reject")
 async def reject_loa(
     loa_id: str,
@@ -790,22 +779,14 @@ async def reject_loa(
         raise HTTPException(status_code=404, detail="LOA not found")
 
     if loa.is_locked:
-        raise HTTPException(
-            status_code=423,
-            detail="LOA is locked by a super-admin.",
-        )
+        raise HTTPException(status_code=423, detail="LOA is locked by a super-admin.")
 
     if not reason or not reason.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="A non-empty reason is required to reject a LOA.",
-        )
+        raise HTTPException(status_code=422, detail="A non-empty reason is required.")
 
     if loa.status == "draft":
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot reject a draft. Drafts can be discarded instead.",
-        )
+        raise HTTPException(status_code=400, detail="Cannot reject a draft.")
+
     if loa.status in ("approved", "rejected"):
         raise HTTPException(
             status_code=400,
@@ -815,10 +796,17 @@ async def reject_loa(
     _check_workflow_permission(user, loa, db)
 
     previous_status = loa.status
-    loa.status = REJECT_DESTINATIONS.get(loa.status, "draft")
+    loa.status = "rejected"
     loa.rejection_reason = reason.strip()
+
+    # Reset ALL gate booleans
     loa.cmo_approved = False
     loa.cfo_approved = False
+    loa.brand_review_done = False
+    loa.function_review_done = False
+    loa.brand_review_skipped = False
+    loa.function_review_skipped = False
+
     db.commit()
     db.refresh(loa)
 
@@ -832,8 +820,6 @@ async def reject_loa(
 
     return loa
 
-
-# ── Comment ─────────────────────────────────────────────────────────────
 
 class CommentRequest(BaseModel):
     comment: str
@@ -857,21 +843,24 @@ async def add_comment(
     if not role:
         raise HTTPException(status_code=403, detail="No role assigned")
 
-    rp = (
-        db.query(RolePermission, Permission)
-        .join(Permission, RolePermission.permission_id == Permission.id)
+    # Get ALL permissions this role has at this LOA's current status
+    perms = (
+        db.query(Permission.code)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
         .filter(
             RolePermission.role_id == role.id,
             RolePermission.loa_status == loa.status,
         )
-        .first()
+        .all()
     )
+    perm_codes = {p[0] for p in perms}
 
-    if not rp:
+    if not perm_codes:
         raise HTTPException(status_code=403, detail="No access at this stage.")
 
-    perm_code = rp[1].code
-    if perm_code not in ('comment', 'validate', 'edit', 'advance_phase'):
+    # Need at least comment-level permission
+    comment_perms = {'comment', 'validate', 'edit', 'advance_phase'}
+    if not perm_codes & comment_perms:
         raise HTTPException(status_code=403, detail="You need at least comment permission.")
 
     timestamp = datetime.utcnow().strftime("%d %b %Y %H:%M")
@@ -882,9 +871,40 @@ async def add_comment(
     else:
         loa.cmo_comment = entry
 
+    # -- Parallel gate tracking for global_review --
+    auto_advanced = False
+    if loa.status == "global_review":
+        if role.scope_type == "brand":
+            loa.brand_review_done = True
+        elif role.scope_type == "function":
+            loa.function_review_done = True
+
+        # Check if both gates are now complete -> auto-advance
+        if _is_global_review_complete(loa):
+            loa.status = "emea_post_global_review"
+            auto_advanced = True
+
     db.commit()
     db.refresh(loa)
-    return {"status": "ok", "comment_added": entry}
+
+    result = {"status": "ok", "comment_added": entry}
+    if auto_advanced:
+        result["auto_advanced_to"] = "emea_post_global_review"
+        await notify_n8n("loa_validated", str(loa_id), {
+            "requestor_email": loa.requestor_email,
+            "loa_draft_id": loa.loa_draft_id,
+            "from_status": "global_review",
+            "to_status": "emea_post_global_review",
+            "skipped_steps": [],
+            "validated_by": "auto (both review gates complete)",
+            "permission_used": "comment",
+            "activity_type": loa.activity_type,
+            "country": loa.country,
+            "fy_total": loa.fy_2026_total,
+        })
+
+    return result
+
 
 
 # ── Lock / Unlock ───────────────────────────────────────────────────────
@@ -968,10 +988,6 @@ async def validate_loa(loa_id: str, db: Session = Depends(get_db)):
         "is_valid": not any(i["type"] == "error" for i in issues),
         "issues": issues,
     }
-
-
-# ── Delete ──────────────────────────────────────────────────────────────
-
 @router.delete("/{loa_id}")
 async def delete_loa(
     loa_id: str,
@@ -983,21 +999,38 @@ async def delete_loa(
         raise HTTPException(status_code=404, detail="LOA not found")
 
     role = user.role_obj
-    is_author = loa.requestor_email == user.email
-    is_admin = role and role.can_override_lock
+    if not role:
+        raise HTTPException(status_code=403, detail="No role assigned")
 
-    if not is_author and not is_admin:
-        raise HTTPException(status_code=403, detail="Only the author or a super-admin can delete a LOA.")
+    # Check matrix: does this role have 'delete' permission at this status?
+    has_delete = (
+        db.query(RolePermission)
+        .join(Permission, RolePermission.permission_id == Permission.id)
+        .filter(
+            RolePermission.role_id == role.id,
+            RolePermission.loa_status == loa.status,
+            Permission.code == 'delete',
+        )
+        .first()
+    )
 
-    if loa.status != "draft":
+    if not has_delete:
         raise HTTPException(
-            status_code=400,
-            detail=f"Cannot delete a LOA in status '{loa.status}'. Only drafts can be deleted — submitted LOAs must be rejected instead.",
+            status_code=403,
+            detail=f"You don't have delete permission for LOAs in status '{loa.status}'.",
+        )
+
+    # Non-admin users can only delete their own LOAs
+    if not role.can_override_lock and loa.requestor_email != user.email:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete your own LOAs.",
         )
 
     db.delete(loa)
     db.commit()
     return {"deleted": True, "loa_id": loa_id}
+
 
 
 # ── PPT download ────────────────────────────────────────────────────────
