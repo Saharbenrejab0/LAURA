@@ -36,7 +36,7 @@ class RolePermission(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (
-        UniqueConstraint('role_id', 'loa_status', name='uq_role_status'),
+        UniqueConstraint('role_id', 'loa_status', 'permission_id', name='uq_role_status_perm'),
     )
 
     role = relationship('Role', back_populates='role_permissions')

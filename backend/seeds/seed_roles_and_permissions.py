@@ -1,14 +1,29 @@
 """
-Seed script — Workflow v2.1 (progressive visibility, June 2026)
+Seed script — Rock 2 (9-status workflow, July 2026)
 
-Based on the client-approved document: LAURA_Approval_Workflow_and_Permissions v2.
+Complete rewrite of the permission matrix for the definitive workflow:
+  draft -> emea_review -> global_review -> emea_post_global_review ->
+  cmo_cfo_review -> emea_final_review -> corporate_review -> approved
+  + rejected (returns to draft)
 
-Key changes from v2.0:
-  - Progressive visibility: roles only get access from their step onward
-  - EMEA PS Editor = Super-Admin in the matrix (Advance everywhere)
-  - Draft and Rejected have identical permissions
-  - Local Finance gets Edit on draft/rejected (same as Local Marketer)
-  - 195 matrix entries (was 226)
+Parallel gates:
+  - global_review: brand + function teams comment simultaneously
+    (tracked by brand_review_done / function_review_done booleans)
+  - cmo_cfo_review: CMO + CFO validate simultaneously
+    (tracked by cmo_approved / cfo_approved booleans)
+
+7 permissions: view, comment, validate, edit, advance_phase, delete, duplicate
+30 roles (no emea_ps_editor, no ai_to_market_admin, no ceo_validator)
+9 statuses
+
+Strategy: WIPE role_permission and rebuild from scratch.
+Permissions and roles are upserted (create if missing, update if exists).
+
+Fixes applied:
+  - east_gr_marketer scope: ['EAST'] (was ['EAST'] already but east_gr_finance
+    was ['EAST & GR'] — both normalized to ['EAST'] to match actual LOA data)
+  - advance_phase hierarchy_level: 4 (was 2)
+  - Added delete + duplicate permissions
 
 Usage:
     python -m backend.seeds.seed_roles_and_permissions
@@ -25,237 +40,411 @@ from backend.models.role import Role
 from backend.models.role_permission import RolePermission
 
 
+# =====================================================================
+# CONSTANTS
+# =====================================================================
+
 CLUSTERS = ['FRANCE', 'ITALY', 'DACH', 'IBERIA', 'NORTH', 'META',
-            'EAST & GR', 'RUSSIA']
+            'EAST', 'RUSSIA']
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# THE 5 PERMISSIONS
-# ═══════════════════════════════════════════════════════════════════════
-
-PERMISSIONS_DATA = [
-    {'code': 'view',          'display_name': 'View',          'description': 'Read-only access to the LOA.',                                        'hierarchy_level': 1},
-    {'code': 'comment',       'display_name': 'Comment',       'description': 'Can add comments per section without modifying content.',              'hierarchy_level': 2},
-    {'code': 'validate',      'display_name': 'Validate',      'description': 'Can click Approve / Reject / Approve-with-comment.',                  'hierarchy_level': 2},
-    {'code': 'edit',          'display_name': 'Edit',          'description': 'Can modify the content of the LOA.',                                  'hierarchy_level': 3},
-    {'code': 'advance_phase', 'display_name': 'Advance Phase', 'description': 'Can advance the LOA to the next step. Includes Edit, Validate, Comment, View.', 'hierarchy_level': 4},
+ALL_STATUSES = [
+    'draft', 'emea_review', 'global_review', 'emea_post_global_review',
+    'cmo_cfo_review', 'emea_final_review', 'corporate_review',
+    'approved', 'rejected',
 ]
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# THE 31 ROLES
-# ═══════════════════════════════════════════════════════════════════════
+# =====================================================================
+# THE 7 PERMISSIONS
+# =====================================================================
+
+PERMISSIONS_DATA = [
+    {
+        'code': 'view',
+        'display_name': 'View',
+        'description': 'Read-only access to the LOA.',
+        'hierarchy_level': 1,
+    },
+    {
+        'code': 'comment',
+        'display_name': 'Comment',
+        'description': 'Can add comments per section without modifying content.',
+        'hierarchy_level': 2,
+    },
+    {
+        'code': 'validate',
+        'display_name': 'Validate',
+        'description': 'Can click Approve / Reject / Approve-with-comment.',
+        'hierarchy_level': 2,
+    },
+    {
+        'code': 'edit',
+        'display_name': 'Edit',
+        'description': 'Can modify the content of the LOA.',
+        'hierarchy_level': 3,
+    },
+    {
+        'code': 'advance_phase',
+        'display_name': 'Advance Phase',
+        'description': 'Can advance the LOA to the next step. Super-permission.',
+        'hierarchy_level': 4,
+    },
+    {
+        'code': 'delete',
+        'display_name': 'Delete',
+        'description': 'Can permanently delete a LOA.',
+        'hierarchy_level': 1,
+    },
+    {
+        'code': 'duplicate',
+        'display_name': 'Duplicate',
+        'description': 'Can duplicate a LOA as a new draft.',
+        'hierarchy_level': 1,
+    },
+]
+
+
+# =====================================================================
+# THE 30 ROLES
+# =====================================================================
 
 ROLES_DATA = []
 
-# Local Marketers (8)
+# -- Group 1: Local Marketers (8 clusters) ----------------------------
 for cluster in CLUSTERS:
-    cc = cluster.lower().replace(' & ', '_').replace(' ', '_')
+    code = cluster.lower().replace(' ', '_').replace('&', '').replace('__', '_')
     ROLES_DATA.append({
-        'code': f'{cc}_marketer',
-        'display_name': f'{cluster.title() if cluster != "DACH" else cluster} Marketer',
-        'description': f'Local marketer for {cluster}. Creates LOAs, edits during draft and after rejection.',
-        'scope_type': 'cluster', 'scope_value': [cluster], 'can_override_lock': False,
+        'code': f'{code}_marketer',
+        'display_name': f'{cluster} Marketer',
+        'description': f'Local marketer for {cluster}. Creates and edits LOAs.',
+        'scope_type': 'cluster',
+        'scope_value': [cluster],
+        'can_override_lock': False,
     })
 
-# Local Finance (8)
+# -- Group 2: Local Finance (8 clusters) ------------------------------
 for cluster in CLUSTERS:
-    cc = cluster.lower().replace(' & ', '_').replace(' ', '_')
+    code = cluster.lower().replace(' ', '_').replace('&', '').replace('__', '_')
     ROLES_DATA.append({
-        'code': f'{cc}_finance',
-        'display_name': f'{cluster.title() if cluster != "DACH" else cluster} Finance',
-        'description': f'Local finance for {cluster}. Edits during draft and after rejection, views during review.',
-        'scope_type': 'cluster', 'scope_value': [cluster], 'can_override_lock': False,
+        'code': f'{code}_finance',
+        'display_name': f'{cluster} Finance',
+        'description': f'Local finance for {cluster}. Same edit rights as marketer on draft.',
+        'scope_type': 'cluster',
+        'scope_value': [cluster],
+        'can_override_lock': False,
     })
 
-# EMEA PS Editor (kept as role, but matrix = Super-Admin)
-ROLES_DATA.append({
-    'code': 'emea_ps_editor',
-    'display_name': 'EMEA PS Editor',
-    'description': 'Vanessa, Thibault, Sandrine. Same permissions as Super-Admin in the matrix.',
-    'scope_type': 'all', 'scope_value': None, 'can_override_lock': False,
-})
-
-# Regional CMO / CFO
+# -- Group 3: Regional leadership (2 roles) ---------------------------
 ROLES_DATA.extend([
-    {'code': 'regional_cmo', 'display_name': 'Regional CMO', 'description': 'Alexandra. Validates at CMO/CFO step (PowerPoint).',
-     'scope_type': 'all', 'scope_value': None, 'can_override_lock': False},
-    {'code': 'regional_cfo', 'display_name': 'Regional CFO', 'description': 'Giulia. Validates at CMO/CFO step (Excel).',
-     'scope_type': 'all', 'scope_value': None, 'can_override_lock': False},
+    {
+        'code': 'regional_cmo',
+        'display_name': 'Regional CMO',
+        'description': 'Alexandra. Validates at cmo_cfo_review step.',
+        'scope_type': 'all',
+        'scope_value': None,
+        'can_override_lock': False,
+    },
+    {
+        'code': 'regional_cfo',
+        'display_name': 'Regional CFO',
+        'description': 'Giulia. Validates at cmo_cfo_review step.',
+        'scope_type': 'all',
+        'scope_value': None,
+        'can_override_lock': False,
+    },
 ])
 
-# Global Brands (6)
+# -- Group 4: Global Brand teams (6 roles) ----------------------------
 ROLES_DATA.extend([
-    {'code': 'global_brand_rayban',         'display_name': 'Global Brand Ray-Ban',         'description': 'Comments on Ray-Ban LOAs during global review.',
-     'scope_type': 'brand', 'scope_value': ['HB - Ray-Ban', 'HB - Ray-Ban Meta'], 'can_override_lock': False},
-    {'code': 'global_brand_oakley',         'display_name': 'Global Brand Oakley',          'description': 'Comments on Oakley LOAs during global review.',
-     'scope_type': 'brand', 'scope_value': ['HB - Oakley', 'HB - Oakley Meta', 'Sport (OO/ZB/OW)'], 'can_override_lock': False},
-    {'code': 'global_brand_essilor_lenses', 'display_name': 'Global Brand Essilor Lenses',  'description': 'Comments on Essilor Lenses LOAs during global review.',
-     'scope_type': 'brand', 'scope_value': ['Essilor - Varilux', 'Essilor - Stellest', 'Essilor - Eyezen', 'Essilor - Crizal', 'Essilor - Masterbrand', 'Essilor - Multibrand', 'Multibrand'], 'can_override_lock': False},
-    {'code': 'global_brand_transitions',    'display_name': 'Global Brand Transitions',     'description': 'Comments on Transitions LOAs during global review.',
-     'scope_type': 'brand', 'scope_value': ['Transitions'], 'can_override_lock': False},
-    {'code': 'global_brand_other_hb',       'display_name': 'Global Brand — Other HB',      'description': 'Comments on Vogue, Persol, Oliver Peoples, etc.',
-     'scope_type': 'brand', 'scope_value': ['HB - Vogue', 'HB - Persol', 'HB - Oliver Peoples', 'HB - Alain Mikli', 'HB - BLIZ', 'HB - Arnette', 'HB - Others'], 'can_override_lock': False},
-    {'code': 'global_brand_license',        'display_name': 'Global Brand — License',       'description': 'Comments on License Brand LOAs.',
-     'scope_type': 'brand', 'scope_value': ['LB - Luxury', 'LB - PFF', 'LB - Armani Exchange', 'LB - Brunello Cucinelli', 'LB - Burberry', 'LB - Chanel', 'LB - Dolce & Gabbana', 'LB - Emporio Armani', 'LB - Ferrari', 'LB - Ferrari Scuderia', 'LB - Giorgio Armani', 'LB - Jimmy Choo', 'LB - Michael Kors', 'LB - Miu Miu', 'LB - Moncler', 'LB - Prada', 'LB - Prada Linea Rossa', 'LB - Polo Ralph Lauren', 'LB - Polo', 'LB - Ralph', 'LB - Swarovski', 'LB - Starck Eye', 'LB - Tiffany', 'LB - Versace', 'LB - Others'], 'can_override_lock': False},
+    {
+        'code': 'global_brand_rayban',
+        'display_name': 'Global Brand - Ray-Ban',
+        'description': 'Ray-Ban global team. Comments during global_review.',
+        'scope_type': 'brand',
+        'scope_value': ['HB - Ray-Ban', 'HB - Ray-Ban Meta'],
+        'can_override_lock': False,
+    },
+    {
+        'code': 'global_brand_oakley',
+        'display_name': 'Global Brand - Oakley',
+        'description': 'Oakley global team. Comments during global_review.',
+        'scope_type': 'brand',
+        'scope_value': ['HB - Oakley', 'HB - Oakley Meta', 'Sport (OO/ZB/OW)'],
+        'can_override_lock': False,
+    },
+    {
+        'code': 'global_brand_essilor_lenses',
+        'display_name': 'Global Brand - Essilor Lenses',
+        'description': 'Essilor lenses global team. Comments during global_review.',
+        'scope_type': 'brand',
+        'scope_value': [
+            'Essilor - Varilux', 'Essilor - Stellest', 'Essilor - Eyezen',
+            'Essilor - Crizal', 'Essilor - Masterbrand', 'Essilor - Multibrand',
+            'Multibrand',
+        ],
+        'can_override_lock': False,
+    },
+    {
+        'code': 'global_brand_transitions',
+        'display_name': 'Global Brand - Transitions',
+        'description': 'Transitions global team. Comments during global_review.',
+        'scope_type': 'brand',
+        'scope_value': ['Transitions'],
+        'can_override_lock': False,
+    },
+    {
+        'code': 'global_brand_license',
+        'display_name': 'Global Brand - License Brands',
+        'description': 'License brands global team. Comments during global_review.',
+        'scope_type': 'brand',
+        'scope_value': [
+            'LB - Luxury', 'LB - PFF', 'LB - Armani Exchange',
+            'LB - Brunello Cucinelli', 'LB - Burberry', 'LB - Chanel',
+            'LB - Dolce & Gabbana', 'LB - Emporio Armani', 'LB - Ferrari',
+            'LB - Ferrari Scuderia', 'LB - Giorgio Armani', 'LB - Jimmy Choo',
+            'LB - Michael Kors', 'LB - Miu Miu', 'LB - Moncler', 'LB - Prada',
+            'LB - Prada Linea Rossa', 'LB - Polo Ralph Lauren', 'LB - Polo',
+            'LB - Ralph', 'LB - Swarovski', 'LB - Starck Eye', 'LB - Tiffany',
+            'LB - Versace', 'LB - Others',
+        ],
+        'can_override_lock': False,
+    },
+    {
+        'code': 'global_brand_other_hb',
+        'display_name': 'Global Brand - Other House Brands',
+        'description': 'Other HB global team (Vogue, Persol, etc.). Comments during global_review.',
+        'scope_type': 'brand',
+        'scope_value': [
+            'HB - Vogue', 'HB - Persol', 'HB - Oliver Peoples',
+            'HB - Alain Mikli', 'HB - BLIZ', 'HB - Arnette', 'HB - Others',
+        ],
+        'can_override_lock': False,
+    },
 ])
 
-# Global Functions (3)
+# -- Group 5: Global Function teams (3 roles) -------------------------
 ROLES_DATA.extend([
-    {'code': 'global_function_pr_events', 'display_name': 'Global Function PR & Events',    'description': 'Comments on PR and Events LOAs during functions review.',
-     'scope_type': 'function', 'scope_value': ['PR', 'Events'], 'can_override_lock': False},
-    {'code': 'global_function_medical',   'display_name': 'Global Function Medical Affairs', 'description': 'Comments on Medical Affairs LOAs during functions review.',
-     'scope_type': 'function', 'scope_value': ['Medical Affairs'], 'can_override_lock': False},
-    {'code': 'global_function_trade',     'display_name': 'Global Function Trade Marketing', 'description': 'Comments on Trade Incentive LOAs during functions review.',
-     'scope_type': 'function', 'scope_value': ['Trade Incentive'], 'can_override_lock': False},
+    {
+        'code': 'global_function_pr_events',
+        'display_name': 'Global Function - PR & Events',
+        'description': 'PR and Events global team. Comments during global_review.',
+        'scope_type': 'function',
+        'scope_value': ['PR', 'Events'],
+        'can_override_lock': False,
+    },
+    {
+        'code': 'global_function_medical',
+        'display_name': 'Global Function - Medical Affairs',
+        'description': 'Medical Affairs global team. Comments during global_review.',
+        'scope_type': 'function',
+        'scope_value': ['Medical Affairs'],
+        'can_override_lock': False,
+    },
+    {
+        'code': 'global_function_trade',
+        'display_name': 'Global Function - Trade Incentive',
+        'description': 'Trade Incentive global team. Comments during global_review.',
+        'scope_type': 'function',
+        'scope_value': ['Trade Incentive'],
+        'can_override_lock': False,
+    },
 ])
 
-# Corporate (2)
+# -- Group 6: Corporate (2 roles) -------------------------------------
 ROLES_DATA.extend([
-    {'code': 'corporate_paola', 'display_name': 'Corporate Marketing Finance — Paola', 'description': 'Validates at corporate review — final gate.',
-     'scope_type': 'all', 'scope_value': None, 'can_override_lock': False},
-    {'code': 'corporate_diana', 'display_name': 'Corporate Marketing Finance — Diana', 'description': 'Validates at corporate review — final gate.',
-     'scope_type': 'all', 'scope_value': None, 'can_override_lock': False},
+    {
+        'code': 'corporate_paola',
+        'display_name': 'Corporate Marketing Finance - Paola',
+        'description': 'Paola Boneto. Validates at corporate_review step.',
+        'scope_type': 'all',
+        'scope_value': None,
+        'can_override_lock': False,
+    },
+    {
+        'code': 'corporate_diana',
+        'display_name': 'Corporate Marketing Finance - Diana',
+        'description': 'Diana Canazaro. Validates at corporate_review step.',
+        'scope_type': 'all',
+        'scope_value': None,
+        'can_override_lock': False,
+    },
 ])
 
-# Super-Admin (1)
+# -- Group 7: Super-Admin (1 role) ------------------------------------
 ROLES_DATA.append({
     'code': 'super_admin',
     'display_name': 'Super-Admin',
-    'description': 'Thibault, Vanessa, Sandrine. Full control everywhere + can_override_lock.',
-    'scope_type': 'all', 'scope_value': None, 'can_override_lock': True,
+    'description': 'Thibault, Vanessa, Sandrine. Full access, can override locks.',
+    'scope_type': 'all',
+    'scope_value': None,
+    'can_override_lock': True,
 })
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# THE PERMISSION MATRIX — Progressive visibility
-# ═══════════════════════════════════════════════════════════════════════
-#
-# Rule: a role gets access only from its active step onward.
-# Once they've had access, they retain View for all subsequent steps.
-# Draft and Rejected have identical permissions.
-#
-# ┌──────────────────────┬──────────┬──────┬────────┬─────────┬────────┬──────┬─────────┐
-# │                      │draft/rej │ emea │ global │ cmo_cfo │   gf   │ corp │approved │
-# ├──────────────────────┼──────────┼──────┼────────┼─────────┼────────┼──────┼─────────┤
-# │ Local Marketer (×8)  │  Edit    │ View │  View  │  View   │  View  │ View │  View   │
-# │ Local Finance  (×8)  │  Edit    │ View │  View  │  View   │  View  │ View │  View   │
-# │ Global Brands  (×6)  │   —      │  —   │Comment │  View   │  View  │ View │  View   │
-# │ Regional CMO         │   —      │  —   │   —    │Validate │  View  │ View │  View   │
-# │ Regional CFO         │   —      │  —   │   —    │Validate │  View  │ View │  View   │
-# │ Global Func.   (×3)  │   —      │  —   │   —    │   —     │Comment │ View │  View   │
-# │ Corporate      (×2)  │   —      │  —   │   —    │   —     │   —    │Valid.│  View   │
-# │ EMEA PS Editor       │ Advance  │ Adv  │  Adv   │  Adv    │  Adv   │ Adv  │  Adv    │
-# │ Super-Admin          │ Advance  │ Adv  │  Adv   │  Adv    │  Adv   │ Adv  │  Adv    │
-# └──────────────────────┴──────────┴──────┴────────┴─────────┴────────┴──────┴─────────┘
-
-ALL_STATUSES = [
-    'draft', 'emea_review', 'global_review', 'cmo_cfo_review',
-    'global_functions_review', 'corporate_review', 'approved', 'rejected',
-]
-
+# =====================================================================
+# THE PERMISSION MATRIX
+# =====================================================================
 
 def build_matrix():
-    matrix = []
+    """
+    Returns a list of dicts: [{role_code, loa_status, permission_code}, ...]
 
-    def add(role_code, perms):
-        for status, perm in perms.items():
-            matrix.append({'role_code': role_code, 'loa_status': status, 'permission_code': perm})
+    Design principles:
+      - Progressive visibility: roles gain access from their workflow step onward
+      - Defaults are restrictive: no row = no access
+      - draft + rejected have identical permissions for marketers/finance
+      - Parallel gates: brand + function both get comment on global_review
+      - CMO + CFO both get validate on cmo_cfo_review
+      - Super-admin gets advance_phase + delete + duplicate on ALL statuses
+    """
+    entries = []
 
-    # ─── Local Marketers — Edit on draft+rejected, View from emea onward
+    def add(role_code, status, perm_code):
+        entries.append({
+            'role_code': role_code,
+            'loa_status': status,
+            'permission_code': perm_code,
+        })
+
+    # -- Helper: statuses from a starting point onward (progressive) ---
+    status_order = [
+        'draft', 'emea_review', 'global_review', 'emea_post_global_review',
+        'cmo_cfo_review', 'emea_final_review', 'corporate_review', 'approved',
+    ]
+
+    def statuses_from(start):
+        """Return all statuses from 'start' onward in the workflow."""
+        idx = status_order.index(start)
+        return status_order[idx:]
+
+    # =================================================================
+    # LOCAL MARKETERS + LOCAL FINANCE (16 roles, identical permissions)
+    # =================================================================
+    cluster_roles = []
     for cluster in CLUSTERS:
-        cc = cluster.lower().replace(' & ', '_').replace(' ', '_')
-        add(f'{cc}_marketer', {
-            'draft':                    'edit',
-            'emea_review':              'view',
-            'global_review':            'view',
-            'cmo_cfo_review':           'view',
-            'global_functions_review':  'view',
-            'corporate_review':         'view',
-            'approved':                 'view',
-            'rejected':                 'edit',
-        })
+        code = cluster.lower().replace(' ', '_').replace('&', '').replace('__', '_')
+        cluster_roles.append(f'{code}_marketer')
+        cluster_roles.append(f'{code}_finance')
 
-    # ─── Local Finance — same as Local Marketer
-    for cluster in CLUSTERS:
-        cc = cluster.lower().replace(' & ', '_').replace(' ', '_')
-        add(f'{cc}_finance', {
-            'draft':                    'edit',
-            'emea_review':              'view',
-            'global_review':            'view',
-            'cmo_cfo_review':           'view',
-            'global_functions_review':  'view',
-            'corporate_review':         'view',
-            'approved':                 'view',
-            'rejected':                 'edit',
-        })
+    for role_code in cluster_roles:
+        # Draft: full edit + delete + duplicate
+        add(role_code, 'draft', 'edit')
+        add(role_code, 'draft', 'delete')
+        add(role_code, 'draft', 'duplicate')
 
-    # ─── Global Brands — access starts at global_review
-    for rc in ['global_brand_rayban', 'global_brand_oakley', 'global_brand_essilor_lenses',
-               'global_brand_transitions', 'global_brand_other_hb', 'global_brand_license']:
-        add(rc, {
-            'global_review':            'comment',
-            'cmo_cfo_review':           'view',
-            'global_functions_review':  'view',
-            'corporate_review':         'view',
-            'approved':                 'view',
-        })
+        # Rejected: edit + duplicate (no delete — rejected LOAs are kept for audit)
+        add(role_code, 'rejected', 'edit')
+        add(role_code, 'rejected', 'duplicate')
 
-    # ─── Regional CMO — access starts at cmo_cfo_review
-    add('regional_cmo', {
-        'cmo_cfo_review':           'validate',
-        'global_functions_review':  'view',
-        'corporate_review':         'view',
-        'approved':                 'view',
-    })
+        # All review steps: view only
+        for status in ['emea_review', 'global_review', 'emea_post_global_review',
+                        'cmo_cfo_review', 'emea_final_review', 'corporate_review']:
+            add(role_code, status, 'view')
 
-    # ─── Regional CFO — same pattern as CMO
-    add('regional_cfo', {
-        'cmo_cfo_review':           'validate',
-        'global_functions_review':  'view',
-        'corporate_review':         'view',
-        'approved':                 'view',
-    })
+        # Approved: view + duplicate
+        add(role_code, 'approved', 'view')
+        add(role_code, 'approved', 'duplicate')
 
-    # ─── Global Functions — access starts at global_functions_review
-    for rc in ['global_function_pr_events', 'global_function_medical', 'global_function_trade']:
-        add(rc, {
-            'global_functions_review':  'comment',
-            'corporate_review':         'view',
-            'approved':                 'view',
-        })
+    # =================================================================
+    # GLOBAL BRAND TEAMS (6 roles)
+    # Progressive visibility from global_review onward
+    # =================================================================
+    brand_roles = [
+        'global_brand_rayban', 'global_brand_oakley',
+        'global_brand_essilor_lenses', 'global_brand_transitions',
+        'global_brand_license', 'global_brand_other_hb',
+    ]
 
-    # ─── Corporate — access starts at corporate_review
-    for rc in ['corporate_paola', 'corporate_diana']:
-        add(rc, {
-            'corporate_review':         'validate',
-            'approved':                 'view',
-        })
+    for role_code in brand_roles:
+        # global_review: comment + duplicate (this is where they act)
+        add(role_code, 'global_review', 'comment')
+        add(role_code, 'global_review', 'duplicate')
 
-    # ─── EMEA PS Editor — Advance everywhere (= Super-Admin in the matrix)
+        # Everything after global_review: view only
+        for status in ['emea_post_global_review', 'cmo_cfo_review',
+                        'emea_final_review', 'corporate_review']:
+            add(role_code, status, 'view')
+
+        # Approved: view + duplicate
+        add(role_code, 'approved', 'view')
+        add(role_code, 'approved', 'duplicate')
+
+    # =================================================================
+    # GLOBAL FUNCTION TEAMS (3 roles)
+    # Same as brand teams — comment on global_review (parallel gate)
+    # =================================================================
+    function_roles = [
+        'global_function_pr_events', 'global_function_medical',
+        'global_function_trade',
+    ]
+
+    for role_code in function_roles:
+        # global_review: comment + duplicate (parallel with brand teams)
+        add(role_code, 'global_review', 'comment')
+        add(role_code, 'global_review', 'duplicate')
+
+        # Everything after: view only
+        for status in ['emea_post_global_review', 'cmo_cfo_review',
+                        'emea_final_review', 'corporate_review']:
+            add(role_code, status, 'view')
+
+        # Approved: view + duplicate
+        add(role_code, 'approved', 'view')
+        add(role_code, 'approved', 'duplicate')
+
+    # =================================================================
+    # REGIONAL CMO + REGIONAL CFO
+    # Progressive visibility from cmo_cfo_review onward
+    # =================================================================
+    for role_code in ['regional_cmo', 'regional_cfo']:
+        # cmo_cfo_review: validate (this is where they act)
+        add(role_code, 'cmo_cfo_review', 'validate')
+
+        # After their step: view
+        for status in ['emea_final_review', 'corporate_review']:
+            add(role_code, status, 'view')
+
+        # Approved: view + duplicate
+        add(role_code, 'approved', 'view')
+        add(role_code, 'approved', 'duplicate')
+
+    # =================================================================
+    # CORPORATE (Paola + Diana)
+    # Only see corporate_review and approved
+    # =================================================================
+    for role_code in ['corporate_paola', 'corporate_diana']:
+        add(role_code, 'corporate_review', 'validate')
+        add(role_code, 'approved', 'view')
+
+    # =================================================================
+    # SUPER-ADMIN (Thibault, Vanessa, Sandrine)
+    # advance_phase + delete + duplicate on ALL statuses
+    # =================================================================
     for status in ALL_STATUSES:
-        matrix.append({'role_code': 'emea_ps_editor', 'loa_status': status, 'permission_code': 'advance_phase'})
+        add('super_admin', status, 'advance_phase')
+        add('super_admin', status, 'delete')
+        add('super_admin', status, 'duplicate')
 
-    # ─── Super-Admin — Advance everywhere
-    for status in ALL_STATUSES:
-        matrix.append({'role_code': 'super_admin', 'loa_status': status, 'permission_code': 'advance_phase'})
-
-    return matrix
+    return entries
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# SEEDING
-# ═══════════════════════════════════════════════════════════════════════
+# =====================================================================
+# SEED FUNCTION
+# =====================================================================
 
 def seed(db: Session) -> None:
-    print("🌱 Seeding permissions, roles, and matrix (v2.1 — progressive visibility)...")
+    print("Seeding permissions, roles, and matrix (Rock 2)...")
 
-    # 1. Permissions
-    print("  → Permissions...")
+    # -- 1. Permissions (upsert) ---------------------------------------
+    print("  -> Permissions...")
     permission_by_code = {}
     for p_data in PERMISSIONS_DATA:
         existing = db.query(Permission).filter_by(code=p_data['code']).first()
         if existing:
+            # Update hierarchy_level and description in case they changed
+            existing.hierarchy_level = p_data['hierarchy_level']
+            existing.display_name = p_data['display_name']
+            existing.description = p_data['description']
             permission_by_code[p_data['code']] = existing
         else:
             perm = Permission(**p_data)
@@ -264,12 +453,27 @@ def seed(db: Session) -> None:
             permission_by_code[p_data['code']] = perm
     print(f"     {len(PERMISSIONS_DATA)} permissions OK")
 
-    # 2. Roles
-    print("  → Roles...")
+    # -- 2. Roles (upsert — update scope_value if changed) -------------
+    print("  -> Roles...")
+
+    # Delete roles that no longer exist
+    for old_code in ['ceo_validator', 'emea_ps_editor', 'ai_to_market_admin']:
+        old_role = db.query(Role).filter_by(code=old_code).first()
+        if old_role:
+            db.delete(old_role)
+            db.flush()
+            print(f"     Deleted obsolete role: {old_code}")
+
     role_by_code = {}
     for r_data in ROLES_DATA:
         existing = db.query(Role).filter_by(code=r_data['code']).first()
         if existing:
+            # Update scope_value and other fields in case they changed
+            existing.scope_type = r_data['scope_type']
+            existing.scope_value = r_data['scope_value']
+            existing.can_override_lock = r_data['can_override_lock']
+            existing.display_name = r_data['display_name']
+            existing.description = r_data['description']
             role_by_code[r_data['code']] = existing
         else:
             role = Role(**r_data)
@@ -278,11 +482,12 @@ def seed(db: Session) -> None:
             role_by_code[r_data['code']] = role
     print(f"     {len(ROLES_DATA)} roles OK")
 
-    # 3. Matrix (wipe + rebuild)
-    print("  → Rebuilding matrix...")
+    # -- 3. Permission matrix (wipe + rebuild) -------------------------
+    print("  -> Rebuilding permission matrix...")
+
     deleted_count = db.query(RolePermission).delete()
     db.flush()
-    print(f"     Wiped {deleted_count} old entries")
+    print(f"     Wiped {deleted_count} old matrix entries")
 
     matrix = build_matrix()
     created = 0
@@ -291,15 +496,23 @@ def seed(db: Session) -> None:
         role = role_by_code.get(entry['role_code'])
         perm = permission_by_code.get(entry['permission_code'])
         if not role or not perm:
-            print(f"     ⚠ Missing: role={entry['role_code']} perm={entry['permission_code']}")
+            print(f"     WARNING: Missing role '{entry['role_code']}' "
+                  f"or permission '{entry['permission_code']}'")
             errors += 1
             continue
-        rp = RolePermission(role_id=role.id, loa_status=entry['loa_status'], permission_id=perm.id)
+
+        rp = RolePermission(
+            role_id=role.id,
+            loa_status=entry['loa_status'],
+            permission_id=perm.id,
+        )
         db.add(rp)
         created += 1
 
     db.commit()
-    print(f"✅ Done — {len(PERMISSIONS_DATA)} perms, {len(ROLES_DATA)} roles, {created} matrix entries ({errors} errors)")
+    print(f"     {created} matrix entries created ({errors} errors)")
+    print(f"Done -- {len(PERMISSIONS_DATA)} permissions, "
+          f"{len(ROLES_DATA)} roles, {created} matrix entries.")
 
 
 def main():
@@ -307,7 +520,9 @@ def main():
     try:
         seed(db)
     except Exception as e:
-        print(f"❌ Seed failed: {e}")
+        print(f"Seed failed: {e}")
+        import traceback
+        traceback.print_exc()
         db.rollback()
         sys.exit(1)
     finally:

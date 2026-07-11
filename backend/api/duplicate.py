@@ -260,7 +260,7 @@ def duplicate_loa(
         loa_draft_id    = _next_draft_id(db, now),
         status          = "draft",
         requestor_email = user.email,    # <-- THE fix. The draft belongs to the caller.
-        is_demo         = False,
+        is_demo         = True,
         is_locked       = False,
         created_at      = now,
         updated_at      = now,

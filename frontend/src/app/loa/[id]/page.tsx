@@ -56,8 +56,13 @@ interface LOAData {
 }
 
 interface Permissions {
+  can_view: boolean;
   can_edit: boolean;
+  can_comment: boolean;
   can_validate: boolean;
+  can_override_lock: boolean;
+  is_scope_match: boolean;
+  is_author: boolean;
   loa_status: string;
   user_role: string;
 }

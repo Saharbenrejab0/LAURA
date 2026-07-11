@@ -138,15 +138,17 @@ def create_comment(
     if loa.is_locked and not (role and role.can_override_lock):
         raise HTTPException(status_code=423, detail="LOA is locked")
 
-    # Permission guard: user must have at least 'comment' rights
-    from backend.api.loa import _check_workflow_permission
-    try:
-        permission_used = _check_workflow_permission(user, loa, db)
-    except HTTPException:
+    # Permission guard: user must have at least 'comment' rights.
+    # Uses compute_permissions (single source of truth) instead of
+    # _check_workflow_permission, which only covers validate/advance actions.
+    from backend.api.permissions import compute_permissions
+    perms = compute_permissions(user, loa, db)
+    if not perms.get("can_comment"):
         raise HTTPException(
             status_code=403,
             detail="You do not have permission to comment on this LOA at this step.",
         )
+    permission_used = "comment"
     if permission_used not in ("comment", "edit", "validate", "advance_phase"):
         raise HTTPException(
             status_code=403,

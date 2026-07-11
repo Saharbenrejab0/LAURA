@@ -28,6 +28,27 @@ from sqlalchemy.orm import relationship
 from backend.models.database import Base
 
 
+def _normalise_brand(name):
+    """Strip prefixes and normalise for comparison: 'HB - Ray-Ban' -> 'ray-ban'."""
+    if not name:
+        return ""
+    s = str(name).strip().lower()
+    # Remove leading category prefixes with or without spaces
+    for prefix in ("hb -", "hb-", "lb -", "lb-", "essilor -", "essilor-"):
+        if s.startswith(prefix):
+            s = s[len(prefix):].strip()
+            break
+    return s
+
+
+def _brand_matches(loa_brand, scope_list):
+    """Check if loa_brand matches any in scope_list, ignoring 'HB - ' / 'LB - ' prefixes."""
+    if not loa_brand or not scope_list:
+        return False
+    loa_norm = _normalise_brand(loa_brand)
+    scope_norm = {_normalise_brand(b) for b in scope_list}
+    return loa_norm in scope_norm
+
 class Role(Base):
     __tablename__ = 'role'
 
@@ -75,7 +96,7 @@ class Role(Base):
 
         if self.scope_type == 'brand':
             allowed = self.scope_value or []
-            return loa.brand in allowed
+            return _brand_matches(loa.brand, allowed)
 
         if self.scope_type == 'function':
             allowed = self.scope_value or []

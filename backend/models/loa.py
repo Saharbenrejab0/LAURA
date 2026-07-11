@@ -19,14 +19,16 @@ from backend.models.database import Base
 # Single source of truth, aligné sur backend/api/loa.py WORKFLOW_TRANSITIONS
 # et frontend/src/types/loa.ts LOAStatus.
 class LOAStatus(str, enum.Enum):
-    DRAFT                   = "draft"                    # author creates the LOA
-    EMEA_REVIEW             = "emea_review"              # EMEA PS reviews XLS & PPT
-    GLOBAL_BRAND_REVIEW           = "global_brand_review"            # Global Brands pre-validate (comment)
-    CMO_CFO_REVIEW          = "cmo_cfo_review"           # Alexandra OR Giulia validates
-    GLOBAL_FUNCTIONS_REVIEW = "global_functions_review"  # PR/Medical/Trade comment, EMEA PS advances
-    CORPORATE_REVIEW        = "corporate_review"         # Paola + Diana — final gate
-    APPROVED                = "approved"                 # terminal ✓ — Teams notif fires here
-    REJECTED                = "rejected"                 # terminal ✗ — back to author via /submit
+    # -- Workflow order (7 active + 2 terminal) ---------------------
+    DRAFT                       = "draft"                       # marketer creates/edits
+    EMEA_REVIEW                 = "emea_review"                 # EMEA PS first review
+    GLOBAL_REVIEW               = "global_review"               # parallel gate 1 - brand + function teams comment
+    EMEA_POST_GLOBAL_REVIEW     = "emea_post_global_review"     # EMEA reviews brand + function feedback
+    CMO_CFO_REVIEW              = "cmo_cfo_review"              # parallel gate 2 - CMO + CFO validate
+    EMEA_FINAL_REVIEW           = "emea_final_review"           # EMEA last check before corporate
+    CORPORATE_REVIEW            = "corporate_review"            # Paola + Diana final gate
+    APPROVED                    = "approved"                    # terminal
+    REJECTED                    = "rejected"                    # marketer re-edits, re-submits
 
 
 class ActivityType(str, enum.Enum):
@@ -245,7 +247,7 @@ class LOA(Base):
     end_date   = Column(String(50), nullable=True)
 
     # ── Approval workflow ──────────────────────────────────────────────────────
-    status               = Column(String(20), default="draft")
+    status               = Column(String(50), default="draft")
     brand_review_deadline = Column(DateTime, nullable=True)  # 5-day window
     cmo_comment          = Column(Text, nullable=True)
     rejection_reason     = Column(Text, nullable=True)
@@ -275,6 +277,12 @@ class LOA(Base):
     approved_at  = Column(DateTime, nullable=True)
     cmo_approved = Column(Boolean, default=False)
     cfo_approved = Column(Boolean, default=False)
+
+    # -- Parallel gate 1: brand + function review tracking ----------
+    brand_review_done       = Column(Boolean, default=False)
+    function_review_done    = Column(Boolean, default=False)
+    brand_review_skipped    = Column(Boolean, default=False)
+    function_review_skipped = Column(Boolean, default=False)
     # ── Business rules (enforced server-side, never trusted from frontend) ─────
 
      # Near q4_2025, q1_2026, etc.

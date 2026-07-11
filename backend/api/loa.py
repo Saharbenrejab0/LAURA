@@ -374,8 +374,8 @@ async def get_loas(
 ):
     query = db.query(LOA)
 
-    if not include_historical:
-        query = query.filter(LOA.is_demo == True)
+    # Removed is_demo filter: tracker shows all LOAs regardless of source
+    # (previously hid real user-created LOAs by mistake)
 
     role = user.role_obj
     if role is None:
@@ -424,7 +424,7 @@ async def export_excel(
     """
     from backend.engines.excel import loas_to_rows, export_excel_bytes, safe_filename
 
-    query = db.query(LOA).filter(LOA.is_demo == True)
+    query = db.query(LOA)  # is_demo filter removed
     query = _apply_scope_filter(query, user)
 
     if status:
