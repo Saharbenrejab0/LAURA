@@ -44,22 +44,9 @@ router = APIRouter(prefix="/permissions", tags=["permissions"])
 def compute_permissions(user: User, loa: LOA, db: Session) -> dict:
     """
     Core permission computation: returns a dict describing what `user` can
-    do on `loa`. Used both by the endpoint below and by the middleware.
+    do on `loa`. Queries ALL matrix entries for this (role, status) pair.
 
-    Returns:
-        {
-            'loa_id': str,
-            'user_role': str,
-            'user_email': str,
-            'loa_status': str,
-            'is_scope_match': bool,    # Does the user's role scope cover this LOA?
-            'is_author': bool,         # Is the user the LOA's requestor?
-            'can_view': bool,
-            'can_edit': bool,
-            'can_comment': bool,
-            'can_validate': bool,
-            'can_override_lock': bool, # True for super-admin only
-        }
+    Rock 4: now includes can_delete and can_duplicate from the matrix.
     """
     role = user.role_obj
     result = {
@@ -73,75 +60,88 @@ def compute_permissions(user: User, loa: LOA, db: Session) -> dict:
         'can_edit': False,
         'can_comment': False,
         'can_validate': False,
+        'can_delete': False,
+        'can_duplicate': False,
         'can_override_lock': False,
     }
 
-    # No role assigned -> no permissions
     if not role:
         return result
 
-    # Super-admin override flag — applies regardless of permission matrix
     result['can_override_lock'] = role.can_override_lock
 
-    # 1. Scope check: does this role have visibility on this LOA?
+    # 1. Scope check
     is_scope_match = role.matches_loa(loa)
 
-    # Special case: 'draft' status is private to the author, regardless of role.
-    # Only the author can see/edit a draft. Super-admin can view drafts too,
-    # but not edit them (drafts belong to their creator).
+    # Draft: private to author (super-admin can view)
     if loa.status == 'draft':
         if role.can_override_lock:
             result['is_scope_match'] = True
             result['can_view'] = True
+            # Super-admin: also check matrix for delete/duplicate
+            _apply_matrix_permissions(role, loa, db, result)
             return result
         if not result['is_author']:
             return result
-        # Author of their own draft — always full edit access
+        # Author of own draft
         result['is_scope_match'] = True
         result['can_view'] = True
         result['can_edit'] = True
         result['can_comment'] = True
+        # Also check matrix for delete/duplicate
+        _apply_matrix_permissions(role, loa, db, result)
         return result
 
-    # Same logic for rejected — author can always edit to revise & resubmit
+    # Rejected: author can always edit to revise and resubmit
     if loa.status == 'rejected' and result['is_author']:
         result['is_scope_match'] = True
         result['can_view'] = True
         result['can_edit'] = True
         result['can_comment'] = True
-        # Don't return — let matrix add validate if applicable
-        # else: author of the draft has the access defined by the matrix below
+        _apply_matrix_permissions(role, loa, db, result)
+        return result
 
     result['is_scope_match'] = is_scope_match
     if not is_scope_match:
-        # Role scope doesn't cover this LOA -> no access
         return result
 
-    # 2. Permission matrix lookup
-    rp = (
-        db.query(RolePermission, Permission)
-        .join(Permission, RolePermission.permission_id == Permission.id)
+    # 2. Permission matrix lookup ? get ALL permissions for this (role, status)
+    _apply_matrix_permissions(role, loa, db, result)
+    return result
+
+
+def _apply_matrix_permissions(role, loa, db, result):
+    """Query all matrix entries for (role, status) and set flags in result."""
+    rows = (
+        db.query(Permission.code)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
         .filter(
             RolePermission.role_id == role.id,
             RolePermission.loa_status == loa.status,
         )
-        .first()
+        .all()
     )
+    perm_codes = {r[0] for r in rows}
 
-    if not rp:
-        # No matrix entry for this (role, status) -> no permissions
-        return result
+    if not perm_codes:
+        return
 
-    role_perm, perm = rp
-    actual_code = perm.code
+    # Apply hierarchy via implies() for the standard 5 permissions
+    for code in perm_codes:
+        if implies(code, PERMISSION_VIEW):
+            result['can_view'] = True
+        if implies(code, PERMISSION_COMMENT):
+            result['can_comment'] = True
+        if implies(code, PERMISSION_VALIDATE):
+            result['can_validate'] = True
+        if implies(code, PERMISSION_EDIT):
+            result['can_edit'] = True
 
-    # Derive boolean flags using the permission hierarchy
-    result['can_view']     = implies(actual_code, PERMISSION_VIEW)
-    result['can_comment']  = implies(actual_code, PERMISSION_COMMENT)
-    result['can_validate'] = implies(actual_code, PERMISSION_VALIDATE)
-    result['can_edit']     = implies(actual_code, PERMISSION_EDIT)
-
-    return result
+    # delete and duplicate are standalone ? no hierarchy
+    if 'delete' in perm_codes:
+        result['can_delete'] = True
+    if 'duplicate' in perm_codes:
+        result['can_duplicate'] = True
 
 
 @router.get("/loa/{loa_id}")
