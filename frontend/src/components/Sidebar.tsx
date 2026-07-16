@@ -41,7 +41,12 @@ type NavKey = 'tracker' | 'past-campaigns' | 'admin';
 export default function Sidebar({ isAdmin = false }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { role } = useMyRole();
+  const { role, loading: roleLoading } = useMyRole();
+  // Admin button visibility comes from the loaded role, not the
+  // async `isAdmin` prop, so it never flashes on first paint.
+  const showAdmin = !roleLoading && (
+    role?.role_code === 'super_admin' || role?.can_override_lock === true
+  );
 
   const [pinned, setPinned]           = useState(false);
   const [peeking, setPeeking]         = useState(false);
@@ -213,7 +218,7 @@ export default function Sidebar({ isAdmin = false }: SidebarProps) {
 
         )}
 
-        {isAdmin && (
+        {showAdmin && (
           <>
             <SectionLabel expanded={expanded}>System</SectionLabel>
             <NavItem expanded={expanded} icon="⚙" label="Admin"
