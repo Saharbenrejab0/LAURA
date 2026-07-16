@@ -18,6 +18,8 @@ from backend.models.database import Base
 # ── APRÈS — workflow client 8 statuts ──────────────────────────────────
 # Single source of truth, aligné sur backend/api/loa.py WORKFLOW_TRANSITIONS
 # et frontend/src/types/loa.ts LOAStatus.
+from sqlalchemy.orm import validates
+
 class LOAStatus(str, enum.Enum):
     # -- Workflow order (7 active + 2 terminal) ---------------------
     DRAFT                       = "draft"                       # marketer creates/edits
@@ -134,6 +136,28 @@ class LOA(Base):
     # Category — MULTI-SELECT (e.g. Frames + Lenses on the same LOA).
     # Stored as PostgreSQL ARRAY. Validation against reference_data.CATEGORIES.
     category = Column(ARRAY(String), nullable=False)
+
+    @validates("category")
+    def _normalize_category(self, key, value):
+        """Guardrail: category must always be a list of real category strings.
+
+        Protects against the historical bug where a bare string ("Frames")
+        was assigned to this ARRAY column and got exploded into characters
+        (['F','r','a','m','e','s']). Whatever the source, we coerce to a
+        clean list here so bad data can never enter the DB again.
+        """
+        if value is None:
+            return value
+        # A bare string -> wrap it. e.g. "Frames" -> ["Frames"]
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, (list, tuple)):
+            parts = [str(v) for v in value]
+            # Detect a string that was exploded into single characters and rejoin.
+            if len(parts) > 1 and all(len(p) == 1 for p in parts):
+                return ["".join(parts)]
+            return list(parts)
+        return value
     # Brand: cascades from Category. Ray-Ban ≠ Ray-Ban Meta (separate entries, confirmed Vanessa Mtg 2)
     brand    = Column(String(200), nullable=False)
 
