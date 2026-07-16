@@ -54,6 +54,8 @@ class CommentCreate(BaseModel):
     content: str
     anchor_type: str = ANCHOR_LOA          # "loa" or "field"
     field_key: Optional[str] = None        # required if anchor_type == "field"
+    anchor_x: Optional[float] = None       # slide pin X (0-1), null = no pin
+    anchor_y: Optional[float] = None       # slide pin Y (0-1), null = no pin
     severity: str = SEVERITY_NOTE          # "note", "suggestion", "blocking"
     visibility: Optional[str] = None       # auto-determined if not set
     # Legacy compat: if frontend sends 'section' instead of field_key, map it
@@ -80,6 +82,16 @@ class CommentCreate(BaseModel):
     def valid_severity(cls, v: str) -> str:
         if v not in ALLOWED_SEVERITIES:
             raise ValueError(f"severity must be one of {sorted(ALLOWED_SEVERITIES)}")
+        return v
+
+
+    @field_validator("anchor_x", "anchor_y")
+    @classmethod
+    def valid_anchor_coord(cls, v):
+        if v is None:
+            return v
+        if v < 0 or v > 1:
+            raise ValueError("anchor coordinates must be between 0 and 1")
         return v
 
 
@@ -193,6 +205,8 @@ def create_comment(
         anchor_type=anchor_type,
         field_key=field_key,
         section=section,
+        anchor_x=body.anchor_x,
+        anchor_y=body.anchor_y,
         author_email=user.email,
         author_name=user.full_name or user.email.split("@")[0],
         author_role=role_display,

@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, String, Text,
+    Boolean, Column, DateTime, Float, ForeignKey, String, Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -132,6 +132,10 @@ class Comment(Base):
     field_key = Column(String, nullable=True)     # e.g. "q3_budget", "description"
     section = Column(String, nullable=False, default="general")
 
+    # -- Slide pin coordinates (relative 0-1; null = no pin) --
+    anchor_x = Column(Float, nullable=True)
+    anchor_y = Column(Float, nullable=True)
+
     # ── Threading (reserved, not used in MVP UI) ──────────────────────
     parent_comment_id = Column(
         UUID(as_uuid=False),
@@ -185,6 +189,8 @@ class Comment(Base):
             "anchor_type": self.anchor_type,
             "field_key": self.field_key,
             "section": self.section,
+            "anchor_x": self.anchor_x,
+            "anchor_y": self.anchor_y,
             "parent_comment_id": self.parent_comment_id,
             "author_email": self.author_email,
             "author_name": self.author_name,
