@@ -1,10 +1,12 @@
-// ============================================================
-// LAURA — API client
+﻿// ============================================================
+// LAURA â€” API client
 // All calls to the FastAPI backend go through here
 // ============================================================
 
 import axios from 'axios'
 import type { LOA, LOAFormValues, AISuggestion } from '@/types/loa'
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
@@ -26,7 +28,7 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('laura_token')
-      if (!window.location.pathname.startsWith('/login')) {
+      if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/welcome')) {
         window.location.href = '/login'
       }
     }
@@ -93,7 +95,7 @@ export const submitLOA = async (id: string): Promise<LOA> => {
   return data
 }
 
-// ── DEPRECATED — /approve does not exist in backend Sprint 2.5 ─────────────
+// â”€â”€ DEPRECATED â€” /approve does not exist in backend Sprint 2.5 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Kept for backward compatibility. New code should use validateWorkflowStep.
 export const approveLOA = async (id: string, comment?: string): Promise<LOA> => {
   const { data } = await api.post(`/loa/${id}/approve`, { comment })
@@ -105,13 +107,13 @@ export const rejectLOA = async (id: string, reason: string): Promise<LOA> => {
   return data
 }
 
-// ── Workflow — Sprint 2.5 endpoints ─────────────────────────────────────────
+// â”€â”€ Workflow â€” Sprint 2.5 endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Advance a LOA one step in the approval workflow.
  * Backend smart-dispatches: 'validate' permission for CMO/CFO/CEO steps,
  * 'advance_phase' for EMEA orchestration steps.
- * Frontend just calls this — backend decides what's allowed.
+ * Frontend just calls this â€” backend decides what's allowed.
  */
 export const validateWorkflowStep = async (id: string): Promise<LOA> => {
   const { data } = await api.post(`/loa/${id}/validate`)
@@ -120,7 +122,7 @@ export const validateWorkflowStep = async (id: string): Promise<LOA> => {
 
 /**
  * Lock a LOA against any editing. Super-admin only (can_override_lock).
- * The LOA keeps its workflow status — can resume once unlocked.
+ * The LOA keeps its workflow status â€” can resume once unlocked.
  */
 export const lockLOA = async (id: string): Promise<LOA> => {
   const { data } = await api.post(`/loa/${id}/lock`)
@@ -215,9 +217,9 @@ export const deletePhoto = async (loaId: string, index: number) => {
   return data
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// SPRINT 2 — Permissions API
-// ═══════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// SPRINT 2 â€” Permissions API
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 /**
  * Get the current user's permissions on a specific LOA.
@@ -237,11 +239,16 @@ export async function getMyRole() {
   return response.data
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// SPRINT 5 — Comments API
-// ═══════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// SPRINT 5 â€” Comments API
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 export interface CommentItem {
+  anchor_x?: number | null
+  anchor_y?: number | null
+  anchor_type?: string
+  field_key?: string | null
+  severity?: string
   id: string
   loa_id: string
   author_email: string
@@ -270,12 +277,29 @@ export interface MyCommentsSummary {
 /**
  * Create a comment on a specific section of a LOA.
  */
+export interface CreateCommentOpts {
+  anchor_type?: 'loa' | 'field'
+  field_key?: string | null
+  anchor_x?: number | null
+  anchor_y?: number | null
+  severity?: 'note' | 'suggestion' | 'blocking'
+}
+
 export async function createComment(
   loaId: string,
   section: string,
   content: string,
+  opts: CreateCommentOpts = {},
 ): Promise<CommentItem> {
-  const { data } = await api.post(`/loa/${loaId}/comments`, { section, content })
+  const { data } = await api.post(`/loa/${loaId}/comments`, {
+    section,
+    content,
+    anchor_type: opts.anchor_type ?? (opts.field_key ? 'field' : 'loa'),
+    field_key: opts.field_key,
+    anchor_x: opts.anchor_x,
+    anchor_y: opts.anchor_y,
+    severity: opts.severity ?? 'note',
+  })
   return data
 }
 
@@ -301,7 +325,7 @@ export async function resolveComment(commentId: string): Promise<CommentItem> {
 }
 
 /**
- * Get a summary of all comments authored by the current user — used
+ * Get a summary of all comments authored by the current user â€” used
  * to power the "My comments" filter on the tracker.
  */
 export async function getMyComments(): Promise<MyCommentsSummary> {
@@ -310,3 +334,4 @@ export async function getMyComments(): Promise<MyCommentsSummary> {
 }
 
 export default api
+

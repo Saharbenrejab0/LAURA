@@ -15,7 +15,7 @@ const SIDEBAR_PIN_EVENT = 'laura:sidebar-pin-change'
  * Routes that should NOT show the sidebar / app chrome.
  * Currently: /login (authentication page is full-screen).
  */
-const BARE_ROUTES = ['/login']
+const BARE_ROUTES = ['/login', '/welcome']
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()

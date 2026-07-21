@@ -83,13 +83,20 @@ FILTER_SYSTEM_PROMPT = """You are a query parser for LAURA, an LOA (Letter of Au
 Your job: extract structured filters and a semantic search query from the user's question.
 
 Available filter fields:
-- brand: e.g. "Ray-Ban", "Oakley", "Varilux", "Chanel", "Prada" (use exact brand name)
+- brand: e.g. "Ray-Ban", "HB - Ray-Ban", "HB - Ray-Ban Meta", "Oakley", "HB - Oakley", "Varilux", "Chanel", "Prada" (use exact brand name as it appears in the database)
+
+CRITICAL BRAND RULE: The following are BRAND NAMES, not brand+cluster combinations:
+  "Ray-Ban Meta" or "HB - Ray-Ban Meta" = brand (NOT Ray-Ban + cluster META)
+  "Oakley Meta" or similar = brand (NOT Oakley + cluster META)
+  When the user says "Ray-Ban Meta", set brand to "Ray-Ban Meta", do NOT set cluster to META.
+  Only set cluster to META if the user explicitly mentions a geographic region like GCC, Export, Middle East, or Africa.
 - country: e.g. "Italy", "France", "UK", "Spain", "Germany"
 - cluster: e.g. "ITALY", "FRANCE", "DACH", "NORTH", "EAST", "META", "IBERIA", "EMEA"
 - activity_type: e.g. "Events", "TM_SEASONAL", "TM_PERMANENT", "COOP_ADVERTISING", "IN_STORE", "SPONSORSHIP", "PR", "CATALOGUES_BROCHURES", "MEDICAL_AFFAIRS"
 - budget_min: minimum budget in EUR (number only)
 - budget_max: maximum budget in EUR (number only)
 - category: e.g. "Frames", "Lenses", "Instruments"
+- vendor: supplier/vendor name if explicitly mentioned (e.g. "Reklam centar")
 
 CRITICAL: FOLLOW-UP QUESTIONS CARRY OVER FILTERS
 If the current question is a follow-up like:
@@ -146,7 +153,7 @@ async def extract_filters(question: str, chat_history: list[dict] = None) -> dic
     defaults = {
         "brand": None, "country": None, "cluster": None,
         "activity_type": None, "budget_min": None, "budget_max": None,
-        "category": None, "semantic_query": question,
+        "category": None, "vendor": None, "semantic_query": question,
     }
     for key, default in defaults.items():
         filters.setdefault(key, default)
@@ -157,6 +164,53 @@ async def extract_filters(question: str, chat_history: list[dict] = None) -> dic
 # ═══════════════════════════════════════════════════════════════
 # 3. HYBRID SEARCH
 # ═══════════════════════════════════════════════════════════════
+
+def _token_match_score(target: str, candidate: str) -> float:
+    """
+    Score how well `candidate` matches `target` at the token level.
+    1.0  = exact match (case/spacing-insensitive)
+    0.5  = candidate is a superset of target's tokens (e.g. "Ray-Ban Meta"
+           vs "Ray-Ban", or "HB - Ray-Ban" vs "Ray-Ban") -- related but NOT
+           the same thing, so it must rank below the exact match.
+    0.3  = weak substring overlap only
+    0.0  = no relation
+    """
+    if not target or not candidate:
+        return 0.0
+    t = target.strip().lower()
+    c = candidate.strip().lower()
+    if t == c:
+        return 1.0
+    t_tokens = set(t.replace("-", " ").split())
+    c_tokens = set(c.replace("-", " ").split())
+    if t_tokens and t_tokens <= c_tokens:
+        return 1.0 if t_tokens == c_tokens else 0.5
+    if t in c or c in t:
+        return 0.3
+    return 0.0
+
+
+def _rerank(results: list[dict], filters: dict, top_k: int) -> list[dict]:
+    """
+    Re-rank retrieved LOAs with a composite score: vector similarity plus
+    exact-match bonuses for brand, activity_type, and vendor. This fixes
+    cases where a semantically-close-but-different entity (e.g. "Ray-Ban
+    Meta") outranks the exact match ("Ray-Ban") on pure vector distance.
+    """
+    brand = filters.get("brand")
+    activity = filters.get("activity_type")
+    vendor = filters.get("vendor")
+
+    for loa in results:
+        similarity = 1 - loa.get("distance", 0)
+        brand_score = _token_match_score(brand, loa.get("brand", "")) if brand else 0.0
+        activity_score = _token_match_score(activity, loa.get("activity_type", "")) if activity else 0.0
+        vendor_score = _token_match_score(vendor, loa.get("vendor", "")) if vendor else 0.0
+        loa["_composite"] = similarity + brand_score * 0.5 + activity_score * 0.2 + vendor_score * 0.15
+
+    results.sort(key=lambda r: r["_composite"], reverse=True)
+    return results[:top_k]
+
 
 def hybrid_search(filters: dict, db: Session, top_k: int = 8) -> list[dict]:
     """SQL pre-filter + pgvector cosine similarity → top K LOAs."""
@@ -217,9 +271,10 @@ def hybrid_search(filters: dict, db: Session, top_k: int = 8) -> list[dict]:
         FROM loas
         WHERE {where_clause}
         ORDER BY embedding <=> :query_vec
-        LIMIT :top_k
+        LIMIT :pool_size
     """
-    params["top_k"] = top_k
+    pool_size = max(top_k * 3, 15)
+    params["pool_size"] = pool_size
 
     rows = db.execute(text(sql), params).fetchall()
 
@@ -231,7 +286,7 @@ def hybrid_search(filters: dict, db: Session, top_k: int = 8) -> list[dict]:
         loa["budget_display"] = f"EUR {fy:,.0f}"
         results.append(loa)
 
-    return results
+    return _rerank(results, filters, top_k)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -247,7 +302,7 @@ CRITICAL RULES:
 - NEVER claim "total budget across all X LOAs" as if the sample is exhaustive.
   Instead say: "across the retrieved sample" or "in these top matches" or "among these examples".
 - If the user asks about totals, counts, or averages over the whole dataset, tell them:
-  "For dataset-wide totals, please use the 📊 Stats tool. What I can show you here is a sample of the most relevant LOAs."
+  "For dataset-wide totals, please use the Stats tool. What I can show you here is a sample of the most relevant LOAs."
 - Base every claim on the LOA data provided. Never invent data.
 - Cite LOA numbers (e.g. LOA-2024-0421) when referencing specific LOAs.
 - If no LOA number exists, cite by brand + country + activity (e.g. "Ray-Ban Events in Italy").
@@ -257,7 +312,16 @@ CRITICAL RULES:
 - Be concise but complete. No fluff.
 - Use EUR for all currency amounts.
 - If a filter was carried over from previous conversation, briefly acknowledge it
-  (e.g. "Focusing on seasonal campaigns in Italy...")."""
+  (e.g. "Focusing on seasonal campaigns in Italy...").
+
+FORMATTING STYLE (important):
+- Write like Claude or ChatGPT default style: calm, clean, understated.
+- Do NOT use decorative emoji in headings or as bullet markers (no trophy, globe,
+  magnifying glass, warning-sign emoji, flag emoji, etc.).
+- Use markdown headings sparingly, only for genuinely distinct sections.
+- Prefer a short paragraph or a simple bullet list over multiple small tables.
+- Use at most one table per answer, only when directly comparing several items.
+- Bold only the 2-3 most important values, not every noun."""
 
 
 def _format_loas_for_prompt(loas: list[dict]) -> str:

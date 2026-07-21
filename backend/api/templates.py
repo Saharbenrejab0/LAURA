@@ -336,12 +336,25 @@ def search_templates(
 
             score = int(max(0, row.similarity * 100))
             matched_on = ["semantic"]
-            if row.brand and row.brand.lower() in brief_lower:
+
+            # Exact-match bonuses (same principle as RAG re-ranking)
+            # Check both directions + normalize dashes so "Ray-Ban Meta"
+            # matches "HB - Ray-Ban Meta" without needing the "HB" prefix.
+            _brand_db = (row.brand or "").lower().replace(" - ", " ").replace("-", " ")
+            _brand_q = brief_lower.replace("-", " ")
+            _brand_hit = (_brand_db and _brand_db in _brand_q) or (_brand_db and _brand_q and any(w in _brand_db for w in _brand_q.split() if len(w) > 2))
+            if row.brand and _brand_hit:
                 matched_on.append("brand")
+                if _brand_db.strip() == _brand_q.strip() or _brand_q.strip() in _brand_db.strip():
+                    score = min(score + 5, 99)
+                else:
+                    score = min(score + 2, 99)
             if row.country and row.country.lower() in brief_lower:
                 matched_on.append("country")
+                score = min(score + 2, 99)
             if row.activity_type and row.activity_type.lower() in brief_lower:
                 matched_on.append("activity")
+                score = min(score + 3, 99)
 
             budget_total = (row.fy_2025_total or 0) + (row.fy_2026_total or 0)
 

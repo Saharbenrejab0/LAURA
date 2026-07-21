@@ -22,11 +22,71 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useLaura, LauraSession, LauraMessage, LauraSource } from './LauraProvider';
 import LauraToolButtons from './LauraToolButtons';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const CHAMPAGNE = '#C9A678';
 const CHAMPAGNE_DEEP = '#8A6A3F';
 const CHAMPAGNE_MIST = 'var(--laura-champagne-mist, #FAF5EA)';
 const CHAMPAGNE_BORDER = 'var(--laura-champagne-border, #E8D9B8)';
+
+const LAURA_MD_STYLES = `
+.laura-md {
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.laura-md h1, .laura-md h2, .laura-md h3 {
+  font-weight: 600;
+  margin: 12px 0 6px;
+  line-height: 1.35;
+  color: var(--laura-text-primary, #0A0A0A);
+}
+.laura-md h1 { font-size: 14.5px; }
+.laura-md h2 { font-size: 13.5px; }
+.laura-md h3 { font-size: 13px; }
+.laura-md p { margin: 0 0 8px; }
+.laura-md strong { font-weight: 600; color: var(--laura-text-primary, #0A0A0A); }
+.laura-md ul, .laura-md ol { margin: 2px 0 8px; padding-left: 18px; }
+.laura-md li { margin-bottom: 3px; }
+.laura-md hr {
+  border: none;
+  border-top: 1px solid var(--laura-champagne-border, #E8D9B8);
+  margin: 10px 0;
+}
+.laura-md table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12.5px;
+}
+.laura-md th, .laura-md td {
+  border: none;
+  border-bottom: 1px solid var(--laura-champagne-border, #E8D9B8);
+  padding: 5px 8px;
+  text-align: left;
+}
+.laura-md th {
+  font-weight: 600;
+  color: var(--laura-text-tertiary, #6F6A62);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.laura-md blockquote {
+  border-left: 2px solid var(--laura-champagne-border, #E8D9B8);
+  padding-left: 10px;
+  margin: 6px 0;
+  color: var(--laura-text-tertiary, #6F6A62);
+}
+.laura-md code {
+  font-family: IBM Plex Mono, ui-monospace, monospace;
+  font-size: 11.5px;
+  background: var(--laura-bg-subtle, #FAFAFA);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+`;
+
 
 /* ═══════════════════════════════════════════════════════════════
    Root
@@ -58,6 +118,7 @@ export default function LauraChat() {
 
   return (
     <>
+      <style>{LAURA_MD_STYLES}</style>
       <div
         onClick={closeChat}
         style={{
@@ -786,14 +847,13 @@ function MessageBlock({ message }: { message: LauraMessage }) {
       </div>
 
       {/* Body */}
-      <div style={{
+      <div className="laura-md" style={{
         fontSize: 14,
         lineHeight: 1.6,
         color: 'var(--laura-text-primary, #0A0A0A)',
-        whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
       }}>
-        {message.content}
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
       </div>
 
       {/* Evidence — for RAG */}
@@ -802,7 +862,6 @@ function MessageBlock({ message }: { message: LauraMessage }) {
       )}
 
       {/* SQL details */}
-      {message.sql && <SqlDisclosure sql={message.sql} />}
     </div>
   );
 }

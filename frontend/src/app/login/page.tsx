@@ -224,7 +224,7 @@ export default function LoginPage() {
     try {
       await login(account.email, POC_PASSWORD)
       success(`Welcome, ${account.name}`)
-      router.push('/')
+      router.push('/welcome')
     } catch {
       toastError(`Sign-in failed for ${account.name}.`)
       setLoggingIn(null)

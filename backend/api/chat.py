@@ -86,25 +86,22 @@ def _is_reviewer_or_admin(user: User, loa: LOA, db: Session) -> bool:
 
 # ── Smart router ────────────────────────────────────────────────────────
 
-_RAG_KEYWORDS = frozenset({
-    "similar", "find", "historical", "compare", "typical", "past",
-    "benchmark", "like", "example", "campaign", "previous",
-    "average", "kpi", "recommend", "suggest", "pattern",
-    "trend", "seasonal", "visibility", "activation",
-})
-
-_SUMMARY_KEYWORDS = frozenset({
-    "summary", "summarize", "comments", "feedback", "review",
-    "what did", "what do reviewers", "reviewer",
-})
+_ROUTER_SYSTEM_PROMPT = """Classify the user's question into exactly one tool:
+- "stats": counts, totals, averages, aggregations over the LOA database (SQL-friendly)
+- "deep_search": finding similar/comparable historical LOAs, semantic search, examples
+- "summarize": summarizing reviewer comments/feedback on a specific LOA
+Respond with ONLY one word: stats, deep_search, or summarize."""
 
 
-def _detect_tool(message: str) -> str:
-    words = set(message.lower().split())
-    if words & _SUMMARY_KEYWORDS:
-        return "summarize"
-    if words & _RAG_KEYWORDS:
-        return "deep_search"
+async def _detect_tool(message: str) -> str:
+    from backend.engines.rag import _call_claude
+    try:
+        raw = await _call_claude(message, system=_ROUTER_SYSTEM_PROMPT, max_tokens=10)
+        choice = raw.strip().lower()
+        if choice in ("stats", "deep_search", "summarize"):
+            return choice
+    except Exception:
+        pass
     return "stats"
 
 
@@ -273,7 +270,7 @@ async def chat_ask_loa(
     if not question:
         raise HTTPException(status_code=400, detail="Empty message")
 
-    tool = body.tool or _detect_tool(question)
+    tool = body.tool or await _detect_tool(question)
     history = _history_to_dicts(body.history)
     session_id = body.session_id
 
@@ -377,7 +374,7 @@ async def chat_ask_global(
     if not question:
         raise HTTPException(status_code=400, detail="Empty message")
 
-    tool = body.tool or _detect_tool(question)
+    tool = body.tool or await _detect_tool(question)
     history = _history_to_dicts(body.history)
     session_id = body.session_id
 
