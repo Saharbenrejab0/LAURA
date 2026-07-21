@@ -224,6 +224,27 @@ def create_comment(
     db.add(comment)
     db.commit()
     db.refresh(comment)
+
+    # Auto-advance for global_review (Rock 3 parallel gate).
+    if loa.status == "global_review" and role:
+        touched = False
+        if role.scope_type == "brand":
+            if not loa.brand_review_done:
+                loa.brand_review_done = True
+                touched = True
+        elif role.scope_type == "function":
+            if not loa.function_review_done:
+                loa.function_review_done = True
+                touched = True
+        if touched:
+            if loa.brand_review_done and loa.function_review_done:
+                from backend.api.loa import WORKFLOW_TRANSITIONS
+                next_status = WORKFLOW_TRANSITIONS.get("global_review")
+                if next_status:
+                    loa.status = next_status
+            db.commit()
+            db.refresh(loa)
+
     return _enrich(comment, user, loa)
 
 

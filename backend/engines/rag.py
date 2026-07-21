@@ -247,6 +247,13 @@ def hybrid_search(filters: dict, db: Session, top_k: int = 8) -> list[dict]:
         conditions.append("COALESCE(fy_2025_total, fy_2026_total, 0) <= :budget_max")
         params["budget_max"] = float(filters["budget_max"])
 
+    # Role-based scope filtering (R10)
+    if filters.get("_scope_clusters"):
+        placeholders = ", ".join(f":scope_{i}" for i in range(len(filters["_scope_clusters"])))
+        conditions.append(f"cluster IN ({placeholders})")
+        for i, c in enumerate(filters["_scope_clusters"]):
+            params[f"scope_{i}"] = c
+
     where_clause = " AND ".join(conditions)
 
     # ── Embed the semantic query ──
@@ -383,6 +390,7 @@ async def generate_answer(question: str, loas: list[dict], filters: dict) -> dic
 Active filters (carried over + new): {filters_summary or 'none (semantic search only)'}
 Semantic search: "{filters.get('semantic_query', question)}"
 Results found: {len(loas)} LOAs (sample, not exhaustive)
+{"NOTE: The original filters returned no results, so these are the closest semantic matches WITHOUT the original filters. Mention this to the user: you could not find an exact match for their specific criteria, but here are the most similar LOAs from the broader dataset." if filters.get("_relaxed") else ""}
 
 Retrieved LOAs:
 {loa_context}
@@ -398,6 +406,7 @@ Do not present a "total" as if it covers all matching LOAs in the database."""
         "filters_used": active_filters,
         "sources": [
             {
+                "id": str(loa.get("id", "")),
                 "loa_number": loa.get("loa_number"),
                 "brand": loa.get("brand"),
                 "activity_type": loa.get("activity_type"),
@@ -419,6 +428,7 @@ async def ask_rag(
     db: Session,
     chat_history: list[dict] = None,
     top_k: int = 8,
+    user_scope: dict | None = None,
 ) -> dict:
     """Main RAG pipeline: extract → search → answer."""
     timing = {}
@@ -426,6 +436,8 @@ async def ask_rag(
     # ── Stage 1: Extract filters (with context awareness) ──
     t0 = time.time()
     filters = await extract_filters(question, chat_history)
+    if user_scope and user_scope.get("clusters"):
+        filters["_scope_clusters"] = user_scope["clusters"]
     timing["extract_ms"] = int((time.time() - t0) * 1000)
     logger.info(f"Filters extracted: {filters}")
 

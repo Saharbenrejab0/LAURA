@@ -255,7 +255,7 @@ def _format_history(history: list[dict] | None) -> str:
     return "\n\nPrevious conversation:\n" + "\n".join(lines) + "\n"
 
 
-async def generate_sql(question: str, history: list[dict] | None = None) -> str:
+async def generate_sql(question: str, history: list[dict] | None = None, scope_hint: str = '') -> str:
     """Ask Claude to translate a natural-language question into SQL."""
     history_block = _format_history(history)
     prompt = (
@@ -266,7 +266,8 @@ async def generate_sql(question: str, history: list[dict] | None = None) -> str:
         f"Current question: {question}\n\n"
         "Rules:\n"
         "- Return ONLY the SQL, no explanation, no markdown fences\n"
-        "- Always add LIMIT 50 unless the user asks for a specific count\n"
+        "- Do NOT add LIMIT unless the user explicitly asks for a top-N or specific count.\n"
+        "- When asked for totals, counts, or aggregations, return ALL matching rows — never truncate.\n"
         "- Use COALESCE for nullable numeric columns in aggregates\n"
         "- When the user asks about an activity type, search BOTH enum codes "
         "AND display names (use OR / IN with both variants)\n"
@@ -279,6 +280,8 @@ async def generate_sql(question: str, history: list[dict] | None = None) -> str:
         "don't include 10+ ROUND(CAST(...)) columns unless the user asks for a detailed breakdown\n"
         "- If you cannot translate the question, return: SELECT 'I cannot answer this question' AS error\n"
     )
+    if scope_hint:
+        prompt += f"\n{scope_hint}\n"
     return await _call_claude(prompt, max_tokens=2500)
 
 
@@ -305,11 +308,13 @@ async def format_sql_answer(
         f"The user asked: \"{question}\"\n\n"
         f"SQL executed:\n{sql}\n\n"
         f"Results ({len(rows)} rows):\n{rows_text}\n\n"
-        "Write a concise, professional answer in 1-4 sentences. "
+        "Write a concise, natural answer in 1-4 sentences as if you are a helpful assistant. "
         "Include key numbers with \u20ac formatting for monetary values. "
         "If there are multiple rows, highlight the top 3-5. "
-        "No markdown tables. No intro like 'Based on the data'. "
-        "Just answer directly."
+        "NEVER mention the SQL query, the database, rows returned, or any technical detail. "
+        "NEVER say 'the query returned' or 'the results show'. "
+        "Do NOT offer to rerun queries or remove filters. "
+        "Just answer the user's question directly and naturally, like Claude or ChatGPT would."
     )
     return await _call_claude(prompt, max_tokens=600)
 

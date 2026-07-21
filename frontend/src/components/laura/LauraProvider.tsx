@@ -23,6 +23,7 @@ import api from '@/lib/api';
 export type LauraMessageRole = 'user' | 'assistant';
 
 export interface LauraSource {
+  id?: string;
   loa_number: string | null;
   brand: string;
   activity_type: string;
@@ -76,8 +77,18 @@ const LauraContext = createContext<LauraContextValue | null>(null);
 
 /* ───── Helpers ───────────────────────────────────────── */
 
-const STORAGE_KEY = 'laura.chat.sessions';
-const CURRENT_KEY = 'laura.chat.currentId';
+function _userStorageKey(suffix: string): string {
+  try {
+    const raw = localStorage.getItem('laura_user');
+    if (raw) {
+      const u = JSON.parse(raw);
+      if (u.email) return 'laura.chat.' + u.email + '.' + suffix;
+    }
+  } catch {}
+  return 'laura.chat.' + suffix;
+}
+function STORAGE_KEY() { return _userStorageKey('sessions'); }
+function CURRENT_KEY() { return _userStorageKey('currentId'); }
 const LOA_LABEL_CACHE_KEY = 'laura.chat.loaLabels';  // { [loaId]: loa_number }
 const MAX_SESSIONS = 50;
 const HISTORY_WINDOW = 6;
@@ -94,7 +105,7 @@ function nowISO(): string { return new Date().toISOString(); }
 function loadSessions(): LauraSession[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY());
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -109,7 +120,7 @@ function saveSessions(sessions: LauraSession[]): void {
       .slice()
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, MAX_SESSIONS);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+    localStorage.setItem(STORAGE_KEY(), JSON.stringify(trimmed));
   } catch {/* quota exceeded — silent */}
 }
 
@@ -226,7 +237,7 @@ export function LauraProvider({ children }: { children: ReactNode }) {
     const loaded = loadSessions();
     setSessions(loaded);
     try {
-      const curr = localStorage.getItem(CURRENT_KEY);
+      const curr = localStorage.getItem(CURRENT_KEY());
       if (curr && loaded.find(s => s.id === curr)) {
         setCurrentSessionId(curr);
       }
@@ -259,8 +270,8 @@ export function LauraProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      if (currentSessionId) localStorage.setItem(CURRENT_KEY, currentSessionId);
-      else localStorage.removeItem(CURRENT_KEY);
+      if (currentSessionId) localStorage.setItem(CURRENT_KEY(), currentSessionId);
+      else localStorage.removeItem(CURRENT_KEY());
     } catch {/* ignore */}
   }, [currentSessionId]);
 

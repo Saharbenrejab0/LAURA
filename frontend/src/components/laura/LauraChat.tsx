@@ -948,9 +948,18 @@ function SourceCard({
           fontSize: 11,
           minWidth: 20,
         }}>[{index}]</span>
-        <span style={{
+        <span
+          onClick={(e) => {
+            if ((source as any).id) {
+              e.stopPropagation();
+              window.open('/loa/' + (source as any).id, '_blank');
+            }
+          }}
+          style={{
           fontWeight: 500,
-          color: 'var(--laura-text-primary, #0A0A0A)',
+          color: (source as any).id ? 'var(--gold, #b08d2f)' : 'var(--laura-text-primary, #0A0A0A)',
+          textDecoration: (source as any).id ? 'underline' : 'none',
+          cursor: (source as any).id ? 'pointer' : 'default',
           flex: 1,
           overflow: 'hidden',
           textOverflow: 'ellipsis',

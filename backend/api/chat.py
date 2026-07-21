@@ -36,6 +36,33 @@ from backend.engines.chat import (
 )
 from backend.engines.rag import ask_rag
 
+
+def _inject_scope_into_sql(sql: str, user) -> str:
+    """Hard-inject cluster scope into generated SQL for non-admin users.
+    This is a safety net: even if the LLM ignores the scope hint in the
+    prompt, the SQL will always be filtered to the user's clusters."""
+    if not sql or not user or not user.role_obj:
+        return sql
+    if user.role_obj.can_override_lock:
+        return sql  # admin sees everything
+    from backend.api.templates import _extract_scope_values
+    clusters = _extract_scope_values(user.role_obj.scope_value)
+    if not clusters:
+        return sql
+    # Check if already filtered by cluster
+    if "cluster" in sql.lower() and any(c.lower() in sql.lower() for c in clusters):
+        return sql
+    placeholders = ", ".join(f"\'{c}\'" for c in clusters)
+    clause = f"cluster IN ({placeholders})"
+    sql_upper = sql.upper()
+    if "WHERE" in sql_upper:
+        idx = sql_upper.index("WHERE") + 5
+        sql = sql[:idx] + f" {clause} AND" + sql[idx:]
+    elif "FROM LOAS" in sql_upper:
+        idx = sql_upper.index("FROM LOAS") + len("FROM LOAS")
+        sql = sql[:idx] + f" WHERE {clause}" + sql[idx:]
+    return sql
+
 router = APIRouter()
 
 
@@ -329,7 +356,15 @@ async def chat_ask_loa(
 
         # ── Route: text-to-SQL ──
         else:
-            sql_used = await generate_sql(question, history=history)
+            # Build scope context for SQL generation (role-based filtering)
+            _sql_scope = ""
+            if user.role_obj and not user.role_obj.can_override_lock:
+                from backend.api.templates import _extract_scope_values
+                _clusters = _extract_scope_values(user.role_obj.scope_value)
+                if _clusters:
+                    _sql_scope = f"IMPORTANT: This user can only see LOAs in cluster(s): {', '.join(_clusters)}. Always add WHERE cluster IN ({', '.join(repr(c) for c in _clusters)}) to every query."
+            sql_used = await generate_sql(question, history=history, scope_hint=_sql_scope)
+            sql_used = _inject_scope_into_sql(sql_used, user)
             ok, err = _validate_sql(sql_used)
             if not ok:
                 response = {"answer": _FRIENDLY_SQL_ERROR, "sql": sql_used, "tool": "stats"}
@@ -384,7 +419,13 @@ async def chat_ask_global(
 
     try:
         if tool == "deep_search":
-            result = await ask_rag(question, db, chat_history=history)
+            _scope = None
+            if user.role_obj and not user.role_obj.can_override_lock:
+                from backend.api.templates import _extract_scope_values
+                _clusters = _extract_scope_values(user.role_obj.scope_value)
+                if _clusters:
+                    _scope = {"clusters": _clusters}
+            result = await ask_rag(question, db, chat_history=history, user_scope=_scope)
             response = {
                 "answer": result["answer"],
                 "sql": None,
@@ -394,7 +435,15 @@ async def chat_ask_global(
                 "timing": result.get("timing", {}),
             }
         else:
-            sql_used = await generate_sql(question, history=history)
+            # R10: scope filter for Stats in global endpoint
+            _sql_scope_g = ""
+            if user.role_obj and not user.role_obj.can_override_lock:
+                from backend.api.templates import _extract_scope_values
+                _clusters_g = _extract_scope_values(user.role_obj.scope_value)
+                if _clusters_g:
+                    _sql_scope_g = f"IMPORTANT: This user can only see LOAs in cluster(s): {', '.join(_clusters_g)}. Always add WHERE cluster IN ({', '.join(repr(c) for c in _clusters_g)}) to every query."
+            sql_used = await generate_sql(question, history=history, scope_hint=_sql_scope_g)
+            sql_used = _inject_scope_into_sql(sql_used, user)
             ok, err = _validate_sql(sql_used)
             if not ok:
                 response = {"answer": _FRIENDLY_SQL_ERROR, "sql": sql_used, "tool": "stats"}
