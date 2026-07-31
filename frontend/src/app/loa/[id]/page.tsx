@@ -32,6 +32,7 @@ import ApprovalPanel from '@/components/draft/ApprovalPanel'
 
 const WORKFLOW = [
   { key: 'draft', label: 'Draft' },
+  { key: 'local_alignment', label: 'Local Alignment' },
   { key: 'emea_review', label: 'EMEA review' },
   { key: 'global_review', label: 'Brand review' },
   { key: 'emea_post_global_review', label: 'Functions' },
@@ -39,7 +40,7 @@ const WORKFLOW = [
   { key: 'corporate_review', label: 'Corporate' },
   { key: 'approved', label: 'Approved' },
 ]
-const WF_ORDER = ['draft', 'emea_review', 'global_review', 'emea_post_global_review', 'cmo_cfo_review', 'emea_final_review', 'corporate_review', 'approved']
+const WF_ORDER = ['draft', 'local_alignment', 'emea_review', 'global_review', 'emea_post_global_review', 'cmo_cfo_review', 'emea_final_review', 'corporate_review', 'approved']
 
 export default function LOADetailPage() {
   const params = useParams<{ id: string }>()
@@ -226,20 +227,36 @@ export default function LOADetailPage() {
               <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)', letterSpacing: 0.5, marginBottom: 14 }}>APPROVAL WORKFLOW</div>
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 {WORKFLOW.map((s, i) => {
-                  const done = wfIndex >= 0 && WF_ORDER.indexOf(s.key) <= wfIndex
+                  const stepIdx = WF_ORDER.indexOf(s.key)
+                  const done = wfIndex >= 0 && stepIdx < wfIndex
+                  const isCurrent = wfIndex >= 0 && stepIdx === wfIndex
                   return (
                     <div key={s.key} style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                      {i > 0 && <div style={{ flex: 1, height: 2, background: done ? 'var(--accent)' : 'var(--border-strong)' }} />}
+                      {i > 0 && <div style={{ flex: 1, height: 2, background: (done || isCurrent) ? 'var(--accent)' : 'var(--border-strong)' }} />}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                        <div style={{ width: 26, height: 26, borderRadius: 13, background: done ? 'var(--accent)' : 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: done ? 'none' : '1.5px solid var(--border-strong)' }}>
+                        <div style={{
+                          width: 26, height: 26, borderRadius: 13,
+                          background: done ? 'var(--accent)' : isCurrent ? 'var(--bg-elevated)' : 'var(--bg-elevated)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          border: isCurrent ? '2px solid var(--gold, #b08d2f)' : done ? 'none' : '1.5px solid var(--border-strong)',
+                          boxShadow: isCurrent ? '0 0 0 3px rgba(176,141,47,0.18)' : 'none',
+                          animation: isCurrent ? 'laStepPulse 1.6s ease-in-out infinite' : 'none',
+                        }}>
                           {done && <Icon d={ic.check} size={13} color="var(--accent-text)" />}
+                          {isCurrent && <div style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--gold, #b08d2f)' }} />}
                         </div>
-                        <span style={{ fontSize: 10, color: done ? 'var(--text-secondary)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>{s.label}</span>
+                        <span style={{ fontSize: 10, fontWeight: isCurrent ? 700 : 400, color: isCurrent ? 'var(--gold, #b08d2f)' : done ? 'var(--text-secondary)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                          {s.label}{isCurrent ? ' — pending' : ''}
+                        </span>
                       </div>
                       {i < WORKFLOW.length - 1 && <div style={{ flex: 1, height: 2, background: (wfIndex >= 0 && WF_ORDER.indexOf(WORKFLOW[i + 1].key) <= wfIndex) ? 'var(--accent)' : 'var(--border-strong)' }} />}
                     </div>
                   )
                 })}
+                <style>{`@keyframes laStepPulse {
+                  0%, 100% { box-shadow: 0 0 0 3px rgba(176,141,47,0.18); }
+                  50% { box-shadow: 0 0 0 6px rgba(176,141,47,0.28); }
+                }`}</style>
               </div>
             </div>
           )}

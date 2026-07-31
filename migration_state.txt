@@ -1,0 +1,94 @@
+=== alembic heads ===
+rock5_comment_pins (head)
+
+=== alembic current ===
+rock5_comment_pins (head)
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+
+=== migration files ===
+  1b7a8cd2e6d6_add_is_locked_flag_to_loas.py
+  1fcc624b3c06_add_comments_table.py
+  23214ae13ff8_add_new_loa_fields_v2.py
+  2739aee08dee_category_to_array_with_data_conversion.py
+  3d4ae2f1fc0e_add_missing_loa_fields_manual.py
+  a1b2c3d4e5f6_create_users_table.py
+  a691d6968278_add_is_demo_flag_to_loas.py
+  c3f4aeb8f496_add_new_loa_fields_v2.py
+  d9cb29ca683a_create_loas_table.py
+  f38d3d060ee3_merge_heads_collapse_empty_v2_branches.py
+  migration_rag_columns.py
+  migration_rag_logs.py
+  rock1_parallel_gates.py
+  rock2_fix_constraint.py
+  rock5_comment_pins.py
+  sprint2_rolepermissions.py
+  wf2_status_v2_workflow_v2_migration.py
+=== LOAStatus enum ===
+class LOAStatus(str, enum.Enum):
+    # -- Workflow order (7 active + 2 terminal) ---------------------
+    DRAFT                       = "draft"                       # marketer creates/edits
+    EMEA_REVIEW                 = "emea_review"                 # EMEA PS first review
+    GLOBAL_REVIEW               = "global_review"               # parallel gate 1 - brand + function teams comment
+    EMEA_POST_GLOBAL_REVIEW     = "emea_post_global_review"     # EMEA reviews brand + function feedback
+    CMO_CFO_REVIEW              = "cmo_cfo_review"              # parallel gate 2 - CMO + CFO validate
+    EMEA_FINAL_REVIEW           = "emea_final_review"           # EMEA last check before corporate
+    CORPORATE_REVIEW            = "corporate_review"            # Paola + Diana final gate
+    APPROVED                    = "approved"                    # terminal
+    REJECTED                    =
+=== role.py (full) ===
+"""
+Role model.
+
+A Role represents a position in the LAURA workflow. Examples:
+  - france_marketer (scope: cluster=FRANCE)
+  - emea_ps_editor (scope: all)
+  - global_brand_rayban (scope: brand=[Ray-Ban, Ray-Ban Meta])
+  - ceo_validator (scope: all, but only active during ceo_validation status)
+  - super_admin (scope: all, can override edit-lock)
+
+Scope determines WHICH LOAs a role can see, in conjunction with the
+permission matrix (role_permission) which determines WHAT they can do.
+
+Scope types:
+  - 'all': sees all LOAs (Vanessa, Alexandra, Giulia, Paola, Diana,
+                          Super-Admin, AI to Market)
+  - 'cluster': sees only LOAs from a specific cluster (Local Marketers, Finance)
+  - 'brand': sees only LOAs where brand is in scope_value list
+  - 'function': sees only LOAs where activity_type is in scope_value list
+  - 'author_only': sees only LOAs they personally created (used for drafts)
+
+scope_value is a JSON array of allowed values, or null when scope_type is
+'all' or 'author_only'.
+"""
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, func
+from sqlalchemy.orm import relationship
+
+from backend.models.database import Base
+
+
+def _normalise_brand(name):
+    """Strip prefixes and normalise for comparison: 'HB - Ray-Ban' -> 'ray-ban'."""
+    if not name:
+        return ""
+    s = str(name).strip().lower()
+    # Remove leading category prefixes with or without spaces
+    for prefix in ("hb -", "hb-", "lb -", "lb-", "essilor -", "essilor-"):
+        if s.startswith(prefix):
+            s = s[len(prefix):].strip()
+            break
+    return s
+
+
+def _brand_matches(loa_brand, scope_list):
+    """Check if loa_brand matches any in scope_list, ignoring 'HB - ' / 'LB - ' prefixes."""
+    if not loa_brand or not scope_list:
+        return False
+    loa_norm = _normalise_brand(loa_brand)
+    scope_norm = {_normalise_brand(b) for b in scope_list}
+    return loa_norm in scope_norm
+
+class Role(Base):
+    __tablename__ = 'role'
+
+    id =

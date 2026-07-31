@@ -345,3 +345,71 @@ async def force_loa_status(
         "forced_by": admin.email,
         "reason": body.reason,
     }
+
+
+class CycleStartRequest(BaseModel):
+    cycle_type: str
+    start_date: str
+    end_date: str
+    name: str | None = None
+    authorized_emails: list[str] | None = None
+
+
+@router.post("/cycle/start")
+async def start_cycle(
+    body: CycleStartRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_super_admin),
+):
+    from backend.models.loa_cycle import LoaCycle
+    from datetime import datetime
+    import uuid as uuid_lib
+
+    if body.cycle_type not in ("normal", "emergency"):
+        raise HTTPException(status_code=422, detail="cycle_type must be normal or emergency")
+
+    try:
+        start = datetime.fromisoformat(body.start_date)
+        end = datetime.fromisoformat(body.end_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="dates must be ISO format YYYY-MM-DD")
+
+    db.query(LoaCycle).filter(
+        LoaCycle.cycle_type == body.cycle_type, LoaCycle.is_active == True
+    ).update({"is_active": False})
+
+    cycle = LoaCycle(
+        id=uuid_lib.uuid4(),
+        name=body.name or f"{body.cycle_type.title()} cycle - {start.strftime('%b %d')} to {end.strftime('%b %d, %Y')}",
+        cycle_type=body.cycle_type,
+        start_date=start,
+        end_date=end,
+        is_active=True,
+        created_by=admin.email,
+        authorized_emails=body.authorized_emails,
+    )
+    db.add(cycle)
+    db.commit()
+    db.refresh(cycle)
+
+    return {
+        "id": str(cycle.id), "name": cycle.name, "cycle_type": cycle.cycle_type,
+        "start_date": cycle.start_date.isoformat(), "end_date": cycle.end_date.isoformat(),
+        "is_active": cycle.is_active,
+    }
+
+
+@router.get("/cycle/active")
+async def get_active_cycles(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_super_admin),
+):
+    from backend.models.loa_cycle import LoaCycle
+    cycles = db.query(LoaCycle).filter(LoaCycle.is_active == True).all()
+    return [
+        {
+            "id": str(c.id), "name": c.name, "cycle_type": c.cycle_type,
+            "start_date": c.start_date.isoformat(), "end_date": c.end_date.isoformat(),
+        }
+        for c in cycles
+    ]

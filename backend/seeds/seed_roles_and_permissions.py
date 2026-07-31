@@ -134,6 +134,31 @@ for cluster in CLUSTERS:
         'can_override_lock': False,
     })
 
+
+# -- Group 2b: Local Procurement (8 clusters) ------------------------
+for cluster in CLUSTERS:
+    code = cluster.lower().replace(' ', '_').replace('&', '').replace('__', '_')
+    ROLES_DATA.append({
+        'code': f'{code}_procurement',
+        'display_name': f'{cluster} Procurement',
+        'description': f'Local procurement for {cluster}. Comments during local_alignment.',
+        'scope_type': 'cluster',
+        'scope_value': [cluster],
+        'can_override_lock': False,
+    })
+
+# -- Group 2c: Local Compliance (8 clusters) --------------------------
+for cluster in CLUSTERS:
+    code = cluster.lower().replace(' ', '_').replace('&', '').replace('__', '_')
+    ROLES_DATA.append({
+        'code': f'{code}_compliance',
+        'display_name': f'{cluster} Compliance',
+        'description': f'Local compliance for {cluster}. Comments during local_alignment.',
+        'scope_type': 'cluster',
+        'scope_value': [cluster],
+        'can_override_lock': False,
+    })
+
 # -- Group 3: Regional leadership (2 roles) ---------------------------
 ROLES_DATA.extend([
     {
@@ -270,6 +295,26 @@ ROLES_DATA.extend([
     },
 ])
 
+# -- Group 6b: EMEA Creator + EMEA Commenter (Trade Marketing) -------
+ROLES_DATA.extend([
+    {
+        'code': 'emea_creator',
+        'display_name': 'EMEA Creator',
+        'description': 'Creates LOAs on behalf of the region. Comments at every review step. Cannot validate or advance phase.',
+        'scope_type': 'all',
+        'scope_value': None,
+        'can_override_lock': False,
+    },
+    {
+        'code': 'emea_commenter_tm',
+        'display_name': 'EMEA Commenter (Trade Marketing)',
+        'description': 'Trade Marketing lead. Comments on every LOA; also validates when activity_type is Trade Incentive (checked in code, not in this matrix).',
+        'scope_type': 'all',
+        'scope_value': None,
+        'can_override_lock': False,
+    },
+])
+
 # -- Group 7: Super-Admin (1 role) ------------------------------------
 ROLES_DATA.append({
     'code': 'super_admin',
@@ -320,30 +365,72 @@ def build_matrix():
     # =================================================================
     # LOCAL MARKETERS + LOCAL FINANCE (16 roles, identical permissions)
     # =================================================================
-    cluster_roles = []
+    marketer_roles = []
+    finance_roles = []
+    procurement_roles = []
+    compliance_roles = []
     for cluster in CLUSTERS:
         code = cluster.lower().replace(' ', '_').replace('&', '').replace('__', '_')
-        cluster_roles.append(f'{code}_marketer')
-        cluster_roles.append(f'{code}_finance')
+        marketer_roles.append(f'{code}_marketer')
+        finance_roles.append(f'{code}_finance')
+        procurement_roles.append(f'{code}_procurement')
+        compliance_roles.append(f'{code}_compliance')
 
-    for role_code in cluster_roles:
-        # Draft: full edit + delete + duplicate
+    # -- Marketer: creates, edits, submits. Sees own LOA through the ---
+    #    whole workflow.
+    for role_code in marketer_roles:
         add(role_code, 'draft', 'edit')
         add(role_code, 'draft', 'delete')
         add(role_code, 'draft', 'duplicate')
 
-        # Rejected: edit + duplicate (no delete — rejected LOAs are kept for audit)
         add(role_code, 'rejected', 'edit')
         add(role_code, 'rejected', 'duplicate')
 
-        # All review steps: view only
+        add(role_code, 'local_alignment', 'view')
+
         for status in ['emea_review', 'global_review', 'emea_post_global_review',
                         'cmo_cfo_review', 'emea_final_review', 'corporate_review']:
             add(role_code, status, 'view')
 
-        # Approved: view + duplicate
         add(role_code, 'approved', 'view')
         add(role_code, 'approved', 'duplicate')
+
+    # -- Finance / Procurement / Compliance: comment-only, act at ------
+    #    local_alignment (the parallel gate right after submission).
+    for role_code in finance_roles + procurement_roles + compliance_roles:
+        add(role_code, 'draft', 'view')
+        add(role_code, 'local_alignment', 'comment')
+        add(role_code, 'local_alignment', 'view')
+
+        for status in ['emea_review', 'global_review', 'emea_post_global_review',
+                        'cmo_cfo_review', 'emea_final_review', 'corporate_review']:
+            add(role_code, status, 'view')
+
+        add(role_code, 'approved', 'view')
+
+    # -- EMEA Creator: create/edit like a marketer but region-wide, -----
+    #    plus comments at every review step.
+    add('emea_creator', 'draft', 'edit')
+    add('emea_creator', 'draft', 'duplicate')
+    for status in ['local_alignment', 'emea_review', 'global_review',
+                    'emea_post_global_review', 'cmo_cfo_review',
+                    'emea_final_review', 'corporate_review']:
+        add('emea_creator', status, 'comment')
+        add('emea_creator', status, 'view')
+    add('emea_creator', 'approved', 'view')
+    add('emea_creator', 'approved', 'duplicate')
+
+    # -- EMEA Commenter (Trade Marketing): comments on every LOA. -------
+    #    The extra 'validate when activity_type == Trade Incentive' rule
+    #    is NOT expressible in this status-only matrix -- it is enforced
+    #    in code (backend/api/loa.py permission check).
+    for status in ['local_alignment', 'emea_review', 'global_review',
+                    'emea_post_global_review', 'cmo_cfo_review',
+                    'emea_final_review', 'corporate_review']:
+        add('emea_commenter_tm', status, 'comment')
+        add('emea_commenter_tm', status, 'view')
+    add('emea_commenter_tm', 'approved', 'view')
+    add('emea_commenter_tm', 'approved', 'duplicate')
 
     # =================================================================
     # GLOBAL BRAND TEAMS (6 roles)

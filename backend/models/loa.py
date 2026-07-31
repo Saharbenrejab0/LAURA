@@ -4,7 +4,7 @@ Maps every field confirmed in Field Connections v4.0 + Dropdown Data Reference v
 Sources: discovery meetings with Vanessa Stöecklein & Thibault de Bodman
 """
 
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, Enum
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, Enum, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 import uuid
@@ -23,6 +23,7 @@ from sqlalchemy.orm import validates
 class LOAStatus(str, enum.Enum):
     # -- Workflow order (7 active + 2 terminal) ---------------------
     DRAFT                       = "draft"                       # marketer creates/edits
+    LOCAL_ALIGNMENT             = "local_alignment"             # finance + procurement + compliance comment
     EMEA_REVIEW                 = "emea_review"                 # EMEA PS first review
     GLOBAL_REVIEW               = "global_review"               # parallel gate 1 - brand + function teams comment
     EMEA_POST_GLOBAL_REVIEW     = "emea_post_global_review"     # EMEA reviews brand + function feedback
@@ -307,6 +308,15 @@ class LOA(Base):
     function_review_done    = Column(Boolean, default=False)
     brand_review_skipped    = Column(Boolean, default=False)
     function_review_skipped = Column(Boolean, default=False)
+
+    # -- Local Alignment gate: finance + procurement + compliance ---
+    finance_review_done      = Column(Boolean, default=False)
+    procurement_review_done  = Column(Boolean, default=False)
+    compliance_review_done   = Column(Boolean, default=False)
+
+    # -- LOA cycles: normal quarterly kickoff vs emergency fast-track ---
+    cycle_id     = Column(UUID(as_uuid=True), ForeignKey("loa_cycle.id"), nullable=True)
+    is_emergency = Column(Boolean, default=False)
     # ── Business rules (enforced server-side, never trusted from frontend) ─────
 
      # Near q4_2025, q1_2026, etc.

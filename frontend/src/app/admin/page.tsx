@@ -290,6 +290,7 @@ function PulseTab({ stats, users, router, greeting, userName }: { stats: DashSta
   return (
     <div style={{ display: 'grid', gap: 18 }}>
       {/* Greeting */}
+      <KickoffBar />
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 500, margin: 0, color: 'var(--text-primary)' }}>{greeting}, {userName}</h2>
@@ -751,6 +752,108 @@ function AuditTab({ loaId, setLoaId, status, setStatus, reason, setReason, confi
           })}
         </div>
       </div>
+    </div>
+  )
+}
+
+
+function KickoffBar() {
+  const [open, setOpen] = useState<null | 'normal' | 'emergency'>(null)
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [marketers, setMarketers] = useState<{ email: string; full_name: string }[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (open !== 'emergency' || marketers.length > 0) return
+    const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null
+    fetch('http://localhost:8000/admin/users', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => r.json())
+      .then(data => {
+        const list = (data.users || data || []).filter((u: any) => (u.role_code || u.role || '').endsWith('_marketer'))
+        setMarketers(list.map((u: any) => ({ email: u.email, full_name: u.full_name })))
+      })
+      .catch(() => {})
+  }, [open, marketers.length])
+
+  function toggle(email: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(email)) next.delete(email); else next.add(email)
+      return next
+    })
+  }
+
+  async function launch() {
+    if (!startDate || !endDate) { setMsg('Pick both dates.'); return }
+    setBusy(true); setMsg(null)
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null
+      const res = await fetch('http://localhost:8000/admin/cycle/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          cycle_type: open, start_date: startDate, end_date: endDate,
+          authorized_emails: open === 'emergency' ? Array.from(selected) : null,
+        }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      setMsg(`Started: ${data.name}`)
+      setOpen(null); setStartDate(''); setEndDate('')
+    } catch (e: any) {
+      setMsg('Failed: ' + (e?.message || 'unknown error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: 0.5 }}>LOA CYCLE</span>
+        <button onClick={() => setOpen(open === 'normal' ? null : 'normal')}
+          style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border-strong)', background: open === 'normal' ? 'var(--accent)' : 'transparent', color: open === 'normal' ? 'var(--accent-text)' : 'var(--text-primary)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+          Start Normal Cycle
+        </button>
+        <button onClick={() => setOpen(open === 'emergency' ? null : 'emergency')}
+          style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #c0392b', background: open === 'emergency' ? '#c0392b' : 'transparent', color: open === 'emergency' ? '#fff' : '#c0392b', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+          Start Emergency
+        </button>
+        {msg && <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{msg}</span>}
+      </div>
+      {open && (
+        <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Start
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+              style={{ marginLeft: 6, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-strong)' }} />
+          </label>
+          <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>End
+            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+              style={{ marginLeft: 6, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-strong)' }} />
+          </label>
+          {open === 'emergency' && (
+            <div style={{ width: '100%', marginTop: 4, marginBottom: 4 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 6 }}>Authorized marketers for this emergency:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflowY: 'auto' }}>
+                {marketers.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Loading marketers…</span>}
+                {marketers.map(m => (
+                  <label key={m.email} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 999, border: '1px solid var(--border-strong)', background: selected.has(m.email) ? '#c0392b' : 'transparent', color: selected.has(m.email) ? '#fff' : 'var(--text-primary)', fontSize: 11.5, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={selected.has(m.email)} onChange={() => toggle(m.email)} style={{ display: 'none' }} />
+                    {m.full_name || m.email}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          <button onClick={launch} disabled={busy}
+            style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: 'var(--ink)', color: 'var(--ink-text)', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>
+            {busy ? 'Starting30' : `Confirm ${open === 'emergency' ? 'Emergency' : 'Normal'} Kickoff`}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

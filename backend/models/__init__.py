@@ -13,6 +13,7 @@ from backend.models.database import Base, SessionLocal, engine, get_db
 # Independent models
 from backend.models.permission import Permission
 from backend.models.user import User
+from backend.models.loa_cycle import LoaCycle
 from backend.models.loa import LOA
 
 # Models that reference other models
@@ -22,5 +23,5 @@ from backend.models.role_permission import RolePermission
 __all__ = [
     'Base', 'SessionLocal', 'engine', 'get_db',
     'Permission', 'Role', 'RolePermission',
-    'User', 'LOA',
+    'User', 'LOA', 'LoaCycle',
 ]

@@ -227,6 +227,7 @@ class SuggestRequest(BaseModel):
 
 # Linear transition map (for non-parallel-gate steps)
 WORKFLOW_TRANSITIONS = {
+    "local_alignment":         "emea_review",
     "emea_review":             "global_review",
     "global_review":           "emea_post_global_review",
     "emea_post_global_review": "cmo_cfo_review",
@@ -237,7 +238,7 @@ WORKFLOW_TRANSITIONS = {
 
 # Display order (used for rollback dropdown)
 WORKFLOW_ORDER = [
-    "draft", "emea_review", "global_review", "emea_post_global_review",
+    "draft", "local_alignment", "emea_review", "global_review", "emea_post_global_review",
     "cmo_cfo_review", "emea_final_review", "corporate_review", "approved",
 ]
 
@@ -314,18 +315,67 @@ def _is_global_review_complete(loa: LOA) -> bool:
     """Check if both brand and function gates are satisfied (done or skipped)."""
     return loa.brand_review_done and loa.function_review_done
 
+def _has_local_role_reviewer(loa: LOA, db: Session, suffix: str) -> bool:
+    """Check if a {cluster}_{suffix} role (finance/procurement/compliance)
+    has at least one active user for this LOA's cluster.
+    """
+    from backend.models.role import Role
+    if not loa.cluster:
+        return False
+    code = loa.cluster.lower().replace(' ', '_').replace('&', '').replace('__', '_') + f'_{suffix}'
+    role = db.query(Role).filter(Role.code == code).first()
+    if not role:
+        return False
+    return db.query(User).filter(User.role_id == role.id).count() > 0
+
+
+def _compute_local_alignment_skip_flags(loa: LOA, db: Session) -> None:
+    """Pre-mark finance/procurement/compliance done if no reviewer exists
+    for this LOA's cluster (mirrors _compute_skip_flags for brand/function).
+    """
+    loa.finance_review_done = not _has_local_role_reviewer(loa, db, 'finance')
+    loa.procurement_review_done = not _has_local_role_reviewer(loa, db, 'procurement')
+    loa.compliance_review_done = not _has_local_role_reviewer(loa, db, 'compliance')
+
+
+def _is_local_alignment_complete(loa: LOA) -> bool:
+    """Check if finance + procurement + compliance gates are all satisfied."""
+    return (loa.finance_review_done and loa.procurement_review_done
+            and loa.compliance_review_done)
+
 # ════════════════════════════════════════════════════════════════════════
 # ROUTES — order matters: /export/* BEFORE /{loa_id} to avoid UUID parse
 # ════════════════════════════════════════════════════════════════════════
 
 
 
+def _get_loa_photos(loa_id: str) -> list[dict]:
+    """List uploaded photos for a LOA from disk (not a DB column).
+    Returns [{index, url}] sorted by index, matching what SlidePreview.tsx expects.
+    """
+    upload_dir = "uploads/loa_photos"
+    if not os.path.isdir(upload_dir):
+        return []
+    matches = []
+    for fname in os.listdir(upload_dir):
+        if fname.startswith(f"{loa_id}_photo"):
+            try:
+                idx_part = fname.split("_photo")[1].split(".")[0]
+                idx = int(idx_part)
+            except (IndexError, ValueError):
+                continue
+            matches.append(idx)
+    matches.sort()
+    return [{"index": idx, "url": f"/loa/{loa_id}/photos/{idx}"} for idx in matches]
+
+
 def _with_display_title(loa):
-    """Serialize an ORM LOA to dict + inject display_title."""
+    """Serialize an ORM LOA to dict + inject display_title + photos."""
     if loa is None:
         return None
     data = {c.name: getattr(loa, c.name) for c in loa.__table__.columns}
     data["display_title"] = compute_display_title(loa)
+    data["photos"] = _get_loa_photos(str(loa.id))
     return data
 
 @router.get("")
@@ -559,7 +609,7 @@ async def submit_loa(
         )
 
     if loa.status == "draft":
-        new_status = "emea_review"
+        new_status = "local_alignment"
         event_name = "loa_submitted"
     elif loa.status == "rejected":
         new_status = "emea_review"
@@ -577,6 +627,10 @@ async def submit_loa(
         raise HTTPException(status_code=422, detail={"validation_errors": errors})
 
     loa.status = new_status
+    if loa.status == "local_alignment":
+        _compute_local_alignment_skip_flags(loa, db)
+        if _is_local_alignment_complete(loa):
+            loa.status = "emea_review"
     loa.submitted_at = datetime.utcnow()
     if event_name == "loa_resubmitted":
         loa.rejection_reason = None
@@ -667,6 +721,12 @@ async def validate_workflow_step(
         raise HTTPException(
             status_code=400,
             detail="global_review advances automatically when reviewers comment.",
+        )
+
+    if current_status == "local_alignment":
+        raise HTTPException(
+            status_code=400,
+            detail="local_alignment advances automatically when finance, procurement, and compliance comment.",
         )
 
     if current_status not in WORKFLOW_TRANSITIONS:

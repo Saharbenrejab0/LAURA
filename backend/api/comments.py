@@ -245,6 +245,33 @@ def create_comment(
             db.commit()
             db.refresh(loa)
 
+
+    # Auto-advance for local_alignment (finance + procurement + compliance gate).
+    if loa.status == "local_alignment" and role:
+        role_code = role.code or ""
+        touched = False
+        if role_code.endswith("_finance"):
+            if not loa.finance_review_done:
+                loa.finance_review_done = True
+                touched = True
+        elif role_code.endswith("_procurement"):
+            if not loa.procurement_review_done:
+                loa.procurement_review_done = True
+                touched = True
+        elif role_code.endswith("_compliance"):
+            if not loa.compliance_review_done:
+                loa.compliance_review_done = True
+                touched = True
+        if touched:
+            if (loa.finance_review_done and loa.procurement_review_done
+                    and loa.compliance_review_done):
+                from backend.api.loa import WORKFLOW_TRANSITIONS
+                next_status = WORKFLOW_TRANSITIONS.get("local_alignment")
+                if next_status:
+                    loa.status = next_status
+            db.commit()
+            db.refresh(loa)
+
     return _enrich(comment, user, loa)
 
 
