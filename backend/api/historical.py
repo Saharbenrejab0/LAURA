@@ -162,6 +162,13 @@ def historical_excel_grid(
             "importBatchId": str(l.import_batch_id) if l.import_batch_id else None,
             "importBatchLabel": b.label if b else "—",
             "importedAt": b.imported_at.isoformat() if b and b.imported_at else None,
+            # `source` is echoed so the Campaign Library's invariant is
+            # checkable from the payload rather than only from this query's
+            # WHERE clause: every row in the Imported History tab must read
+            # 'historical_import'. A mixed set here means the two domains have
+            # started sharing a query, which is the regression to catch.
+            "source": l.source,
+            "source_file": l.source_file,
         })
 
     return {

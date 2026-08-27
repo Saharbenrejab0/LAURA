@@ -23,6 +23,8 @@ from backend.api.permissions import compute_permissions
 from backend.models.user import User
 from backend.models.loa import LOA
 
+from backend.services.cycle_service import assert_cycle_open_for_writes
+
 router = APIRouter(prefix="/corporate", tags=["corporate"])
 
 IA_YEAR = 2026
@@ -39,6 +41,10 @@ def _authorize(db: Session, loa_id: str, user: User) -> LOA:
             status_code=403,
             detail="You cannot action this LOA at corporate review.",
         )
+    # A closed cycle is an archive — nothing inside it changes again. All three
+    # corporate actions (approve / hold / rework) funnel through here, so one
+    # guard covers them.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="actioned")
     return loa
 
 

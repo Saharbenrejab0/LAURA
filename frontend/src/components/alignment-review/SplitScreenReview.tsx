@@ -205,7 +205,7 @@ export default function SplitScreenReview({
       : !userEmail
         ? Promise.resolve([] as LOAWithStages[])
         : import('@/lib/api')
-            .then(m => m.getLOAs({ include_historical: false }))
+            .then(m => m.getLOAs())
             .then((all: LOA[]) => all
               .filter(l => l.requestor_email?.toLowerCase() === userEmail.toLowerCase() && l.status !== 'draft')
               .map(l => ({ ...l, stages: {} as Record<AlignmentStage, LOAReviewStageRecord> } as unknown as LOAWithStages)))

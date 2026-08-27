@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createLOA, updateLOA, submitLOA, getLOA, getAISuggestion, validateDescription } from '@/lib/api'
 import type { ActivityType, AISuggestion } from '@/types/loa'
@@ -24,6 +24,9 @@ import LoaLineRows, {
 import { createPortal } from 'react-dom'
 import { useAutoSave, clearDraft, scrollToFirstError, useLeaveConfirmation } from '@/components/useFormGuard'
 import { slidePageCount, rowTotal, type SlideRow } from '@/lib/slideRows'
+import {
+  takeCarriedContext, WARNING_FIELD_TO_KEY, type CarriedContext,
+} from '@/lib/campaign-library'
 import { useMyRole } from '@/hooks/usePermissions'
 
 function formatEuros(n: number) {
@@ -159,15 +162,30 @@ function ComboInput({ value, onChange, suggestions, placeholder, disabled }: {
   )
 }
 
-function Field({ label, required, hint, children, error, fieldKey }: {
+function Field({ label, required, hint, children, error, fieldKey, carried }: {
   label: string; required?: boolean; hint?: string; children: React.ReactNode; error?: string; fieldKey?: string
+  /**
+   * What "Use as starting point" did to this field, if anything.
+   *
+   * A cleared controlled value has to say WHY it is empty and WHAT was there
+   * before, or the marketer just sees a blank required field on a form they did
+   * not fill in. The text comes from the duplicate endpoint's own warnings, so
+   * it names the historical value: "Cluster 'South Europe' not recognized."
+   */
+  carried?: { severity: string; message: string }
 }) {
+  const cleared = carried?.severity === 'invalid_cleared'
   return (
     <div data-field={fieldKey}>
       <label className="label">{label}{required && <span className="ml-0.5" style={{ color: 'var(--red)' }}>*</span>}</label>
       {children}
       {error && <p className="text-xs mt-1" style={{ color: 'var(--red-text)' }}>{error}</p>}
-      {!error && hint && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{hint}</p>}
+      {!error && carried && (
+        <p className="text-xs mt-1" style={{ color: cleared ? 'var(--amber-text)' : 'var(--blue-text)' }}>
+          {cleared ? '⚠ ' : '↺ '}{carried.message}
+        </p>
+      )}
+      {!error && !carried && hint && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{hint}</p>}
     </div>
   )
 }
@@ -219,6 +237,34 @@ export default function NewLOAPage() {
   const searchParams = useSearchParams()
   const editId = searchParams.get('edit')
   const isEditMode = !!editId
+
+  // ── Arrived from the Campaign Library ─────────────────────────────────────
+  //
+  // `from=library` means this draft was just seeded by "Use as starting point".
+  // The duplicate endpoint's per-field warnings were stashed in sessionStorage
+  // by the library (different page, so the form never saw the response) and are
+  // read exactly once here — a later manual edit of the same draft must not be
+  // re-annotated as if it were fresh.
+  const fromLibrary = searchParams.get('from') === 'library'
+  const [carried, setCarried] = useState<CarriedContext | null>(null)
+  useEffect(() => {
+    if (!fromLibrary || !editId) return
+    setCarried(takeCarriedContext(editId))
+  }, [fromLibrary, editId])
+
+  /** Warning for one form field, keyed by the form's own fieldKey. */
+  const carriedByKey = useMemo(() => {
+    const map: Record<string, { severity: string; message: string }> = {}
+    for (const w of carried?.warnings ?? []) {
+      const key = WARNING_FIELD_TO_KEY[w.field]
+      // `empty_required` is not a carry-over problem — the field is simply
+      // blank, and the normal required-field validation already says so.
+      if (key && w.severity !== 'empty_required') {
+        map[key] = { severity: w.severity, message: w.message }
+      }
+    }
+    return map
+  }, [carried])
 
   // Multi-row shape. Comes from the type selector as ?type=, and from the loaded
   // LOA in edit mode. 'standard' keeps every existing behaviour untouched.
@@ -715,6 +761,38 @@ export default function NewLOAPage() {
             ))}
           </nav>
         <div className="space-y-4">
+          {/* ── Seeded from the Campaign Library ──────────────────────────────
+              A cleared field with no explanation reads as a broken form, so say
+              what came from where. Per-field detail is on the fields themselves;
+              this is the summary and the "what was NOT carried" note. */}
+          {carried && (
+            <div style={{ padding: '12px 16px', borderRadius: 10, background: 'var(--blue-bg)', border: '1px solid var(--blue-border)', fontSize: 12.5, lineHeight: 1.6 }}>
+              <p style={{ margin: 0, fontWeight: 600, color: 'var(--blue-text)' }}>
+                ↺ Started from {carried.sourceKind === 'completed_cycle' ? 'a completed LAURA cycle' : 'imported history'}: “{carried.sourceTitle}”
+              </p>
+              <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)' }}>
+                Text, budget and classification were copied and are fully editable.{' '}
+                <strong style={{ color: 'var(--text-primary)' }}>Dates were not carried</strong> — enter the new campaign&rsquo;s dates in section 6.
+                {' '}Nothing from the original&rsquo;s approval history came with it: this is a fresh draft.
+              </p>
+              {(() => {
+                const cleared = carried.warnings.filter(w => w.severity === 'invalid_cleared')
+                const fixed   = carried.warnings.filter(w => w.severity === 'auto_fixed')
+                if (cleared.length === 0 && fixed.length === 0) return null
+                return (
+                  <ul style={{ margin: '8px 0 0', paddingLeft: 18, color: 'var(--text-secondary)' }}>
+                    {cleared.map((w, i) => (
+                      <li key={`c${i}`} style={{ color: 'var(--amber-text)' }}>{w.message}</li>
+                    ))}
+                    {fixed.map((w, i) => (
+                      <li key={`f${i}`}>{w.message}</li>
+                    ))}
+                  </ul>
+                )
+              })()}
+            </div>
+          )}
+
           {/* Laura preview — where this LOA lands in the deck (design 2d "will appear as" hint) */}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 14px', borderRadius: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
             <span style={{ color: 'var(--accent)', flex: 'none' }}>✦</span>
@@ -722,13 +800,13 @@ export default function NewLOAPage() {
           </div>
           <SectionCard number={1} title="Location">
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Cluster" required error={errors.cluster} fieldKey="cluster">
+              <Field label="Cluster" required error={errors.cluster} fieldKey="cluster" carried={carriedByKey.cluster}>
                 <select className="input" value={cluster} onChange={e => { setCluster(e.target.value); markDirty() }}>
                   <option value="">Select cluster…</option>
                   {(refClusters.length > 0 ? refClusters.map(c => c.name) : Array.from(CLUSTERS)).map(name => <option key={name} value={name}>{name}</option>)}
                 </select>
               </Field>
-              <Field label="Country" required hint="Filters from cluster" error={errors.country} fieldKey="country">
+              <Field label="Country" required hint="Filters from cluster" error={errors.country} fieldKey="country" carried={carriedByKey.country}>
                 <select className="input" value={country} onChange={e => { setCountry(e.target.value); markDirty() }} disabled={!cluster}>
                   <option value="">Select country…</option>
                   {(refCountries.length > 0 ? refCountries.map(c => c.name) : (CLUSTER_COUNTRIES[cluster] || [])).map(name => <option key={name} value={name}>{name}</option>)}
@@ -747,18 +825,18 @@ export default function NewLOAPage() {
             <div className="grid grid-cols-2 gap-4">
               {/* Multi-activity: the type is per-row, not shared. */}
               {!isMultiAct && (
-                <Field label="Activity Type" required error={errors.activityType} fieldKey="activityType">
+                <Field label="Activity Type" required error={errors.activityType} fieldKey="activityType" carried={carriedByKey.activityType}>
                   <select className="input" value={activityType} onChange={e => { setActivityType(e.target.value as ActivityType); markDirty() }}><option value="">Select type…</option>{ACTIVITY_TYPES.map(t => <option key={t} value={t}>{activityLabel(t)}</option>)}</select>
                 </Field>
               )}
-              <Field label="Channel of Trade (COT)" required error={errors.cot} fieldKey="cot">
+              <Field label="Channel of Trade (COT)" required error={errors.cot} fieldKey="cot" carried={carriedByKey.cot}>
                 <select className="input" value={cot} onChange={e => { setCot(e.target.value); markDirty() }}>{COT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select>
               </Field>
               {isEvent && (<>
-                <Field label="Event Type" required error={errors.eventType} fieldKey="eventType">
+                <Field label="Event Type" required error={errors.eventType} fieldKey="eventType" carried={carriedByKey.eventType}>
                   <select className="input" value={eventType} onChange={e => { setEventType(e.target.value); markDirty() }}><option value="">Select event type…</option>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select>
                 </Field>
-                <Field label="Event Purpose" required error={errors.eventPurpose} fieldKey="eventPurpose">
+                <Field label="Event Purpose" required error={errors.eventPurpose} fieldKey="eventPurpose" carried={carriedByKey.eventPurpose}>
                   <select className="input" value={eventPurpose} onChange={e => { setEventPurpose(e.target.value); markDirty() }}><option value="">Select purpose…</option>{EVENT_PURPOSES.map(p => <option key={p} value={p}>{p}</option>)}</select>
                 </Field>
                 <Field label="SAP Event Code" hint="Created in SAP first, then entered here" error={errors.sapEventCode} fieldKey="sapEventCode">
@@ -782,7 +860,7 @@ export default function NewLOAPage() {
               </Field>
               {/* Multi-brand: the brand is per-row, not shared. */}
               {!isMultiBrand && (
-                <Field label="Brand" required hint="Type name or SAP code" error={errors.brand} fieldKey="brand">
+                <Field label="Brand" required hint="Type name or SAP code" error={errors.brand} fieldKey="brand" carried={carriedByKey.brand}>
                   <SearchableSelect value={brand} onChange={v => { setBrand(v); markDirty() }} options={availableBrands} placeholder="Search brand…" />
                 </Field>
               )}
@@ -822,6 +900,13 @@ export default function NewLOAPage() {
           </SectionCard>
 
           <SectionCard number={5} title="Budget">
+            {/* Carried, not committed. Last year's spend is a starting number,
+                not this year's ask, and it must not look approved. */}
+            {carried && fyTotal > 0 && (
+              <p className="text-xs mb-3" style={{ color: 'var(--blue-text)' }}>
+                ↺ {formatEuros(fyTotal)} carried from “{carried.sourceTitle}” — a suggested figure. Review each quarter before submitting.
+              </p>
+            )}
             {errors.q1 && <p className="text-xs mb-3" style={{ color: 'var(--red-text)' }}>{errors.q1}</p>}
             {isMulti ? (
               <>
@@ -943,7 +1028,7 @@ export default function NewLOAPage() {
               </div>
             )}
             <div className="space-y-4">
-              <Field label="Description (the WHY)" required hint='One sentence: the business objective.' error={errors.description} fieldKey="description">
+              <Field label="Description (the WHY)" required hint='One sentence: the business objective.' error={errors.description} fieldKey="description" carried={carriedByKey.description}>
                 <div className="flex gap-2 items-start">
                   <textarea className="input resize-none flex-1" rows={3} value={description} onChange={e => { setDescription(e.target.value); setDescFeedback(null); markDirty() }} placeholder="e.g. Drive Varilux penetration among independent ECPs in France via targeted seasonal visibility" />
                   <VoiceInput onResult={t => { setDescription(prev => prev ? prev + ' ' + t : t); markDirty() }} />
@@ -959,11 +1044,11 @@ export default function NewLOAPage() {
               </Field>
               {/* Multi-activity: the HOW is per-row, entered as each row's Detail. */}
               {!isMultiAct && (
-                <Field label="Detail / Tools (the HOW)" required hint="What exactly will the money be spent on" error={errors.detail} fieldKey="detail">
+                <Field label="Detail / Tools (the HOW)" required hint="What exactly will the money be spent on" error={errors.detail} fieldKey="detail" carried={carriedByKey.detail}>
                   <div className="flex gap-2 items-start"><textarea className="input resize-none flex-1" rows={3} value={detail} onChange={e => { setDetail(e.target.value); markDirty() }} placeholder="e.g. Seasonal POS materials · ECP staff training · Digital campaign support" /><VoiceInput onResult={t => { setDetail(prev => prev ? prev + ' ' + t : t); markDirty() }} /></div>
                 </Field>
               )}
-              <Field label="KPI" required={activityType !== 'OTHER'} error={errors.kpi} fieldKey="kpi">
+              <Field label="KPI" required={activityType !== 'OTHER'} error={errors.kpi} fieldKey="kpi" carried={carriedByKey.kpi}>
                 <div className="flex gap-2 items-center"><input className="input flex-1" value={kpi} onChange={e => { setKpi(e.target.value); markDirty() }} placeholder="+12% sell-out uplift · 500 doors activated · 85% sell-through" /><VoiceInput onResult={t => { setKpi(prev => prev ? prev + ' ' + t : t); markDirty() }} /></div>
               </Field>
               <Field label="Cost Drill Down" required hint="Investment breakdown for PPT slide" error={errors.costDrillDown} fieldKey="costDrillDown">

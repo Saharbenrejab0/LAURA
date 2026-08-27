@@ -30,6 +30,8 @@ from backend.models.loa import LOA
 from backend.models.permission import Permission
 from backend.models.role_permission import RolePermission
 
+from backend.services.cycle_service import assert_cycle_open_for_writes
+
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
@@ -476,6 +478,17 @@ async def force_loa_status(
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
+
+    # A closed cycle is an archive — nothing inside it changes again.
+    #
+    # TEMPORARILY ABSOLUTE: force-status is exactly the tool you would want for
+    # a closed cycle, but the override reason is currently discarded (this
+    # endpoint echoes `body.reason` in its response and persists nothing, and
+    # there is no audit table). Until an audit trail exists, an unrecorded
+    # rewrite of archived data is worse than no rewrite — so it is blocked, and
+    # reopening the cycle is the documented route. Relax this once overrides are
+    # recorded.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="force-statused")
 
     if body.new_status not in VALID_STATUSES:
         raise HTTPException(

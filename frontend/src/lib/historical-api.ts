@@ -35,6 +35,8 @@ export type HistoricalRow = LOA & {
   importBatchId: string | null
   importBatchLabel: string
   importedAt: string | null
+  /** The spreadsheet this row came out of. Admin-facing provenance. */
+  source_file?: string | null
 }
 
 export interface HistoricalDeckResponse {

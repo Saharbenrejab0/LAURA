@@ -36,6 +36,7 @@ from backend.models.user import User
 from backend.reference_data import (
     ACTIVITY_TYPES, ADV_SELLING, CAPEX_OPEX, CATEGORIES,
     CLUSTERS, COT_OPTIONS, EVENT_PURPOSES, EVENT_TYPES,
+    activity_label, normalise_activity_type,
 )
 
 router = APIRouter()
@@ -46,23 +47,37 @@ router = APIRouter()
 # for normalizing the 1332 historical LOAs)
 # ---------------------------------------------------------------------------
 
-ACTIVITY_TYPE_MAP: dict[str, str] = {
-    "TM_SEASONAL":     "Seasonal Visibility",
-    "TM_PERMANENT":    "Permanent Visibility",
-    "EVENTS":          "Events",
-    "IN_STORE":        "In Store / Consumer Activation",
-    "COOP_ADV":        "Coop Advertising",
-    "OTHER_ADV":       "Other ADV Expenses",
-    "TRADE_INCENTIVE": "Trade Incentive",
-    "TRAINING":        "Training",
-    "SPONSORSHIP":     "Sponsorship",
-    "CATALOGUES":      "Catalogues & Brochures",
-    "MEDICAL":         "Medical Affairs",
-    "PR":              "PR",
-    "E_TOOLS":         "e-Tools",
-    "OTHERS_NON_ADV":  "Others (non ADV)",
-    "Tailor Made Seasonal":  "Seasonal Visibility",
-    "Tailor Made Permanent": "Permanent Visibility",
+# ── Activity type ────────────────────────────────────────────────────────────
+#
+# This used to be a dict mapping CODE -> LABEL ("TM_SEASONAL" ->
+# "Seasonal Visibility"), which is backwards: `activity_type` stores the code.
+# Every duplicate would have rewritten a perfectly valid code into a display
+# label that `POST /loa` rejects. It never fired in production (no row has
+# `duplicated_from_id`), so no data was corrupted — but the first real use of
+# "Use as starting point" would have been.
+#
+# `normalise_activity_type()` in reference_data already resolves codes and the
+# 14 Title Case labels. Verified against every distinct `activity_type` value in
+# the database: it handles 27 of 35. This map covers only the 8 it cannot, and
+# every value on the right is a CANONICAL CODE.
+LEGACY_ACTIVITY_CODES: dict[str, str] = {
+    # Old `models.loa.ActivityType` enum member names, from before codes were
+    # the stored form. Not present in current data; kept so an old payload or a
+    # re-import of an old export still resolves.
+    "coop_adv":         "COOP_ADVERTISING",
+    "other_adv":        "OTHER_ADVERTISING",
+    "catalogues":       "CATALOGUES_BROCHURES",
+    "medical":          "MEDICAL_AFFAIRS",
+    "others_non_adv":   "OTHER",
+    # The client's original spreadsheet wording for the two Tailor Made lines.
+    "tailor made seasonal":   "TM_SEASONAL",
+    "tailor made permanent":  "TM_PERMANENT",
+    "tailored made seasonal":  "TM_SEASONAL",
+    "tailored made permanent": "TM_PERMANENT",
+    # A typo that reached the database on 3 historical rows. Left in the data
+    # deliberately (the audit did not rewrite history); resolved on the way out.
+    "in-store/ consummer activation": "IN_STORE",
+    "in-store/ consumer activation":  "IN_STORE",
 }
 
 COT_MAP: dict[str, str] = {
@@ -101,6 +116,29 @@ _REQUIRED_FOR_SUBMIT: dict[str, str] = {
 }
 
 
+
+# Columns that are NOT NULL in `loas`. Clearing an unrecognised value on one of
+# these must write "" (or [] for the array), not None — the insert would fail
+# the not-null constraint and the whole duplicate would 500.
+#
+# This is exactly what happened the first time the endpoint was ever called:
+# 502 of the 2,657 historical rows carry a cluster the current list rejects
+# ("META", "EMEA", "South Europe"), so `_sanitize_field` correctly returned None
+# for them and Postgres refused the insert. An empty string is what the form
+# already renders as "nothing selected", so the marketer sees an empty required
+# dropdown with the reason underneath — which is the intent.
+_NOT_NULL_TEXT = frozenset({"cluster", "country", "cot"})
+_NOT_NULL_LIST = frozenset({"category"})
+
+
+def _cleared_value(name: str):
+    """What "no usable value" looks like for this column."""
+    if name in _NOT_NULL_LIST:
+        return []
+    if name in _NOT_NULL_TEXT:
+        return ""
+    return None
+
 # ---------------------------------------------------------------------------
 # Pure sanitization helpers (no DB, no FastAPI - unit-testable in isolation)
 # ---------------------------------------------------------------------------
@@ -111,31 +149,31 @@ def _sanitize_field(name: str, value: Any, warnings: list[dict]) -> Any:
         return value
 
     if name == "activity_type":
-        mapped = ACTIVITY_TYPE_MAP.get(value)
-        if mapped:
-            warnings.append({
-                "field": name, "severity": "auto_fixed",
-                "original": value, "mapped_to": mapped,
-                "message": f"Activity type normalized: '{value}' -> '{mapped}'",
-            })
-            return mapped
+        # Already a canonical code (the common case, and the only case for a
+        # completed-cycle LOA) — pass it straight through, unflagged.
         if value in ACTIVITY_TYPES:
             return value
-        for canonical in ACTIVITY_TYPES:
-            if value.lower().strip() == canonical.lower().strip():
-                if value != canonical:
-                    warnings.append({
-                        "field": name, "severity": "auto_fixed",
-                        "original": value, "mapped_to": canonical,
-                        "message": f"Activity type case-normalized: '{value}' -> '{canonical}'",
-                    })
-                return canonical
+
+        # Otherwise resolve to a code: reference_data's aliases first, then the
+        # legacy spellings it does not know about.
+        resolved = normalise_activity_type(value)
+        if resolved not in ACTIVITY_TYPES:
+            resolved = LEGACY_ACTIVITY_CODES.get(str(value).strip().lower())
+
+        if resolved in ACTIVITY_TYPES:
+            warnings.append({
+                "field": name, "severity": "auto_fixed",
+                "original": value, "mapped_to": resolved,
+                "message": f"Activity type normalized: '{value}' -> '{activity_label(resolved)}'",
+            })
+            return resolved
+
         warnings.append({
             "field": name, "severity": "invalid_cleared",
             "original": value,
-            "message": f"Activity type '{value}' not recognized. Please pick a valid value.",
+            "message": f"Activity type '{value}' no longer exists. Please pick a current value.",
         })
-        return None
+        return _cleared_value(name)
 
     if name == "cluster":
         if value in CLUSTERS:
@@ -145,7 +183,7 @@ def _sanitize_field(name: str, value: Any, warnings: list[dict]) -> Any:
             "original": value,
             "message": f"Cluster '{value}' not recognized. Field cleared.",
         })
-        return None
+        return _cleared_value(name)
 
     if name == "cot":
         mapped = COT_MAP.get(value)
@@ -163,7 +201,7 @@ def _sanitize_field(name: str, value: Any, warnings: list[dict]) -> Any:
             "original": value,
             "message": f"COT '{value}' not recognized. Field cleared.",
         })
-        return None
+        return _cleared_value(name)
 
     if name == "category" and isinstance(value, list):
         kept = [c for c in value if c in CATEGORIES]
@@ -179,12 +217,12 @@ def _sanitize_field(name: str, value: Any, warnings: list[dict]) -> Any:
     if name == "event_type" and value not in EVENT_TYPES:
         warnings.append({"field": name, "severity": "invalid_cleared",
                          "original": value, "message": f"Event type '{value}' not recognized."})
-        return None
+        return _cleared_value(name)
 
     if name == "event_purpose" and value not in EVENT_PURPOSES:
         warnings.append({"field": name, "severity": "invalid_cleared",
                          "original": value, "message": f"Event purpose '{value}' not recognized."})
-        return None
+        return _cleared_value(name)
 
     if name == "capex_opex" and value not in CAPEX_OPEX:
         return "OpEx"   # safe default
@@ -271,7 +309,10 @@ def duplicate_loa(
         requestor_email = user.email,    # <-- THE fix. The draft belongs to the caller.
         cycle_id        = cycle.id,      # the open cycle, not the source's
         source          = SOURCE_LAURA_CREATED,
-        is_demo         = True,
+        # A duplicate is a real submission, not a fixture. This was hardcoded
+        # True, which flagged every "Use as starting point" result as demo data —
+        # and demo rows are filtered out of reporting and the tracker.
+        is_demo         = False,
         is_locked       = False,
         created_at      = now,
         updated_at      = now,

@@ -24,6 +24,7 @@ from backend.models.database import get_db
 from backend.api.ordering import thread_order
 from backend.models.loa import LOA
 from backend.models.user import User
+from backend.services.cycle_service import assert_cycle_open_for_writes
 from backend.models.comment import (
     Comment,
     ANCHOR_LOA, ANCHOR_FIELD,
@@ -135,6 +136,17 @@ def _enrich(comment: Comment, user: User, loa: LOA) -> dict:
 # POST /loa/{loa_id}/comments — create
 # ═══════════════════════════════════════════════════════════════════════
 
+
+def _assert_comment_cycle_open(db: Session, comment: Comment, action: str = "modified") -> None:
+    """Refuse a comment mutation when its LOA sits in a closed cycle.
+
+    `edit_comment` and `delete_comment` are keyed by comment id and never load
+    the LOA, so the cycle has to be resolved here.
+    """
+    loa = db.query(LOA).filter(LOA.id == comment.loa_id).first()
+    if loa is not None:
+        assert_cycle_open_for_writes(db, loa.cycle_id, action=action)
+
 @router.post("/loa/{loa_id}/comments")
 def create_comment(
     loa_id: str,
@@ -145,6 +157,8 @@ def create_comment(
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="commented on")
 
     # Lock guard
     role = user.role_obj
@@ -369,6 +383,9 @@ def edit_comment(
 
     if comment.author_email != user.email:
         raise HTTPException(status_code=403, detail="Only the author can edit a comment")
+    # A closed cycle is an archive — nothing inside it changes again.
+    _assert_comment_cycle_open(db, comment, action="edited")
+
 
     if comment.created_at and (datetime.utcnow() - comment.created_at) > EDIT_WINDOW:
         raise HTTPException(
@@ -402,6 +419,8 @@ def resolve_comment(
     loa = db.query(LOA).filter(LOA.id == comment.loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="modified")
 
     if not can_resolve_comment(user, comment, loa):
         raise HTTPException(
@@ -437,6 +456,8 @@ def reopen_comment(
     loa = db.query(LOA).filter(LOA.id == comment.loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="modified")
 
     if not can_reopen_comment(user, comment, loa):
         raise HTTPException(
@@ -468,6 +489,9 @@ def delete_comment(
     comment = db.query(Comment).filter(Comment.id == comment_id).first()
     if not comment:
         raise HTTPException(status_code=404, detail="Comment not found")
+
+    # A closed cycle is an archive — nothing inside it changes again.
+    _assert_comment_cycle_open(db, comment, action="deleted")
 
     is_author = comment.author_email == user.email
     is_super = user.role_obj and user.role_obj.code == "super_admin"

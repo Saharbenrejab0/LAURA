@@ -5,7 +5,7 @@
  * ------------------------------------------------------
  * VISUAL layer rebuilt on styles/redesign.css + components/ui/atoms.
  * ALL business logic preserved from the previous version:
- *   - getLOAs({ include_historical }) fetch
+ *   - getLOAs() fetch
  *   - visited LOAs via sessionStorage 'laura.visitedLOAs'
  *   - getMyComments + batched per-LOA comments/summary fetch
  *   - filters: status / cluster / quarter / owner / search
@@ -373,11 +373,14 @@ export default function TrackerPage() {
   useEffect(() => {
     if (roleLoading || skipsTrackerFetch) return;
     setLoading(true);
-    getLOAs({ include_historical: showHistorical })
+    // Every LOA in scope comes back; `showHistorical` is applied client-side in
+    // `filtered` (on `source`, not `is_demo`). The server parameter that used to
+    // be passed here was accepted and ignored, so it never filtered anything.
+    getLOAs()
       .then(setLOAs)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [showHistorical, roleLoading, skipsTrackerFetch]);
+  }, [roleLoading, skipsTrackerFetch]);
 
   // Reset pagination on filter change
   useEffect(() => { setPage(1); }, [
@@ -453,7 +456,15 @@ export default function TrackerPage() {
     } else { // current — real, active LOAs; historical live in Past Campaigns / Past cycles
       if (l.is_emergency) return false;              // emergency has its own tab
       if (l.status === 'archived') return false;
-      if (!showHistorical && (l as any).is_demo === false) return false;  // hide the ETL import
+      // Imported history is gated by the toggle. Real LAURA work never is.
+      //
+      // This tested `is_demo === false`, which is not what "imported" means:
+      // is_demo is false on the 2,657 historical rows AND on every real
+      // laura_created LOA, and true on the demo fixtures. So the toggle hid all
+      // 21 real submissions and kept the fixtures — the exact inversion the
+      // backend already fixed and removed (see loa.py, "Removed is_demo
+      // filter"). `source` is the classifier; is_demo only marks fixtures.
+      if (!showHistorical && l.source === 'historical_import') return false;
     }
 
     if (showMyCommentsOnly && !myCommentsByLoa.has(l.id)) return false;

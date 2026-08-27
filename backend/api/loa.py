@@ -613,14 +613,16 @@ def _with_display_title(loa, user=None, db=None):
 async def get_loas(
     status: Optional[str] = None,
     cluster: Optional[str] = None,
-    include_historical: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     query = db.query(LOA)
 
-    # Removed is_demo filter: tracker shows all LOAs regardless of source
-    # (previously hid real user-created LOAs by mistake)
+    # No source/is_demo filter here on purpose: the tracker returns every LOA in
+    # the caller's scope and decides what to show client-side. An earlier
+    # is_demo filter here hid real user-created LOAs, and the `include_historical`
+    # parameter that used to drive it was left accepted-but-ignored for a while —
+    # both are gone. `loas.source` is the classifier, wherever the choice is made.
 
     role = user.role_obj
     if role is None:
@@ -869,6 +871,9 @@ async def submit_loa(
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
 
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="submitted")
+
     if loa.requestor_email != user.email:
         raise HTTPException(
             status_code=403,
@@ -995,6 +1000,9 @@ async def validate_workflow_step(
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
+
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="advanced")
 
     if loa.is_locked:
         raise HTTPException(status_code=423, detail="LOA is locked by a super-admin.")
@@ -1216,6 +1224,9 @@ async def reject_loa(
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
 
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="rejected")
+
     if loa.is_locked:
         raise HTTPException(status_code=423, detail="LOA is locked by a super-admin.")
 
@@ -1316,6 +1327,9 @@ async def add_comment(
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
 
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="commented on")
+
     if not body.comment or not body.comment.strip():
         raise HTTPException(status_code=422, detail="Comment cannot be empty.")
 
@@ -1373,6 +1387,9 @@ async def lock_loa(
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
 
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="locked")
+
     role = user.role_obj
     if not role or not role.can_override_lock:
         raise HTTPException(
@@ -1405,6 +1422,9 @@ async def unlock_loa(
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
+
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="unlocked")
 
     role = user.role_obj
     if not role or not role.can_override_lock:
@@ -1451,6 +1471,9 @@ async def delete_loa(
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
+
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="deleted")
 
     role = user.role_obj
     if not role:
@@ -1544,6 +1567,9 @@ async def upload_photo(
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
 
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="modified")
+
     existing = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(loa_id)]
     if len(existing) >= 2:
         raise HTTPException(
@@ -1578,7 +1604,15 @@ async def get_photo(loa_id: str, index: int):
 
 
 @router.delete("/{loa_id}/photos/{index}")
-async def delete_photo(loa_id: str, index: int):
+async def delete_photo(loa_id: str, index: int, db: Session = Depends(get_db)):
+    # NOTE: this endpoint has no auth dependency — it deletes a file off disk
+    # for any caller who knows the LOA id. Left as-is (changing it is a separate
+    # decision), but it now at least refuses to strip photos off an archived
+    # cycle. The `db` session exists only for that check.
+    loa = db.query(LOA).filter(LOA.id == loa_id).first()
+    if loa is not None:
+        assert_cycle_open_for_writes(db, loa.cycle_id, action="modified")
+
     for f in os.listdir(UPLOAD_DIR):
         if f.startswith(f"{loa_id}_photo{index}"):
             os.remove(os.path.join(UPLOAD_DIR, f))

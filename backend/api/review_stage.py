@@ -25,6 +25,8 @@ from backend.models.user import User
 from backend.models.review import LOAReviewStage, ALIGNMENT_STAGES
 from backend.api.auth import get_current_user
 
+from backend.services.cycle_service import assert_cycle_open_for_writes
+
 router = APIRouter()
 
 # ── Role → stage mapping ──────────────────────────────────────────────────────
@@ -207,6 +209,9 @@ def approve_stage(
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
+
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="approved")
 
     stage = body.stage
 

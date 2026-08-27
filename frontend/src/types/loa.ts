@@ -118,6 +118,19 @@ export interface LOA {
   is_emergency?: boolean
   ia_code?: string | null   // assigned on corporate approval (2026-XXXX)
 
+  /**
+   * Where the row came from. Set once at insert, never editable.
+   *
+   * This is THE classifier that separates LAURA's own work from imported
+   * history — `is_demo` does not mean "imported" and must never be used for it.
+   * The DB constraint `ck_loa_live_has_cycle` ties it to `cycle_id`:
+   * laura_created always has a cycle, everything else never does.
+   */
+  source?: 'laura_created' | 'historical_import' | 'demo_seed'
+  /** Set by "Use as starting point" — the LOA this draft was seeded from. */
+  duplicated_from_id?: string | null
+  import_batch_id?: string | null
+
   // Meta
   created_at: string
   updated_at: string

@@ -56,6 +56,8 @@ def _can_upload(user: User) -> bool:
     role = (user.role or "").lower()
     return "cmo" not in role and "cfo" not in role
 
+from backend.services.cycle_service import assert_cycle_open_for_writes
+
 router = APIRouter()
 
 
@@ -397,6 +399,8 @@ def upsert_verdict(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="given a verdict")
     """Create or update a verdict for one LOA. Blocked after submission."""
     _get_writable_cycle(cycle_id, db)
     if _is_submitted(cycle_id, str(current_user.id), db):
@@ -440,6 +444,8 @@ def bulk_verdict(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="given a verdict")
     """Upsert one verdict per LOA. Used by CFO summary-cell bulk rejection."""
     _get_writable_cycle(cycle_id, db)
     if _is_submitted(cycle_id, str(current_user.id), db):
@@ -512,6 +518,8 @@ def add_comment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="commented on")
     """Add a comment to a slide. Allowed even after submission (for meeting notes)."""
     _get_writable_cycle(cycle_id, db)
     comment = ReviewComment(
@@ -535,6 +543,8 @@ def submit_review(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="submitted")
     """Finalize reviewer's pass. Idempotent — safe to call twice."""
     _get_writable_cycle(cycle_id, db)
 
@@ -656,6 +666,8 @@ async def upload_loa_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="modified")
     """Upload an execution photo for one LOA slide. Max 2 per LOA."""
     if not _can_upload(current_user):
         raise HTTPException(status_code=403, detail="Review-only role cannot upload photos")
@@ -697,6 +709,8 @@ def delete_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="modified")
     """Delete a photo by id."""
     if not _can_upload(current_user):
         raise HTTPException(status_code=403, detail="Review-only role cannot delete photos")
@@ -728,6 +742,8 @@ async def upload_title_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="modified")
     """Upload / replace the title slide background photo for this cycle."""
     if not _can_upload(current_user):
         raise HTTPException(status_code=403, detail="Review-only role cannot upload photos")
@@ -765,6 +781,8 @@ async def upload_overview_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="modified")
     """Upload / replace a category overview photo (slots 1-4)."""
     if not _can_upload(current_user):
         raise HTTPException(status_code=403, detail="Review-only role cannot upload photos")
@@ -861,6 +879,8 @@ def upsert_title_config(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="modified")
     """Save title slide text configuration. Restricted to uploaders."""
     if not _can_upload(current_user):
         raise HTTPException(status_code=403, detail="Review-only role cannot edit title config")
@@ -928,6 +948,8 @@ def update_photo_crop(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="modified")
     """Persist the pan/zoom crop for a single photo."""
     if not _can_upload(current_user):
         raise HTTPException(status_code=403, detail="Review-only role cannot edit photos")
@@ -956,6 +978,8 @@ async def upload_lens_photo(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, cycle_id, action="modified")
     """Upload an image for a lens slide column (overview or investment layout)."""
     if not _can_upload(current_user):
         raise HTTPException(status_code=403, detail="Review-only role cannot upload photos")

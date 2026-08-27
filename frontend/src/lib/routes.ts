@@ -25,6 +25,12 @@ export const ROUTES = {
   loas:          '/loas',
   loaNew:        '/loa/new',
   loaNewType:    '/loa/new/type',
+  /**
+   * Campaign Library — the single entry that replaced `/historical` and
+   * `/past-campaigns`. Both old paths still resolve (they redirect here), so an
+   * old bookmark or a link in an email keeps working.
+   */
+  campaigns:     '/campaigns',
   historical:    '/historical',
   pastCampaigns: '/past-campaigns',
   admin:         '/admin',
@@ -123,8 +129,12 @@ export function destinationsFor(iface: Interface): Destination[] {
     { key: 'cycles',     label: 'Review cycles',        href: ROUTES.cycles,        icon: '▦', allowed: true },
     { key: 'loas',       label: 'LOAs',                 href: ROUTES.loas,          icon: '▤', allowed: canSeeLOAList(iface) },
     { key: 'new',        label: 'New LOA',              href: ROUTES.loaNew,        icon: '＋', allowed: canCreateLOAs(iface) },
-    { key: 'historical', label: 'Historical campaigns', href: ROUTES.historical,    icon: '🗄', allowed: canSeeHistorical(iface) },
-    { key: 'past',       label: 'Past campaigns',       href: ROUTES.pastCampaigns, icon: '📋', allowed: canSeePastCampaigns(iface) },
+    // One entry, two tabs inside. It replaced two that both misled: "Past
+    // campaigns" was a template picker whose contents were 99.4% imported
+    // history, and "Historical campaigns" sat beside it showing the same rows.
+    // Visible to anyone who can create an LOA — it exists to seed one — or to
+    // anyone allowed to read the imported archive.
+    { key: 'campaigns',  label: 'Campaign Library',     href: ROUTES.campaigns,     icon: '◷', allowed: canSeePastCampaigns(iface) || canSeeHistorical(iface) },
     { key: 'admin',      label: 'Admin panel',          href: ROUTES.admin,         icon: '⚙', allowed: canSeeAdmin(iface) },
   ]
   return all.filter(d => d.allowed).map(({ allowed, ...d }) => d)
@@ -141,6 +151,9 @@ export function canAccess(iface: Interface, pathname: string): boolean {
   if (t) return canUseTemplate(iface, t)
 
   if (pathname.startsWith(ROUTES.admin))         return canSeeAdmin(iface)
+  // The library holds both stores, so either permission opens it. The two old
+  // paths keep their original predicate — they only redirect.
+  if (pathname.startsWith(ROUTES.campaigns))     return canSeePastCampaigns(iface) || canSeeHistorical(iface)
   if (pathname.startsWith(ROUTES.pastCampaigns)) return canSeePastCampaigns(iface)
   if (pathname.startsWith(ROUTES.historical))    return canSeeHistorical(iface)
   if (pathname.startsWith(ROUTES.loaNew))        return canCreateLOAs(iface)
@@ -155,8 +168,9 @@ const CRUMBS: [string, string[]][] = [
   ['/loa/new',       ['LOAs', 'New LOA']],
   ['/loa/',          ['LOAs', 'LOA']],
   ['/loas',          ['LOAs']],
-  ['/historical',    ['Historical campaigns']],
-  ['/past-campaigns',['Past campaigns']],
+  ['/campaigns',     ['Campaign Library']],
+  ['/historical',    ['Campaign Library', 'Imported history']],
+  ['/past-campaigns',['Campaign Library']],
   ['/admin',         ['Admin']],
   ['/welcome',       ['Welcome']],
 ]

@@ -1010,3 +1010,199 @@
 .la-ssr-excel-cycle > * { height: 100%; }
 .la-ssr-slide-cycle { min-height: 58vh; max-height: none; }
 .la-ssr-slide-cycle > * { height: 100%; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Campaign Library — one surface over two stores.
+
+   Merges the old "Past Campaigns" and "Historical Campaigns" pages. The two
+   tabs are styled to look deliberately different at a glance (gold tick vs
+   archive box, workflow badges vs a provenance line) because the whole point of
+   merging them was to stop the two kinds of record being indistinguishable.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.la-lib { padding: 26px 28px 40px; font-family: var(--font-sans); }
+
+.la-lib-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap;
+}
+.la-lib-over {
+  margin: 0; font-size: 10px; font-weight: 700; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--accent);
+}
+.la-lib-title {
+  margin: 6px 0 0; font-family: var(--font-display);
+  font-size: 30px; font-weight: 600; letter-spacing: -.02em; color: var(--text-primary);
+}
+.la-lib-blurb {
+  margin: 6px 0 0; max-width: 640px; line-height: 1.6;
+  font-size: 13px; color: var(--text-secondary);
+}
+.la-lib-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.la-lib-search {
+  width: min(340px, 70vw); height: 34px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-primary); font-family: var(--font-sans); font-size: 12.5px;
+}
+.la-lib-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+.la-lib-tabs {
+  display: flex; gap: 4px; margin: 22px 0 0;
+  border-bottom: 1px solid var(--border);
+}
+.la-lib-tab {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border: none; background: none; cursor: pointer;
+  font-family: var(--font-sans); font-size: 13px; font-weight: 500;
+  color: var(--text-tertiary); border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.la-lib-tab:hover { color: var(--text-primary); }
+.la-lib-tab.is-on {
+  color: var(--text-primary); font-weight: 600; border-bottom-color: var(--accent);
+}
+.la-lib-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.la-lib-count {
+  min-width: 20px; padding: 1px 6px; border-radius: 9px;
+  background: var(--gold-soft); color: var(--accent);
+  font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+
+/* ── Provenance banners — one per tab, visually distinct on purpose ────── */
+.la-lib-banner {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 18px 0 16px; padding: 11px 16px; border-radius: 10px;
+  font-size: 12.5px; border: 1px solid;
+}
+.la-lib-banner strong { font-weight: 600; }
+.la-lib-banner.is-laura    { border-color: var(--accent);     background: var(--gold-soft);  color: var(--text-primary); }
+.la-lib-banner.is-imported { border-color: var(--st-wait-fg); background: var(--st-wait-bg); color: var(--st-wait-fg); }
+.la-lib-stats {
+  margin-left: auto; display: flex; gap: 14px; font-variant-numeric: tabular-nums;
+}
+
+.la-lib-filters { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 18px; }
+.la-lib-select {
+  height: 34px; padding: 0 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-primary); font-family: var(--font-sans); font-size: 12.5px;
+}
+.la-lib-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.la-lib-msg { font-size: 13.5px; color: var(--text-secondary); padding: 24px 2px; }
+.la-lib-msg.is-inset { padding: 14px 18px; margin: 0; }
+.la-lib-dim { color: var(--text-tertiary); }
+
+.la-lib-empty {
+  padding: 44px 24px; text-align: center;
+  border: 1px dashed var(--border); border-radius: 12px;
+}
+.la-lib-empty-title {
+  margin: 0; font-size: 14.5px; font-weight: 600; color: var(--text-primary);
+}
+.la-lib-empty-sub {
+  margin: 8px auto 0; max-width: 460px; line-height: 1.6;
+  font-size: 12.5px; color: var(--text-secondary);
+}
+
+/* ── Tab 1: closed cycles, expandable ─────────────────────────────────── */
+.la-lib-cycles { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.la-lib-cycle {
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface); overflow: hidden;
+}
+.la-lib-cycle-head {
+  width: 100%; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 14px 18px; border: none; background: none; cursor: pointer;
+  text-align: left; font-family: var(--font-sans);
+}
+.la-lib-cycle-head:hover { background: var(--gold-soft); }
+.la-lib-cycle-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.la-lib-chev { color: var(--accent); font-size: 11px; width: 12px; }
+.la-lib-cycle-name {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
+}
+.la-lib-code {
+  padding: 1px 7px; border-radius: 5px; border: 1px solid var(--border);
+  font-family: var(--font-mono, monospace); font-size: 10.5px; font-weight: 500;
+  color: var(--text-secondary);
+}
+.la-lib-cycle-meta {
+  margin-left: auto; display: flex; gap: 16px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+
+/* ── Tab 2: Year to Quarter ───────────────────────────────────────────── */
+.la-lib-years { display: grid; gap: 26px; }
+.la-lib-year-head {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.la-lib-year-title {
+  margin: 0; font-family: var(--font-display); font-size: 20px;
+  font-weight: 600; color: var(--text-primary);
+}
+.la-lib-year-meta {
+  margin-left: auto; display: flex; gap: 14px;
+  font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+.la-lib-quarter { margin-top: 14px; }
+.la-lib-quarter-head {
+  display: flex; align-items: baseline; gap: 10px;
+  margin: 0 0 6px; padding: 0 2px;
+}
+.la-lib-quarter-title {
+  font-size: 11px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--accent);
+}
+.la-lib-quarter-head .la-lib-dim { margin-left: auto; font-size: 11.5px; }
+
+/* ── One campaign row, identical in both tabs ─────────────────────────── */
+.la-lib-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.la-lib-row {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 11px 18px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.la-lib-row:hover { border-color: var(--accent); }
+.la-lib-row-main { flex: 1; min-width: 220px; }
+.la-lib-row-title {
+  margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text-primary);
+}
+.la-lib-row-sub {
+  margin: 3px 0 0; font-size: 11.5px; color: var(--text-secondary);
+}
+.la-lib-row-prov {
+  margin: 3px 0 0; font-size: 10.5px; color: var(--text-tertiary); font-style: italic;
+}
+.la-lib-row-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.la-lib-badge {
+  padding: 2px 9px; border-radius: 999px; border: 1px solid;
+  font-size: 10.5px; font-weight: 600; white-space: nowrap;
+}
+.la-lib-ia {
+  padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border);
+  font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--text-secondary);
+}
+.la-lib-row-budget {
+  min-width: 96px; text-align: right;
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.la-lib-use {
+  height: 30px; padding: 0 13px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--accent); background: transparent; color: var(--accent);
+  font-family: var(--font-sans); font-size: 11.5px; font-weight: 600;
+  white-space: nowrap;
+}
+.la-lib-use:hover:not(:disabled) { background: var(--gold-soft); }
+.la-lib-use:disabled { opacity: .45; cursor: progress; }
+.la-lib-use:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 860px) {
+  .la-lib { padding: 18px 16px 32px; }
+  .la-lib-cycle-meta, .la-lib-year-meta { margin-left: 0; width: 100%; }
+  .la-lib-row-budget { min-width: 0; text-align: left; }
+}
