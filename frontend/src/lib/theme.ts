@@ -35,6 +35,10 @@ function readStored(): Theme {
         localStorage.removeItem(LEGACY_STORAGE_KEY);
       }
     }
+    if (!v) {
+      // First visit — follow system preference rather than forcing light
+      v = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
     return v === 'dark' ? 'dark' : 'light';
   } catch {
     return 'light';

@@ -21,6 +21,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from backend.models.database import get_db
+from backend.api.ordering import thread_order
 from backend.models.loa import LOA
 from backend.models.user import User
 from backend.models.comment import (
@@ -225,52 +226,12 @@ def create_comment(
     db.commit()
     db.refresh(comment)
 
-    # Auto-advance for global_review (Rock 3 parallel gate).
-    if loa.status == "global_review" and role:
-        touched = False
-        if role.scope_type == "brand":
-            if not loa.brand_review_done:
-                loa.brand_review_done = True
-                touched = True
-        elif role.scope_type == "function":
-            if not loa.function_review_done:
-                loa.function_review_done = True
-                touched = True
-        if touched:
-            if loa.brand_review_done and loa.function_review_done:
-                from backend.api.loa import WORKFLOW_TRANSITIONS
-                next_status = WORKFLOW_TRANSITIONS.get("global_review")
-                if next_status:
-                    loa.status = next_status
-            db.commit()
-            db.refresh(loa)
-
-
-    # Auto-advance for local_alignment (finance + procurement + compliance gate).
-    if loa.status == "local_alignment" and role:
-        role_code = role.code or ""
-        touched = False
-        if role_code.endswith("_finance"):
-            if not loa.finance_review_done:
-                loa.finance_review_done = True
-                touched = True
-        elif role_code.endswith("_procurement"):
-            if not loa.procurement_review_done:
-                loa.procurement_review_done = True
-                touched = True
-        elif role_code.endswith("_compliance"):
-            if not loa.compliance_review_done:
-                loa.compliance_review_done = True
-                touched = True
-        if touched:
-            if (loa.finance_review_done and loa.procurement_review_done
-                    and loa.compliance_review_done):
-                from backend.api.loa import WORKFLOW_TRANSITIONS
-                next_status = WORKFLOW_TRANSITIONS.get("local_alignment")
-                if next_status:
-                    loa.status = next_status
-            db.commit()
-            db.refresh(loa)
+    # Creating a comment NEVER advances the workflow. A reviewer may add as many
+    # comments as they need while the LOA stays in their current review stage.
+    # The LOA only moves when the reviewer *explicitly* submits their review via
+    # POST /loa/{id}/validate (backend/api/loa.py), which flips that reviewer's
+    # parallel-gate flag and auto-advances only once every required reviewer is
+    # done. Gate flags are intentionally NOT touched here.
 
     return _enrich(comment, user, loa)
 
@@ -311,7 +272,9 @@ def list_comments(
     if severity:
         query = query.filter(Comment.severity == severity)
 
-    all_comments = query.order_by(Comment.created_at.asc()).all()
+    # Newest THREAD first, replies inside a thread still chronological —
+    # a reply must never render above the comment it answers.
+    all_comments = thread_order(query, Comment).all()
 
     # Filter by visibility
     visible = filter_visible_comments(user, all_comments, loa)

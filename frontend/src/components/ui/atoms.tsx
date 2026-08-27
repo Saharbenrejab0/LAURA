@@ -41,6 +41,7 @@ const CODE_TO_KIND: Record<string, StatusKind> = {
   corporate_review: 'Decision',
   approved: 'Approved',
   rejected: 'Rejected',
+  on_hold: 'Wait',
 };
 
 /** Human labels → semantic kind (for places that pass display text) */
@@ -75,6 +76,7 @@ export const CODE_TO_LABEL: Record<string, string> = {
   corporate_review: 'Corporate review',
   approved: 'Approved',
   rejected: 'Rejected',
+  on_hold: 'On hold',
 };
 
 export function statusKind(statusOrLabel: string): StatusKind {

@@ -33,11 +33,18 @@ from backend.models.role_permission import RolePermission
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-# ── Valid statuses (single source of truth) ─────────────────────────────
-VALID_STATUSES = [
-    'draft', 'emea_review', 'global_review', 'cmo_cfo_review',
-    'global_functions_review', 'corporate_review', 'approved', 'rejected',
-]
+# ── Valid statuses ─────────────────────────────────────────────────────
+# Derived from the workflow itself, not re-typed. The hand-written copy that
+# used to live here had drifted: it was missing `local_alignment`,
+# `emea_post_global_review` and `emea_final_review`, and contained
+# `global_functions_review`, which no LOA has ever had.
+#
+# That list drives the Admin Console's Roles & permissions columns AND the PATCH
+# filter, so the drift meant three live review stages were unmanageable and any
+# edit to them was dropped while reporting success.
+from backend.api.loa import WORKFLOW_ORDER as _WORKFLOW_ORDER
+
+VALID_STATUSES = [*_WORKFLOW_ORDER, 'rejected', 'returned']
 
 
 # ── Guard: super-admin only ────────────────────────────────────────────
@@ -53,6 +60,14 @@ async def require_super_admin(
 # ── Schemas ─────────────────────────────────────────────────────────────
 class RoleAssignment(BaseModel):
     role_code: str
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    full_name: str
+    password: str
+    role_code: str
+    is_active: bool = True
 
 
 class MatrixEntry(BaseModel):
@@ -114,14 +129,43 @@ async def get_dashboard_stats(
     locked_count = db.query(sql_func.count(LOA.id)).filter(LOA.is_locked == True).scalar() or 0
 
     # Pipeline: LOAs in active review (not draft, not terminal)
-    active_statuses = ['emea_review', 'global_brand_review', 'emea_brand_rework',
-                       'global_functions_review', 'emea_functions_rework',
-                       'cmo_cfo_review', 'emea_cmo_rework', 'corporate_review']
+    active_statuses = [
+        'local_alignment', 'emea_review', 'global_review',
+        'emea_post_global_review', 'cmo_cfo_review', 'emea_final_review', 'corporate_review',
+    ]
     pipeline_count = (
         db.query(sql_func.count(LOA.id))
         .filter(LOA.status.in_(active_statuses))
         .scalar() or 0
     )
+
+    # LOAs by source (laura_created / historical_import / demo_seed)
+    source_counts_raw = (
+        db.query(LOA.source, sql_func.count(LOA.id))
+        .group_by(LOA.source)
+        .all()
+    )
+    source_counts = {s: c for s, c in source_counts_raw}
+
+    # High-value LOAs: fy_2026_total above the alert threshold, highest first
+    BUDGET_ALERT_THRESHOLD = 50_000
+    high_value_raw = (
+        db.query(LOA)
+        .filter(LOA.fy_2026_total > BUDGET_ALERT_THRESHOLD)
+        .order_by(desc(LOA.fy_2026_total))
+        .limit(20)
+        .all()
+    )
+    high_value_loas = [{
+        "id": str(loa.id),
+        "cycle_id": str(loa.cycle_id) if loa.cycle_id else None,
+        "draft_id": loa.loa_draft_id,
+        "cluster": loa.cluster,
+        "country": loa.country,
+        "brand": loa.brand,
+        "fy_2026_total": loa.fy_2026_total,
+        "status": loa.status,
+    } for loa in high_value_raw]
 
     # Recent LOAs (last 10 updated)
     recent_loas = (
@@ -152,6 +196,8 @@ async def get_dashboard_stats(
         "cluster_budgets": cluster_budgets,
         "activity_budgets": activity_budgets,
         "recent_loas": recent,
+        "source_counts": source_counts,
+        "high_value_loas": high_value_loas,
     }
 
 
@@ -206,6 +252,83 @@ async def change_user_role(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# POST /admin/users — Create a new user
+# ═══════════════════════════════════════════════════════════════════════
+@router.post("/users", status_code=201)
+async def create_user(
+    body: CreateUserRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_super_admin),
+):
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=400, detail="Email already in use.")
+
+    role = db.query(Role).filter_by(code=body.role_code).first()
+    if not role:
+        raise HTTPException(status_code=400, detail=f"Role '{body.role_code}' not found.")
+
+    from backend.api.auth import hash_password
+    new_user = User(
+        email=body.email,
+        full_name=body.full_name,
+        hashed_password=hash_password(body.password),
+        role="editor",          # legacy field — kept for backward compat
+        role_id=role.id,
+        is_active=body.is_active,
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {
+        "id":            str(new_user.id),
+        "email":         new_user.email,
+        "full_name":     new_user.full_name,
+        "is_active":     new_user.is_active,
+        "role_code":     role.code,
+        "role_name":     role.display_name,
+        "scope_type":    role.scope_type,
+        "scope_value":   role.scope_value,
+        "created_at":    str(new_user.created_at) if new_user.created_at else None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PATCH /admin/users/{user_id}/deactivate — Soft-deactivate a user
+# ═══════════════════════════════════════════════════════════════════════
+@router.patch("/users/{user_id}/deactivate")
+async def deactivate_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_super_admin),
+):
+    if str(admin.id) == user_id:
+        raise HTTPException(status_code=400, detail="Cannot deactivate yourself.")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user.is_active = False
+    db.commit()
+    return {"user_id": user_id, "is_active": False}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PATCH /admin/users/{user_id}/reactivate — Re-activate a deactivated user
+# ═══════════════════════════════════════════════════════════════════════
+@router.patch("/users/{user_id}/reactivate")
+async def reactivate_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_super_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user.is_active = True
+    db.commit()
+    return {"user_id": user_id, "is_active": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # GET /admin/roles — All roles
 # ═══════════════════════════════════════════════════════════════════════
 @router.get("/roles")
@@ -256,6 +379,26 @@ async def get_permission_matrix(
     }
 
 
+@router.get("/permissions")
+async def list_permissions(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_super_admin),
+):
+    """
+    The permission vocabulary, for the Admin Console's Roles & permissions grid.
+
+    Read-only, and additive: no schema change. The console needs the full set of
+    permission codes to offer in a cell, not only the ones some role happens to
+    hold already — deriving the options from existing grants would make a
+    never-yet-granted permission unassignable.
+    """
+    perms = db.query(Permission).order_by(Permission.id).all()
+    return [
+        {"code": p.code, "display_name": p.display_name, "description": p.description}
+        for p in perms
+    ]
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # PATCH /admin/permission-matrix — Batch upsert
 # ═══════════════════════════════════════════════════════════════════════
@@ -277,14 +420,18 @@ async def update_permission_matrix(
         if entry.loa_status not in VALID_STATUSES:
             continue
 
-        existing = db.query(RolePermission).filter_by(
+        # A (role, status) pair legitimately holds SEVERAL grants — the seed gives
+        # marketers edit+delete+duplicate on `draft`. `.first()` therefore cannot
+        # stand in for "the grant": revoking with it deleted one row and left the
+        # rest, so the cell read as empty while the permission was still live.
+        existing_all = db.query(RolePermission).filter_by(
             role_id=role.id, loa_status=entry.loa_status
-        ).first()
+        ).all()
 
-        # 'none' = delete the entry (revoke access)
+        # 'none' = revoke access on this cell entirely
         if entry.permission_code == 'none':
-            if existing:
-                db.delete(existing)
+            for row in existing_all:
+                db.delete(row)
                 deleted += 1
             continue
 
@@ -292,16 +439,24 @@ async def update_permission_matrix(
         if not perm:
             continue
 
-        if existing:
-            existing.permission_id = perm.id
+        # Setting a cell means "this is now the grant", so any other grant on the
+        # same pair goes with it — otherwise the grid shows one value while the
+        # database holds several.
+        if any(r.permission_id == perm.id for r in existing_all):
+            for row in existing_all:
+                if row.permission_id != perm.id:
+                    db.delete(row)
+                    deleted += 1
             updated += 1
         else:
-            rp = RolePermission(
+            for row in existing_all:
+                db.delete(row)
+                deleted += 1
+            db.add(RolePermission(
                 role_id=role.id,
                 loa_status=entry.loa_status,
                 permission_id=perm.id,
-            )
-            db.add(rp)
+            ))
             created += 1
 
     db.commit()
@@ -413,3 +568,87 @@ async def get_active_cycles(
         }
         for c in cycles
     ]
+
+
+@router.get("/cycle/current")
+async def get_current_cycle_context(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Auth-only cycle context for the tracker (readable by every role).
+
+    Unlike /cycle/active (super-admin only), this powers the tracker's cycle
+    banner and scope tabs for ALL authenticated users, and tells the current
+    user whether they may open an emergency LOA (email ∈ authorized_emails of
+    the active emergency cycle). Returns:
+      - active[]  : currently open cycles (normal + emergency)
+      - past[]    : closed cycles, newest first, with per-cycle LOA counts
+      - can_create_emergency / emergency_cycle : Task 2 authorization
+    """
+    from backend.models.loa_cycle import LoaCycle
+    from backend.services.cycle_service import can_view_cycle
+
+    def _fmt(c):
+        return {
+            "id": str(c.id), "name": c.name, "code": c.code,
+            "cycle_type": c.cycle_type, "status": c.status,
+            "start_date": c.start_date.isoformat(), "end_date": c.end_date.isoformat(),
+        }
+
+    # An emergency cycle is confidential — it must not even appear in the
+    # tracker's cycle context for someone who is not named on it.
+    active = [
+        c for c in db.query(LoaCycle).filter(LoaCycle.is_active == True).all()
+        if can_view_cycle(c, user)
+    ]
+
+    # Past cycles for the "Past Cycles" dropdown, with LOA counts.
+    past_cycles = [
+        c for c in (
+            db.query(LoaCycle)
+            .filter(LoaCycle.status == "closed")
+            .order_by(desc(LoaCycle.created_at).nullslast(), LoaCycle.start_date.desc().nullslast())
+            .all()
+        )
+        if can_view_cycle(c, user)
+    ]
+    counts = dict(
+        db.query(LOA.cycle_id, sql_func.count(LOA.id))
+        .filter(LOA.cycle_id.isnot(None))
+        .group_by(LOA.cycle_id)
+        .all()
+    )
+    past = []
+    for c in past_cycles:
+        row = _fmt(c)
+        row["loa_count"] = int(counts.get(c.id, 0))
+        past.append(row)
+
+    # Emergency authorization for the current user.
+    emergency = next((c for c in active if c.cycle_type == "emergency"), None)
+    can_create_emergency = False
+    emergency_out = None
+    if emergency is not None:
+        emails = emergency.authorized_emails or []
+        can_create_emergency = bool(
+            user.email and any(user.email.lower() == str(e).lower() for e in emails)
+        )
+        emergency_out = {
+            "id": str(emergency.id),
+            "name": emergency.name,
+            "code": emergency.code,
+            "reason": emergency.emergency_reason,
+            "end_date": emergency.end_date.isoformat(),
+        }
+
+    # The one question the "New LOA" button needs answered: is a normal window
+    # taking submissions right now?
+    normal = next((c for c in active if c.cycle_type == "normal"), None)
+
+    return {
+        "active": [_fmt(c) for c in active],
+        "past": past,
+        "can_submit": normal is not None and normal.status == "open",
+        "can_create_emergency": can_create_emergency,
+        "emergency_cycle": emergency_out,
+    }

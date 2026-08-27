@@ -96,11 +96,26 @@ class Role(Base):
 
         if self.scope_type == 'brand':
             allowed = self.scope_value or []
-            return _brand_matches(loa.brand, allowed)
+            # A multi-brand LOA carries brand=NULL on the parent — its brands are
+            # on loa_line. Matching any one of them grants visibility.
+            if loa.brand:
+                return _brand_matches(loa.brand, allowed)
+            return any(
+                _brand_matches(ln.brand, allowed)
+                for ln in (getattr(loa, 'lines', None) or [])
+                if ln.brand
+            )
 
         if self.scope_type == 'function':
             allowed = self.scope_value or []
-            return loa.activity_type in allowed
+            # Same for multi-activity: activity_type is NULL on the parent.
+            if loa.activity_type:
+                return loa.activity_type in allowed
+            return any(
+                ln.activity_type in allowed
+                for ln in (getattr(loa, 'lines', None) or [])
+                if ln.activity_type
+            )
 
         return False
 

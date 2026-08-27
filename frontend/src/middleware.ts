@@ -7,7 +7,8 @@ const PUBLIC_PATHS = ['/login', '/welcome']
 export function middleware(request: NextRequest) {
   const token = request.cookies.get('laura_token')?.value
   const path = request.nextUrl.pathname
-  const isPublic = PUBLIC_PATHS.includes(path)
+  // /design is the public design-build showcase (no real data behind it).
+  const isPublic = PUBLIC_PATHS.includes(path) || path === '/design' || path.startsWith('/design/')
 
   // Not logged in and trying to reach a protected page -> go to login first.
   if (!token && !isPublic) {

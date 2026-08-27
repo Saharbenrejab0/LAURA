@@ -5,21 +5,25 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createLOA, updateLOA, submitLOA, getLOA, getAISuggestion, validateDescription } from '@/lib/api'
 import type { ActivityType, AISuggestion } from '@/types/loa'
 import {
-  CLUSTERS, CLUSTER_COUNTRIES, ACTIVITY_TYPES,
-  EVENT_TYPES, EVENT_PURPOSES, COT_OPTIONS, CATEGORY_OPTIONS,
-  BRAND_OPTIONS, BRANDS_BY_CATEGORY, LEGAL_ENTITIES_BY_COUNTRY,
-  EVENT_ACTIVITY_TYPES, DOOR_ACTIVITY_TYPES,
+  CLUSTERS, CLUSTER_COUNTRIES, LEGAL_ENTITIES_BY_COUNTRY, BRAND_OPTIONS,
+  ACTIVITY_TYPES, EVENT_TYPES, EVENT_PURPOSES, COT_OPTIONS, CATEGORY_OPTIONS,
+  EVENT_ACTIVITY_TYPES, DOOR_ACTIVITY_TYPES, activityLabel,
 } from '@/types/loa'
 import PhotoUpload from '@/components/PhotoUpload'
 import type { PhotoUploadRef } from '@/components/PhotoUpload'
-import { ThemeToggle } from '@/components/ThemeProvider'
 import { useToast } from '@/components/Toast'
 import VoiceInput from '@/components/VoiceInput'
 import PreviewModal from '@/components/PreviewModal'
 import ReviewBeforeSubmit from '@/components/ReviewBeforeSubmit'
 import MultiSelect from '@/components/MultiSelect'
+import LoaLineRows, {
+  emptyLine, lineTotal, linesTotal, lineComplete,
+  MIN_LINES, MAX_LINES,
+  type LoaLine, type LoaKind,
+} from '@/components/loa/LoaLineRows'
 import { createPortal } from 'react-dom'
 import { useAutoSave, clearDraft, scrollToFirstError, useLeaveConfirmation } from '@/components/useFormGuard'
+import { slidePageCount, rowTotal, type SlideRow } from '@/lib/slideRows'
 import { useMyRole } from '@/hooks/usePermissions'
 
 function formatEuros(n: number) {
@@ -215,6 +219,19 @@ export default function NewLOAPage() {
   const searchParams = useSearchParams()
   const editId = searchParams.get('edit')
   const isEditMode = !!editId
+
+  // Multi-row shape. Comes from the type selector as ?type=, and from the loaded
+  // LOA in edit mode. 'standard' keeps every existing behaviour untouched.
+  const typeParam = searchParams.get('type')
+  const [loaType, setLoaType] = useState<'standard' | LoaKind>(
+    typeParam === 'multi_brand' || typeParam === 'multi_activity' ? typeParam : 'standard'
+  )
+  const isMulti      = loaType !== 'standard'
+  const isMultiBrand = loaType === 'multi_brand'
+  const isMultiAct   = loaType === 'multi_activity'
+  // Emergency LOA context — set when arriving from the tracker's emergency window.
+  const isEmergencyNew = !isEditMode && searchParams.get('emergency') === '1'
+  const emergencyCycleId = searchParams.get('cycle')
   const { success, error: toastError, info } = useToast()
   const { role, loading: roleLoading } = useMyRole()
 
@@ -279,6 +296,18 @@ export default function NewLOAPage() {
   })
   const [financeEmail, setFinanceEmail] = useState('')
 
+  // Per-brand / per-activity rows. Seeded with MIN_LINES blanks for a new multi LOA.
+  const [lines, setLines] = useState<LoaLine[]>(() =>
+    typeParam === 'multi_brand' || typeParam === 'multi_activity'
+      ? Array.from({ length: MIN_LINES }, emptyLine)
+      : []
+  )
+
+  const [refClusters, setRefClusters]           = useState<{id: number; name: string}[]>([])
+  const [refCountries, setRefCountries]         = useState<{id: number; name: string}[]>([])
+  const [refLegalEntities, setRefLegalEntities] = useState<{id: number; name: string}[]>([])
+  const [refBrands, setRefBrands]               = useState<{id: number; code: string; name: string}[]>([])
+
   const [suggestion, setSuggestion]               = useState<AISuggestion | null>(null)
   const [loadingSuggestion, setLoadingSuggestion] = useState(false)
   const [descFeedback, setDescFeedback]           = useState<any>(null)
@@ -291,6 +320,37 @@ export default function NewLOAPage() {
       setCluster(role.role_scope_value[0]); setScopeApplied(true)
     }
   }, [role, roleLoading, scopeApplied, isEditMode])
+
+  // Fetch clusters + brands once on mount
+  useEffect(() => {
+    fetch('/api/reference/clusters').then(r => r.json()).then(setRefClusters).catch(() => {})
+    fetch('/api/reference/brands').then(r => r.json()).then(setRefBrands).catch(() => {})
+  }, [])
+
+  // Fetch countries whenever cluster changes or cluster list arrives
+  useEffect(() => {
+    if (!cluster || refClusters.length === 0) { setRefCountries([]); setRefLegalEntities([]); return }
+    const c = refClusters.find(x => x.name === cluster)
+    if (!c) return
+    fetch(`/api/reference/countries?cluster_id=${c.id}`).then(r => r.json()).then(setRefCountries).catch(() => {})
+    setRefLegalEntities([])
+  }, [cluster, refClusters])
+
+  // Fetch legal entities whenever country changes or country list arrives
+  useEffect(() => {
+    if (!country || refCountries.length === 0) { setRefLegalEntities([]); return }
+    const c = refCountries.find(x => x.name === country)
+    if (!c) return
+    // In new-LOA mode, reset the field before fetching so stale values don't persist
+    if (!isEditMode) setLegalEntity('')
+    fetch(`/api/reference/legal-entities?country_id=${c.id}`)
+      .then(r => r.json())
+      .then((data: {id: number; name: string}[]) => {
+        setRefLegalEntities(data)
+        if (data.length === 1 && !isEditMode) setLegalEntity(data[0].name)
+      })
+      .catch(() => {})
+  }, [country, refCountries, isEditMode])
 
   useEffect(() => {
     if (!editId) return
@@ -315,6 +375,27 @@ export default function NewLOAPage() {
         setForecastedLenses((loa as any).forecasted_lenses_sales || 0); setForecastedFrames((loa as any).forecasted_frames_sales || 0)
         setForecastedInstruments((loa as any).forecasted_instruments_sales || 0)
         setRequestorEmail(loa.requestor_email || ''); setFinanceEmail((loa as any).finance_validator_email || '')
+
+        // Restore the multi-row shape from the loaded LOA, not the URL.
+        const lt = ((loa as any).loa_type || 'standard') as 'standard' | LoaKind
+        setLoaType(lt)
+        const srcLines = (loa as any).lines
+        if (lt !== 'standard' && Array.isArray(srcLines) && srcLines.length > 0) {
+          setLines(srcLines.map((l: any) => ({
+            brand:         l.brand || '',
+            activityType:  l.activity_type || '',
+            customer:      l.customer || '',
+            vendor:        l.vendor || '',
+            detail:        l.detail || '',
+            numDoors:      l.num_doors || 0,
+            q4_2025:       l.q4_2025 || 0,
+            q1_2026:       l.q1_2026 || 0,
+            q2_2026:       l.q2_2026 || 0,
+            q3_2026:       l.q3_2026 || 0,
+            q4_2026:       l.q4_2026 || 0,
+            costDrillDown: l.cost_drill_down || '',
+          })))
+        }
         info(`Editing LOA ${loa.loa_draft_id}`)
       } catch { toastError('Could not load LOA — it may have been deleted'); router.push('/') }
       finally { setLoadingEdit(false) }
@@ -322,16 +403,77 @@ export default function NewLOAPage() {
     loadLOA()
   }, [editId])
 
-  const fyTotal     = q1 + q2 + q3 + q4
-  const fy2025Total = q4_2025
-  const avgPerDoor  = numDoors > 0 ? fyTotal / numDoors : 0
+  // On a multi-row LOA the budget lives on the rows, so the shared totals are
+  // aggregates of the lines rather than the (hidden) shared quarter inputs.
+  const linesFyTotal   = linesTotal(lines)
+  const linesQ4_2025   = lines.reduce((s, l) => s + (l.q4_2025 || 0), 0)
+  const linesDoorCount = lines.reduce((s, l) => s + (l.numDoors || 0), 0)
+
+  const fyTotal     = isMulti ? linesFyTotal : q1 + q2 + q3 + q4
+  const fy2025Total = isMulti ? linesQ4_2025 : q4_2025
+  const doorCount   = isMulti ? linesDoorCount : numDoors
+  const avgPerDoor  = doorCount > 0 ? fyTotal / doorCount : 0
   const pptRequired = fyTotal > 50_000
   const isEvent       = EVENT_ACTIVITY_TYPES.includes(activityType as ActivityType)
-  const isPermanent   = activityType === 'Permanent Visibility'
-  const isSponsorship = activityType === 'Sponsorship'
+  const isPermanent   = activityType === 'TM_PERMANENT'
+  const isSponsorship = activityType === 'SPONSORSHIP'
   const hasDoors      = !isSponsorship && DOOR_ACTIVITY_TYPES.includes(activityType as ActivityType)
-  const showCostSplit = activityType === 'Events'
-  const availableBrands = category.length > 0 ? Array.from(new Set(category.flatMap(c => BRANDS_BY_CATEGORY[c] || []))) : BRAND_OPTIONS
+  const showCostSplit = activityType === 'EVENTS'
+  const availableBrands = refBrands.length > 0 ? refBrands.map(b => `${b.name} (${b.code})`) : BRAND_OPTIONS
+
+  // ── What "Suggest with AI" sends, and when it is allowed ────────────────────
+  //
+  // Description / Tools / KPI are ONE set of fields per LOA, not per row, so a
+  // multi-row LOA still gets exactly one suggestion. The axis that lives on the
+  // rows is collapsed into a single joined string ("Ray-Ban (RB) + Oakley (OO)")
+  // so the model sees every brand it has to write for.
+  //
+  // The gate used to be `!activityType || !brand`, which is dead in both multi
+  // modes by construction: multi-brand leaves the shared `brand` empty (brands
+  // are on the rows) and multi-activity leaves the shared `activityType` empty.
+  // Either way one half of the condition was permanently true and the button
+  // could never be clicked.
+  // Codes, not labels — the backend resolves them to labels for the prompt and
+  // keys the KPI templates off the codes.
+  const aiActivityType = isMultiAct
+    ? lines.map(l => l.activityType).filter(Boolean).join(' + ')
+    : activityType
+  const aiBrand = isMultiBrand
+    ? lines.map(l => l.brand).filter(Boolean).join(' + ')
+    : brand
+
+  // Every row must be finished — axis, vendor and budget. A half-filled row
+  // would give the model a brand with no money behind it and the text would be
+  // written for the wrong split.
+  const rowsReadyForAI = isMulti
+    && lines.length >= MIN_LINES
+    && lines.every(l => {
+      const c = lineComplete(l, loaType as LoaKind)
+      return c.axis && c.vendor && c.budget
+    })
+
+  const canSuggest = category.length > 0 && !!aiActivityType && !!aiBrand
+    && (isMulti ? rowsReadyForAI : true)
+
+  // ── Rows as the slide will draw them ───────────────────────────────────────
+  // Empty on a standard LOA — the preview then treats the LOA itself as its one
+  // row, which is what ppt.py's `_loa_rows` does.
+  const previewRows: SlideRow[] = isMulti ? lines.map(l => ({
+    brand:        isMultiBrand ? l.brand : brand,
+    activityType: isMultiAct   ? l.activityType : activityType,
+    customer:     l.customer,
+    vendor:       l.vendor,
+    detail:       l.detail,
+    numDoors:     l.numDoors,
+    q1: l.q1_2026, q2: l.q2_2026, q3: l.q3_2026, q4: l.q4_2026,
+  })) : []
+
+  /** Why the button is off, for the marketer. '' when it is on. */
+  const suggestBlockedReason = canSuggest ? '' :
+    category.length === 0 ? 'Pick a category first' :
+    isMulti && !rowsReadyForAI ? `Finish all ${lines.length} rows first — brand, vendor and budget on each` :
+    !aiActivityType ? 'Pick an activity type first' :
+    !aiBrand ? 'Pick a brand first' : ''
   const costSplitTotal = (Number(costSplitLenses)||0) + (Number(costSplitFrames)||0)
   const costSplitValid = costSplitLenses === '' && costSplitFrames === '' ? true : Math.abs(costSplitTotal - 1.0) < 0.001
   const costSplitTotalPct = Math.round(costSplitTotal * 100)
@@ -364,10 +506,12 @@ export default function NewLOAPage() {
   function handleBack() { const dest = isEditMode ? `/loa/${editId}` : '/'; if (isDirty) { setShowLeave(true); setPendingLeave(dest) } else router.push(dest) }
 
   async function fetchSuggestion() {
-    if (!activityType || category.length === 0 || !brand) return
+    if (!canSuggest) return
     setLoadingSuggestion(true)
     try {
-      const result = await getAISuggestion({ activity_type: activityType, cluster, category, brand, fy_total: fyTotal, num_doors: numDoors })
+      // aiActivityType / aiBrand collapse the per-row axis into one string on a
+      // multi-row LOA — see the comment where they are computed.
+      const result = await getAISuggestion({ activity_type: aiActivityType, cluster, category, brand: aiBrand, fy_total: fyTotal, num_doors: doorCount })
       setSuggestion(result)
       if (result.description) { setDescription(result.description); markDirty() }
       if (result.kpi) setKpi(result.kpi)
@@ -387,37 +531,82 @@ export default function NewLOAPage() {
     markDirty()
   }
 
-  const DOOR_MANDATORY_TYPES: ActivityType[] = ['Permanent Visibility', 'Seasonal Visibility', 'Coop Advertising', 'Trade Incentive', 'Catalogues & Brochures']
+  const DOOR_MANDATORY_TYPES: ActivityType[] = ['TM_PERMANENT', 'TM_SEASONAL', 'COOP_ADVERTISING', 'TRADE_INCENTIVE', 'CATALOGUES_BROCHURES']
 
   function validate(): boolean {
     const e: Record<string, string> = {}
     if (!cluster) e.cluster = 'Required'; if (!country) e.country = 'Required'
-    if (!activityType) e.activityType = 'Required'; if (category.length === 0) e.category = 'Required'
-    if (!brand) e.brand = 'Required'; if (!cot) e.cot = 'Required'
+    if (!isMultiAct && !activityType) e.activityType = 'Required'; if (category.length === 0) e.category = 'Required'
+    if (!isMultiBrand && !brand) e.brand = 'Required'; if (!cot) e.cot = 'Required'
     if (!requestorEmail) e.requestorEmail = 'Required'
     if (!description) e.description = 'Required — must answer WHY'
-    if (!detail) e.detail = 'Required — must answer HOW'
-    if (activityType !== 'Others (non ADV)' && !kpi) e.kpi = 'Required'
+    if (!isMultiAct && !detail) e.detail = 'Required — must answer HOW'
+    if (activityType !== 'OTHER' && !kpi) e.kpi = 'Required'
     if (!startDate) e.startDate = 'Required'; if (!isPermanent && !endDate) e.endDate = 'Required'
     if (isEvent && !eventType) e.eventType = 'Required'; if (isEvent && !eventPurpose) e.eventPurpose = 'Required'
     if (fyTotal === 0 && fy2025Total === 0) e.q1 = 'At least one quarterly value required'
     if (showCostSplit && !costSplitValid) e.costSplit = `Lenses + Frames must equal 100% (currently ${costSplitTotalPct}%)`
     if (fyTotal > 100_000 && !costJustification.trim()) e.costJustification = 'Required — explain why this investment exceeds €100K'
-    if (!vendor) e.vendor = 'Required — vendor or agency name'
-    if (!costDrillDown) e.costDrillDown = 'Required — investment breakdown'
+    if (!isMulti && !vendor) e.vendor = 'Required — vendor or agency name'
+    if (!isMulti && !costDrillDown) e.costDrillDown = 'Required — investment breakdown'
     if (isEvent && !sapEventCode) e.sapEventCode = 'Required for Events — create in SAP first'
-    if (DOOR_MANDATORY_TYPES.includes(activityType as ActivityType) && (!numDoors || numDoors <= 0)) e.numDoors = 'Required for this activity type'
+    if (!isMulti && DOOR_MANDATORY_TYPES.includes(activityType as ActivityType) && (!numDoors || numDoors <= 0)) e.numDoors = 'Required for this activity type'
+
+    // Per-row rules for multi-brand / multi-activity.
+    if (isMulti) {
+      if (lines.length < MIN_LINES) {
+        e.lines = `A ${isMultiBrand ? 'multi-brand' : 'multi-activity'} LOA needs at least ${MIN_LINES} rows.`
+      } else if (lines.length > MAX_LINES) {
+        e.lines = `At most ${MAX_LINES} rows.`
+      } else {
+        const bad: string[] = []
+        lines.forEach((l, i) => {
+          const c = lineComplete(l, loaType as LoaKind)
+          const missing = [
+            !c.axis   && (isMultiBrand ? 'brand' : 'activity type'),
+            !c.vendor && 'vendor',
+            !c.budget && 'budget',
+          ].filter(Boolean)
+          if (missing.length) bad.push(`Row ${i + 1}: ${missing.join(', ')}`)
+        })
+        if (bad.length) e.lines = `Incomplete rows — ${bad.join(' · ')}`
+      }
+    }
+
     setErrors(e); if (Object.keys(e).length > 0) scrollToFirstError(e); return Object.keys(e).length === 0
   }
 
   function buildPayload() {
     return {
-      cluster, country, legal_entity: legalEntity, activity_type: activityType as ActivityType,
+      loa_type: loaType,
+      // The axis that varies per row is omitted; the backend nulls it on the parent
+      // and recomputes the shared budget totals from the lines.
+      lines: isMulti ? lines.map((l, i) => ({
+        position: i,
+        brand:         isMultiBrand ? l.brand : undefined,
+        activity_type: isMultiAct   ? l.activityType : undefined,
+        customer: l.customer || undefined,
+        vendor:   l.vendor   || undefined,
+        detail:   l.detail   || undefined,
+        num_doors: l.numDoors || undefined,
+        cost_drill_down: l.costDrillDown || undefined,
+        q4_2025: l.q4_2025||0, q1_2026: l.q1_2026||0, q2_2026: l.q2_2026||0,
+        q3_2026: l.q3_2026||0, q4_2026: l.q4_2026||0,
+      })) : [],
+      cluster, country, legal_entity: legalEntity,
+      activity_type: (isMultiAct ? '' : activityType) as ActivityType,
       event_type: eventType || undefined, event_purpose: eventPurpose || undefined, sap_event_code: sapEventCode || undefined,
-      cot, category, brand, capex_opex: capexOpex as any, adv_selling: advSelling as any,
-      detail, description, customer, vendor, currency,
-      num_customers: numCustomers || undefined, num_doors: numDoors || undefined,
-      q4_2025: q4_2025||0, q1_2026: q1||0, q2_2026: q2||0, q3_2026: q3||0, q4_2026: q4||0,
+      cot, category, brand: isMultiBrand ? '' : brand,
+      capex_opex: capexOpex as any, adv_selling: advSelling as any,
+      detail, description,
+      customer: isMulti ? undefined : customer,
+      vendor:   isMulti ? undefined : vendor,
+      currency,
+      num_customers: isMulti ? undefined : (numCustomers || undefined),
+      num_doors:     isMulti ? undefined : (numDoors || undefined),
+      q4_2025: isMulti ? 0 : (q4_2025||0),
+      q1_2026: isMulti ? 0 : (q1||0), q2_2026: isMulti ? 0 : (q2||0),
+      q3_2026: isMulti ? 0 : (q3||0), q4_2026: isMulti ? 0 : (q4||0),
       tools, kpi, timing, cost_drill_down: costDrillDown, cost_justification: costJustification || undefined,
       start_date: startDate || undefined, end_date: isPermanent ? '31/12/2026' : (endDate||undefined),
       cost_split_lenses: costSplitLenses!=='' ? Number(costSplitLenses) : undefined,
@@ -425,6 +614,7 @@ export default function NewLOAPage() {
       forecasted_lenses_sales: forecastedLenses||undefined, forecasted_frames_sales: forecastedFrames||undefined,
       forecasted_instruments_sales: forecastedInstruments||undefined,
       finance_validator_email: financeEmail||undefined, requestor_email: requestorEmail,
+      ...(isEmergencyNew ? { is_emergency: true, cycle_id: emergencyCycleId || undefined } : {}),
     }
   }
 
@@ -487,12 +677,11 @@ export default function NewLOAPage() {
   return (
     <div className="min-h-screen page-enter" style={{ background: 'var(--bg-base)' }}>
       {showLeave && <LeaveDialog onStay={() => setShowLeave(false)} onLeave={() => { setIsDirty(false); router.push(pendingLeave || '/') }} />}
-      {showPreview && <PreviewModal isOpen={showPreview} onClose={() => setShowPreview(false)} category={categoryLabel} country={country} brand={brand} fyTotal={fyTotal} description={description} tools={tools} kpi={kpi} costDrillDown={costDrillDown} numDoors={numDoors} avgPerDoor={avgPerDoor} activityType={activityType} detail={detail} photos={photos} />}
+      {showPreview && <PreviewModal isOpen={showPreview} onClose={() => setShowPreview(false)} category={categoryLabel} country={country} brand={brand} fyTotal={fyTotal} description={description} tools={tools} kpi={kpi} costDrillDown={costDrillDown} numDoors={doorCount} avgPerDoor={avgPerDoor} activityType={activityType} detail={detail} photos={photos}
+        rows={previewRows} customer={customer} vendor={vendor} sapEventCode={sapEventCode} eventType={eventType} numCustomers={numCustomers} startDate={startDate} />}
 
       <header className="sticky top-0 z-20 px-6 py-3.5 flex items-center justify-between" style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-3">
-          <button onClick={handleBack} className="btn-ghost text-sm px-2">← Back</button>
-          <span style={{ color: 'var(--border)', opacity: 0.4 }}>|</span>
           <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{pageTitle}</span>
           {role && !isEditMode && role.role_scope_type === 'cluster' && (
             <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--blue-bg)', color: 'var(--blue-text)', border: '1px solid var(--blue-border)' }}>{role.role_scope_value?.join(', ')} scope</span>
@@ -501,7 +690,6 @@ export default function NewLOAPage() {
           {autoSaveAt && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>· Saved {autoSaveAt}</span>}
         </div>
         <div className="flex items-center gap-2">
-          <ThemeToggle />
           {pptRequired && <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--green-bg)', color: 'var(--green-text)', border: '1px solid var(--green-border)' }}>PPT required (over €50k)</span>}
           <button onClick={() => handleSubmit(true)} disabled={saving} className="btn-secondary text-sm">{draftLabel}</button>
           <button onClick={handleReviewSubmit} disabled={saving} className="btn-primary text-sm">{saving ? 'Saving…' : isEditMode ? 'Save & resubmit' : 'Review & submit'}</button>
@@ -527,25 +715,42 @@ export default function NewLOAPage() {
             ))}
           </nav>
         <div className="space-y-4">
+          {/* Laura preview — where this LOA lands in the deck (design 2d "will appear as" hint) */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 14px', borderRadius: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            <span style={{ color: 'var(--accent)', flex: 'none' }}>✦</span>
+            <span>Will appear as <strong style={{ color: 'var(--text-primary)' }}>{[category.join(' / '), activityType, country].filter(Boolean).join(' › ') || 'Category › Activity › Country'}</strong>{brand ? <> · <strong style={{ color: 'var(--text-primary)' }}>{brand}</strong></> : null} — the slide title &amp; deck section come from the details below.</span>
+          </div>
           <SectionCard number={1} title="Location">
             <div className="grid grid-cols-2 gap-4">
               <Field label="Cluster" required error={errors.cluster} fieldKey="cluster">
-                <select className="input" value={cluster} onChange={e => { setCluster(e.target.value); markDirty() }}><option value="">Select cluster…</option>{CLUSTERS.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                <select className="input" value={cluster} onChange={e => { setCluster(e.target.value); markDirty() }}>
+                  <option value="">Select cluster…</option>
+                  {(refClusters.length > 0 ? refClusters.map(c => c.name) : Array.from(CLUSTERS)).map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
               </Field>
               <Field label="Country" required hint="Filters from cluster" error={errors.country} fieldKey="country">
-                <select className="input" value={country} onChange={e => { setCountry(e.target.value); markDirty() }} disabled={!cluster}><option value="">Select country…</option>{(CLUSTER_COUNTRIES[cluster]||[]).map(c => <option key={c} value={c}>{c}</option>)}</select>
+                <select className="input" value={country} onChange={e => { setCountry(e.target.value); markDirty() }} disabled={!cluster}>
+                  <option value="">Select country…</option>
+                  {(refCountries.length > 0 ? refCountries.map(c => c.name) : (CLUSTER_COUNTRIES[cluster] || [])).map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
               </Field>
-              <Field label="Legal Entity" hint="Pick from list or type freely">
-                <ComboInput value={legalEntity} onChange={v => { setLegalEntity(v); markDirty() }} suggestions={country ? (LEGAL_ENTITIES_BY_COUNTRY[country] || []) : []} placeholder={country ? 'Type or select legal entity…' : 'Select a country first'} disabled={!country} />
+              <Field label="Legal Entity" hint="Filters from country">
+                <select className="input" value={legalEntity} onChange={e => { setLegalEntity(e.target.value); markDirty() }} disabled={!country}>
+                  <option value="">Select legal entity…</option>
+                  {(refLegalEntities.length > 0 ? refLegalEntities.map(e => e.name) : (LEGAL_ENTITIES_BY_COUNTRY[country] || [])).map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
               </Field>
             </div>
           </SectionCard>
 
           <SectionCard number={2} title="Activity Classification">
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Activity Type" required error={errors.activityType} fieldKey="activityType">
-                <select className="input" value={activityType} onChange={e => { setActivityType(e.target.value as ActivityType); markDirty() }}><option value="">Select type…</option>{ACTIVITY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select>
-              </Field>
+              {/* Multi-activity: the type is per-row, not shared. */}
+              {!isMultiAct && (
+                <Field label="Activity Type" required error={errors.activityType} fieldKey="activityType">
+                  <select className="input" value={activityType} onChange={e => { setActivityType(e.target.value as ActivityType); markDirty() }}><option value="">Select type…</option>{ACTIVITY_TYPES.map(t => <option key={t} value={t}>{activityLabel(t)}</option>)}</select>
+                </Field>
+              )}
               <Field label="Channel of Trade (COT)" required error={errors.cot} fieldKey="cot">
                 <select className="input" value={cot} onChange={e => { setCot(e.target.value); markDirty() }}>{COT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select>
               </Field>
@@ -575,19 +780,24 @@ export default function NewLOAPage() {
               <Field label="Category" required error={errors.category} fieldKey="category">
                 <MultiSelect options={CATEGORY_OPTIONS} values={category} onChange={v => { setCategory(v); markDirty() }} placeholder="Select one or more categories…" />
               </Field>
-              <Field label="Brand" required hint="Type to search" error={errors.brand} fieldKey="brand">
-                <SearchableSelect value={brand} onChange={v => { setBrand(v); markDirty() }} options={availableBrands} placeholder="Search brand…" disabled={category.length === 0} />
-              </Field>
+              {/* Multi-brand: the brand is per-row, not shared. */}
+              {!isMultiBrand && (
+                <Field label="Brand" required hint="Type name or SAP code" error={errors.brand} fieldKey="brand">
+                  <SearchableSelect value={brand} onChange={v => { setBrand(v); markDirty() }} options={availableBrands} placeholder="Search brand…" />
+                </Field>
+              )}
             </div>
           </SectionCard>
 
           <SectionCard number={4} title="Investment Detail">
             <div className="grid grid-cols-3 gap-4">
-              <Field label="Customer" hint="Account/company name"><input className="input" value={customer} onChange={e => { setCustomer(e.target.value); markDirty() }} placeholder="e.g. Hans Anders, Krys" /></Field>
-              <Field label="Vendor" required hint="External agency or supplier" error={errors.vendor} fieldKey="vendor"><input className="input" value={vendor} onChange={e => { setVendor(e.target.value); markDirty() }} placeholder="e.g. Altavia, TBC" /></Field>
+              {/* Customer, Vendor, # Customers and # Doors are per-row on a multi LOA. */}
+              {!isMulti && <Field label="Customer" hint="Account/company name"><input className="input" value={customer} onChange={e => { setCustomer(e.target.value); markDirty() }} placeholder="e.g. Hans Anders, Krys" /></Field>}
+              {!isMulti && <Field label="Vendor" required hint="External agency or supplier" error={errors.vendor} fieldKey="vendor"><input className="input" value={vendor} onChange={e => { setVendor(e.target.value); markDirty() }} placeholder="e.g. Altavia, TBC" /></Field>}
               <Field label="Currency"><select className="input" value={currency} onChange={e => { setCurrency(e.target.value); markDirty() }}><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="CHF">CHF</option><option value="USD">USD</option></select></Field>
-              <Field label="# Customers" hint="Number of accounts (not stores)"><input type="number" className="input" value={numCustomers||''} min={0} onChange={e => { setNumCustomers(Number(e.target.value)); markDirty() }} placeholder="0" /></Field>
-              {activityType && <Field label="# Doors (total)" hint="ONE total across ALL brands" error={errors.numDoors} fieldKey="numDoors"><input type="number" className="input" value={numDoors||''} min={0} onChange={e => { setNumDoors(Number(e.target.value)); markDirty() }} placeholder="0" /></Field>}
+              {!isMulti && <Field label="# Customers" hint="Number of accounts (not stores)"><input type="number" className="input" value={numCustomers||''} min={0} onChange={e => { setNumCustomers(Number(e.target.value)); markDirty() }} placeholder="0" /></Field>}
+              {!isMulti && activityType && <Field label="# Doors (total)" hint="ONE total across ALL brands" error={errors.numDoors} fieldKey="numDoors"><input type="number" className="input" value={numDoors||''} min={0} onChange={e => { setNumDoors(Number(e.target.value)); markDirty() }} placeholder="0" /></Field>}
+              {isMulti && <CalcField label="# Doors (all rows)" value={doorCount > 0 ? String(doorCount) : '—'} />}
             </div>
             {showCostSplit && (
               <div className="mt-4 p-4 rounded-xl" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
@@ -613,14 +823,38 @@ export default function NewLOAPage() {
 
           <SectionCard number={5} title="Budget">
             {errors.q1 && <p className="text-xs mb-3" style={{ color: 'var(--red-text)' }}>{errors.q1}</p>}
-            <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Enter amounts in thousands of euros. Example: type 45 for €45,000.</p>
-            <div className="grid grid-cols-3 gap-4" data-field="q1">
-              {[{ label:'Q1 2026 (k€)', val:q1, set:setQ1 },{ label:'Q2 2026 (k€)', val:q2, set:setQ2 },{ label:'Q3 2026 (k€)', val:q3, set:setQ3 },{ label:'Q4 2026 (k€)', val:q4, set:setQ4 }].map(({ label, val, set }) => (
-                <Field key={label} label={label}><KEurosInput value={val} onChange={n => { set(n); markDirty() }} placeholder="0" /></Field>
-              ))}
-            </div>
+            {isMulti ? (
+              <>
+                <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+                  Budget is entered per row below — these totals are the sum of all {lines.length} rows.
+                </p>
+                <div className="grid grid-cols-4 gap-4" data-field="q1">
+                  {([
+                    ['Q1 2026', 'q1_2026'],
+                    ['Q2 2026', 'q2_2026'],
+                    ['Q3 2026', 'q3_2026'],
+                    ['Q4 2026', 'q4_2026'],
+                  ] as const).map(([label, key]) => (
+                    <CalcField
+                      key={key}
+                      label={label}
+                      value={formatEuros(lines.reduce((s, l) => s + (l[key] || 0), 0))}
+                    />
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Enter amounts in thousands of euros. Example: type 45 for €45,000.</p>
+                <div className="grid grid-cols-3 gap-4" data-field="q1">
+                  {[{ label:'Q1 2026 (k€)', val:q1, set:setQ1 },{ label:'Q2 2026 (k€)', val:q2, set:setQ2 },{ label:'Q3 2026 (k€)', val:q3, set:setQ3 },{ label:'Q4 2026 (k€)', val:q4, set:setQ4 }].map(({ label, val, set }) => (
+                    <Field key={label} label={label}><KEurosInput value={val} onChange={n => { set(n); markDirty() }} placeholder="0" /></Field>
+                  ))}
+                </div>
+              </>
+            )}
 
-            {!showQ4_2025 && q4_2025 === 0 && (
+            {!isMulti && !showQ4_2025 && q4_2025 === 0 && (
               <button
                 type="button"
                 onClick={() => setShowQ4_2025(true)}
@@ -631,7 +865,7 @@ export default function NewLOAPage() {
               </button>
             )}
 
-            {(showQ4_2025 || q4_2025 > 0) && (
+            {!isMulti && (showQ4_2025 || q4_2025 > 0) && (
               <div className="mt-4 p-4 rounded-xl" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center justify-between mb-2">
                   <p className="section-heading" style={{ margin: 0 }}>Q4 2025 (post-event or carryover)</p>
@@ -657,7 +891,7 @@ export default function NewLOAPage() {
             <div className="grid grid-cols-3 gap-4 mt-4">
               <CalcField label="FY 2025 Total" value={formatEuros(fy2025Total)} />
               <CalcField label="FY 2026 Total" value={formatEuros(fyTotal)} highlight={pptRequired} />
-              <CalcField label="Avg / Door" value={numDoors>0 ? formatEuros(avgPerDoor) : '—'} />
+              <CalcField label="Avg / Door" value={doorCount>0 ? formatEuros(avgPerDoor) : '—'} />
             </div>
             {pptRequired && <div className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ background:'var(--green-bg)', color:'var(--green-text)', border:'1px solid var(--green-border)' }}>✓ FY 2026 total exceeds €50,000 — PPT slide will be automatically generated</div>}
             {fyTotal > 100_000 && (
@@ -683,8 +917,20 @@ export default function NewLOAPage() {
           <SectionCard number={7} title="Description & PPT Content">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Fill description, tools and KPI — or let LAURA suggest</p>
-              <button onClick={fetchSuggestion} disabled={!activityType||category.length===0||!brand||loadingSuggestion} className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-40">{loadingSuggestion ? 'Asking LAURA…' : '✦ Suggest with AI'}</button>
+              <button onClick={fetchSuggestion} disabled={!canSuggest||loadingSuggestion} title={suggestBlockedReason} className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-40">{loadingSuggestion ? 'Asking LAURA…' : '✦ Suggest with AI'}</button>
             </div>
+            {/* A disabled button with no reason next to it reads as broken — say why. */}
+            {suggestBlockedReason && (
+              <p className="text-xs -mt-2 mb-4" style={{ color: 'var(--amber-text, var(--text-muted))' }}>
+                ✦ {suggestBlockedReason}
+              </p>
+            )}
+            {isMulti && canSuggest && (
+              <p className="text-xs -mt-2 mb-4" style={{ color: 'var(--text-muted)' }}>
+                One suggestion covers all {lines.length} rows — LAURA is told about{' '}
+                {isMultiBrand ? aiBrand : lines.map(l => activityLabel(l.activityType)).filter(Boolean).join(' + ')}.
+              </p>
+            )}
             {suggestion && (
               <div className="rounded-xl p-4 mb-4 space-y-2" style={{ background:'var(--blue-bg)', border:'1px solid var(--blue-border)' }}>
                 <p className="text-xs font-medium mb-2" style={{ color:'var(--blue-text)' }}>✦ LAURA suggests — click to re-apply individually</p>
@@ -711,10 +957,13 @@ export default function NewLOAPage() {
                   </div>
                 )}
               </Field>
-              <Field label="Detail / Tools (the HOW)" required hint="What exactly will the money be spent on" error={errors.detail} fieldKey="detail">
-                <div className="flex gap-2 items-start"><textarea className="input resize-none flex-1" rows={3} value={detail} onChange={e => { setDetail(e.target.value); markDirty() }} placeholder="e.g. Seasonal POS materials · ECP staff training · Digital campaign support" /><VoiceInput onResult={t => { setDetail(prev => prev ? prev + ' ' + t : t); markDirty() }} /></div>
-              </Field>
-              <Field label="KPI" required={activityType!=='Others (non ADV)'} error={errors.kpi} fieldKey="kpi">
+              {/* Multi-activity: the HOW is per-row, entered as each row's Detail. */}
+              {!isMultiAct && (
+                <Field label="Detail / Tools (the HOW)" required hint="What exactly will the money be spent on" error={errors.detail} fieldKey="detail">
+                  <div className="flex gap-2 items-start"><textarea className="input resize-none flex-1" rows={3} value={detail} onChange={e => { setDetail(e.target.value); markDirty() }} placeholder="e.g. Seasonal POS materials · ECP staff training · Digital campaign support" /><VoiceInput onResult={t => { setDetail(prev => prev ? prev + ' ' + t : t); markDirty() }} /></div>
+                </Field>
+              )}
+              <Field label="KPI" required={activityType !== 'OTHER'} error={errors.kpi} fieldKey="kpi">
                 <div className="flex gap-2 items-center"><input className="input flex-1" value={kpi} onChange={e => { setKpi(e.target.value); markDirty() }} placeholder="+12% sell-out uplift · 500 doors activated · 85% sell-through" /><VoiceInput onResult={t => { setKpi(prev => prev ? prev + ' ' + t : t); markDirty() }} /></div>
               </Field>
               <Field label="Cost Drill Down" required hint="Investment breakdown for PPT slide" error={errors.costDrillDown} fieldKey="costDrillDown">
@@ -732,10 +981,27 @@ export default function NewLOAPage() {
             </div>
           </SectionCard>
 
-          <div className="flex gap-3 pb-6">
+          {/* Per-brand / per-activity rows — appended below the shared sections. */}
+          {isMulti && (
+            <LoaLineRows
+              kind={loaType as LoaKind}
+              lines={lines}
+              onChange={next => { setLines(next); markDirty() }}
+              brandOptions={availableBrands}
+              activityOptions={ACTIVITY_TYPES as unknown as string[]}
+              error={errors.lines}
+            />
+          )}
+
+          <div className="flex gap-3 pb-6 items-center">
             <button onClick={handleReviewSubmit} disabled={saving} className="btn-primary">{saving ? 'Saving…' : isEditMode ? 'Save & resubmit' : 'Review & submit'}</button>
             <button onClick={() => handleSubmit(true)} disabled={saving} className="btn-secondary">{draftLabel}</button>
             <button onClick={handleBack} className="btn-secondary">Cancel</button>
+            {isMulti && (
+              <span className="ml-auto text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {lines.length} {lines.length === 1 ? 'row' : 'rows'} · {formatEuros(fyTotal)} requested
+              </span>
+            )}
           </div>
         </div>
 
@@ -748,18 +1014,35 @@ export default function NewLOAPage() {
               if (!mounted) return null
               const items: { label: string; done: boolean }[] = [
                 { label: 'Cluster', done: !!cluster },{ label: 'Country', done: !!country },
-                { label: 'Activity Type', done: !!activityType },{ label: 'COT', done: !!cot },
-                { label: 'Category', done: category.length > 0 },{ label: 'Brand', done: !!brand },
-                { label: 'Vendor', done: !!vendor },{ label: 'Budget (≥1 quarter)', done: fyTotal > 0 || fy2025Total > 0 },
-                { label: 'Description (WHY)', done: !!description },{ label: 'Detail (HOW)', done: !!detail },
-                { label: 'KPI', done: activityType === 'Others (non ADV)' || !!kpi },
-                { label: 'Cost drill-down', done: !!costDrillDown },
+              ]
+              if (!isMultiAct) items.push({ label: 'Activity Type', done: !!activityType })
+              items.push({ label: 'COT', done: !!cot }, { label: 'Category', done: category.length > 0 })
+              if (!isMultiBrand) items.push({ label: 'Brand', done: !!brand })
+              if (!isMulti) items.push({ label: 'Vendor', done: !!vendor })
+              items.push({ label: 'Budget (≥1 quarter)', done: fyTotal > 0 || fy2025Total > 0 })
+              items.push({ label: 'Description (WHY)', done: !!description })
+              if (!isMultiAct) items.push({ label: 'Detail (HOW)', done: !!detail })
+              items.push({ label: 'KPI', done: activityType === 'OTHER' || !!kpi })
+              if (!isMulti) items.push({ label: 'Cost drill-down', done: !!costDrillDown })
+              items.push(
                 { label: 'Start date', done: !!startDate },{ label: 'End date', done: isPermanent || !!endDate },
                 { label: 'Requestor email', done: !!requestorEmail },
-              ]
+              )
               if (isEvent) { items.push({ label: 'Event type', done: !!eventType }); items.push({ label: 'Event purpose', done: !!eventPurpose }); items.push({ label: 'SAP Event Code', done: !!sapEventCode }) }
-              if (['Permanent Visibility','Seasonal Visibility','Coop Advertising','Trade Incentive','Catalogues & Brochures'].includes(activityType)) items.push({ label: '# Doors', done: numDoors > 0 })
+              if (!isMulti && DOOR_MANDATORY_TYPES.includes(activityType as ActivityType)) items.push({ label: '# Doors', done: numDoors > 0 })
               if (fyTotal > 100_000) items.push({ label: 'Cost justification (>100K)', done: !!costJustification.trim() })
+              // One line per row — the denominator grows as rows are added.
+              if (isMulti) {
+                items.push({ label: `Rows (min ${MIN_LINES})`, done: lines.length >= MIN_LINES })
+                lines.forEach((l, i) => {
+                  const c = lineComplete(l, loaType as LoaKind)
+                  const axisOk = c.axis, vOk = c.vendor, bOk = c.budget
+                  items.push({
+                    label: `Row ${i + 1}: ${axisOk ? '✓' : '✗'} ${isMultiBrand ? 'Brand' : 'Type'} ${vOk ? '✓' : '✗'} Vendor ${bOk ? '✓' : '✗'} Budget`,
+                    done: axisOk && vOk && bOk,
+                  })
+                })
+              }
               const doneCount = items.filter(i => i.done).length; const total = items.length; const pct = Math.round((doneCount / total) * 100)
               return (
                 <div className="px-4 py-3">
@@ -791,7 +1074,22 @@ export default function NewLOAPage() {
                 <span style={{ color: '#aaa' }}>{categoryLabel||'Category'}</span>
                 <span className="font-semibold" style={{ color: 'white' }}>{country||'COUNTRY'} · {formatEuros(fyTotal)}</span>
               </div>
-              <div className="px-3 py-1.5 font-semibold text-xs truncate" style={{ color:'var(--text-primary)', borderBottom:'1px solid var(--border)', background:'var(--bg-surface)' }}>{brand ? `${brand}: ` : ''}{detail||activityType||'Activity title'}</div>
+              <div className="px-3 py-1.5 font-semibold text-xs truncate" style={{ color:'var(--text-primary)', borderBottom:'1px solid var(--border)', background:'var(--bg-surface)' }}>{brand ? `${brand}: ` : ''}{detail||activityLabel(activityType)||'Activity title'}{slidePageCount(previewRows.length || 1) > 1 ? ` (1 / ${slidePageCount(previewRows.length)})` : ''}</div>
+              {/* The rows the slide's table will hold. One line each — the full
+                  columns are in the Expand modal; this is the shape check. */}
+              {previewRows.length > 0 && (
+                <div style={{ background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border)' }}>
+                  {previewRows.map((r, i) => (
+                    <div key={i} className="px-3 py-1 flex justify-between gap-2" style={{ borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
+                      <span className="truncate" style={{ color:'var(--text-secondary)' }}>
+                        {i + 1}. {(isMultiBrand ? r.brand : activityLabel(r.activityType)) || `Row ${i + 1}`}
+                        {r.vendor ? ` · ${r.vendor}` : ''}
+                      </span>
+                      <span className="shrink-0" style={{ color:'var(--text-primary)' }}>{formatEuros(rowTotal(r))}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="grid grid-cols-2 divide-x" style={{ borderColor: 'var(--border)' }}>
                 <div className="px-3 py-3 space-y-2" style={{ background: 'var(--bg-surface)' }}>
                   {description && <div><p className="font-medium" style={{ color:'var(--text-muted)' }}>Description:</p><p style={{ color:'var(--text-secondary)' }} className="line-clamp-2">{description}</p></div>}
@@ -815,14 +1113,49 @@ export default function NewLOAPage() {
           <div className="card overflow-hidden order-1">
             <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}><span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Excel row preview</span></div>
             <div className="px-4 py-3 space-y-1.5 text-xs">
-              {[['Cluster',cluster],['Country',country],['Activity',activityType],['Category',categoryLabel],['Brand',brand],['COT',cot],['Customer',customer],['Vendor',vendor],['Q4-25',q4_2025?formatEuros(q4_2025):'—'],['Q1-26',q1?formatEuros(q1):'—'],['Q2-26',q2?formatEuros(q2):'—'],['Q3-26',q3?formatEuros(q3):'—'],['Q4-26',q4?formatEuros(q4):'—']].map(([label,val]) => (
-                <div key={label} className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>{label}</span><span className="truncate max-w-[140px] text-right" style={{ color:'var(--text-primary)' }}>{val||'—'}</span></div>
-              ))}
-              <div className="pt-1.5 mt-1.5 space-y-1" style={{ borderTop:'1px solid var(--border)' }}>
-                <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>FY-26 total</span><span className="font-medium" style={{ color:'var(--green)' }}>{formatEuros(fyTotal)} ✓ auto</span></div>
-                {numDoors>0 && <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>Avg/door</span><span className="font-medium" style={{ color:'var(--green)' }}>{formatEuros(avgPerDoor)} ✓ auto</span></div>}
-                <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>PPT required</span><span className="font-medium" style={{ color: pptRequired ? 'var(--green)' : 'var(--text-muted)' }}>{pptRequired ? 'YES ✓ auto' : 'NO — auto'}</span></div>
-              </div>
+              {isMulti ? (
+                <>
+                  {/* One line per row — this is what lands in the slide's Excel table. */}
+                  {[['Cluster',cluster],['Country',country],['Category',categoryLabel],['COT',cot],
+                    ...(isMultiBrand ? [['Activity',activityType]] : [['Brand',brand]] as [string,string][]),
+                  ].map(([label,val]) => (
+                    <div key={label} className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>{label}</span><span className="truncate max-w-[140px] text-right" style={{ color:'var(--text-primary)' }}>{val||'—'}</span></div>
+                  ))}
+                  <div className="pt-1.5 mt-1.5" style={{ borderTop:'1px solid var(--border)' }}>
+                    <div className="mb-1" style={{ color:'var(--text-muted)' }}>
+                      {lines.length} {lines.length === 1 ? 'row' : 'rows'}
+                    </div>
+                    {lines.map((l, i) => {
+                      const axis = (isMultiBrand ? l.brand : l.activityType) || `Row ${i + 1}`
+                      return (
+                        <div key={i} className="flex justify-between py-0.5">
+                          <span className="truncate max-w-[130px]" style={{ color:'var(--text-secondary)' }}>{i + 1}. {axis}</span>
+                          <span style={{ color:'var(--text-primary)' }}>{formatEuros(lineTotal(l))}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="pt-1.5 mt-1.5 space-y-1" style={{ borderTop:'1px solid var(--border)' }}>
+                    <div className="flex justify-between"><span className="font-medium" style={{ color:'var(--text-primary)' }}>Grand total</span><span className="font-medium" style={{ color:'var(--green)' }}>{formatEuros(fyTotal)}</span></div>
+                    {doorCount>0 && <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>Avg/door</span><span className="font-medium" style={{ color:'var(--green)' }}>{formatEuros(avgPerDoor)} ✓ auto</span></div>}
+                    {/* Page count comes from the same function the modal uses,
+                        which mirrors ppt.py — not a re-typed `> 3`. */}
+                    <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>Slides</span><span className="font-medium" style={{ color:'var(--text-primary)' }}>{slidePageCount(lines.length) > 1 ? `${slidePageCount(lines.length)} (paginated)` : '1'}</span></div>
+                    <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>PPT required</span><span className="font-medium" style={{ color: pptRequired ? 'var(--green)' : 'var(--text-muted)' }}>{pptRequired ? 'YES ✓ auto' : 'NO — auto'}</span></div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {[['Cluster',cluster],['Country',country],['Activity',activityType],['Category',categoryLabel],['Brand',brand],['COT',cot],['Customer',customer],['Vendor',vendor],['Q4-25',q4_2025?formatEuros(q4_2025):'—'],['Q1-26',q1?formatEuros(q1):'—'],['Q2-26',q2?formatEuros(q2):'—'],['Q3-26',q3?formatEuros(q3):'—'],['Q4-26',q4?formatEuros(q4):'—']].map(([label,val]) => (
+                    <div key={label} className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>{label}</span><span className="truncate max-w-[140px] text-right" style={{ color:'var(--text-primary)' }}>{val||'—'}</span></div>
+                  ))}
+                  <div className="pt-1.5 mt-1.5 space-y-1" style={{ borderTop:'1px solid var(--border)' }}>
+                    <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>FY-26 total</span><span className="font-medium" style={{ color:'var(--green)' }}>{formatEuros(fyTotal)} ✓ auto</span></div>
+                    {numDoors>0 && <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>Avg/door</span><span className="font-medium" style={{ color:'var(--green)' }}>{formatEuros(avgPerDoor)} ✓ auto</span></div>}
+                    <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>PPT required</span><span className="font-medium" style={{ color: pptRequired ? 'var(--green)' : 'var(--text-muted)' }}>{pptRequired ? 'YES ✓ auto' : 'NO — auto'}</span></div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -861,6 +1194,13 @@ export default function NewLOAPage() {
       <ReviewBeforeSubmit
         open={showReview} onClose={() => setShowReview(false)} onConfirm={() => { setShowReview(false); handleSubmit(false) }}
         saving={saving} errors={errors} cluster={cluster} country={country} legalEntity={legalEntity}
+        loaType={loaType}
+        lines={lines.map(l => ({
+          axis:     isMultiBrand ? l.brand : l.activityType,
+          customer: l.customer,
+          vendor:   l.vendor,
+          total:    lineTotal(l),
+        }))}
         activityType={activityType} eventType={eventType} eventPurpose={eventPurpose} sapEventCode={sapEventCode}
         cot={cot} category={category} brand={brand} capexOpex={capexOpex} advSelling={advSelling} currency={currency}
         q4_2025={q4_2025} q1={q1} q2={q2} q3={q3} q4={q4} fyTotal={fyTotal} avgPerDoor={avgPerDoor} pptRequired={pptRequired}

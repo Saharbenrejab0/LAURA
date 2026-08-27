@@ -1,0 +1,245 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Admin Console — layout only.
+
+   TOKEN-NATIVE BY CONSTRUCTION: there is not one hard-coded colour in this
+   file. Every surface, border, text and accent value is a `var(--…)` from the
+   semantic set in styles/redesign.css, which defines both themes. That was the
+   condition attached to deferring this build — retrofitting it later would mean
+   repeating the whole theme pass.
+
+   The per-role accent (CFO reads as finance, CMO as marketing) is not built yet,
+   but `--role-accent` below is a token with a neutral default, so that work is a
+   value change here rather than a hunt through components.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-console] {
+  /* Neutral default. A future per-role accent overrides this one property. */
+  --role-accent: var(--accent);
+  --console-nav-w: 236px;
+
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+  min-height: 0;
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+/* ── Frame ───────────────────────────────────────────────────────────────── */
+.ac-body { flex: 1; min-height: 0; display: flex; }
+
+.ac-nav {
+  width: var(--console-nav-w); flex-shrink: 0; box-sizing: border-box;
+  background: var(--surface-raised);
+  border-right: 1px solid var(--border);
+  padding: 18px 14px 16px;
+  display: flex; flex-direction: column; gap: 4px;
+  overflow-y: auto;
+}
+.ac-nav-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.ac-nav-label {
+  font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-tertiary); padding: 0 9px 7px;
+}
+.ac-nav-item {
+  display: flex; align-items: center; gap: 10px; min-height: 34px;
+  padding: 0 9px; border-radius: 8px; width: 100%;
+  background: transparent; border: none; border-left: 2px solid transparent;
+  cursor: pointer; font-family: var(--font-sans); text-align: left;
+}
+.ac-nav-item:hover:not(:disabled) { background: var(--surface-sunken); }
+.ac-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ac-nav-item.is-on {
+  background: var(--surface-sunken);
+  border-left-color: var(--role-accent);
+}
+.ac-nav-item.is-on .ac-nav-item-label { color: var(--text-primary); font-weight: 600; }
+.ac-nav-item.is-on .ac-nav-item-icon { color: var(--accent-dim); }
+
+/* A destination that has no data layer yet is disabled, not hidden: the shape
+   of the console stays visible and navigable, and nothing pretends to work. */
+.ac-nav-item:disabled { cursor: not-allowed; opacity: .55; }
+.ac-nav-item:disabled .ac-nav-item-label { color: var(--text-tertiary); }
+
+.ac-nav-item-icon {
+  font-size: 11px; width: 13px; flex: none; text-align: center;
+  color: var(--text-tertiary);
+}
+.ac-nav-item-label { font-size: 12.5px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; }
+.ac-nav-item-badge {
+  margin-left: auto; font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+  color: var(--accent-dim); background: var(--surface-sunken);
+  border-radius: 99px; padding: 2px 6px;
+}
+.ac-nav-item-pending {
+  margin-left: auto; font-size: 9px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.ac-nav-foot {
+  border-top: 1px solid var(--border); padding: 12px 9px 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ac-nav-foot-line { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); }
+.ac-dot { width: 7px; height: 7px; border-radius: 99px; flex: none; background: var(--status-open-fg); }
+.ac-nav-build { font-size: 10.5px; color: var(--text-faint); }
+
+.ac-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ac-head {
+  flex-shrink: 0; padding: 22px 28px 0;
+  display: flex; align-items: flex-end; gap: 20px; flex-wrap: wrap;
+}
+.ac-kicker {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.ac-title {
+  font-size: 25px; line-height: 1.2; font-weight: 600;
+  margin: 4px 0 0; letter-spacing: -.02em; color: var(--text-primary);
+}
+.ac-sub {
+  font-size: 12.5px; line-height: 1.55; color: var(--text-secondary);
+  margin: 0 0 4px; max-width: 430px;
+}
+.ac-head-actions { margin-left: auto; display: flex; gap: 9px; margin-bottom: 3px; }
+.ac-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 28px 30px; }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.ac-btn, .ac-btn-primary {
+  height: 36px; padding: 0 15px; border-radius: 9px;
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-sans); font-size: 12.5px; font-weight: 600;
+  white-space: nowrap; cursor: pointer;
+}
+.ac-btn { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-secondary); }
+.ac-btn:hover:not(:disabled) { color: var(--text-primary); background: var(--surface-sunken); }
+.ac-btn-primary {
+  border: 1px solid var(--ink); background: var(--ink); color: var(--ink-text);
+  padding: 0 17px; box-shadow: var(--shadow-sm);
+}
+.ac-btn-primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+.ac-btn:disabled, .ac-btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.ac-btn:focus-visible, .ac-btn-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.ac-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 20px 24px;
+  box-shadow: var(--shadow-sm);
+}
+.ac-card-strong { border-width: 1.5px; border-color: var(--border-strong); }
+.ac-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.ac-card-note { font-size: 11.5px; color: var(--text-tertiary); }
+.ac-stack { display: flex; flex-direction: column; gap: 16px; }
+.ac-cols { display: grid; grid-template-columns: 1fr 372px; gap: 16px; }
+@media (max-width: 1100px) { .ac-cols { grid-template-columns: 1fr; } }
+
+.ac-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 26px; padding: 0 11px; border-radius: 99px;
+  font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  background: var(--status-open-bg); color: var(--status-open-fg);
+  border: 1px solid var(--status-open-border);
+}
+.ac-mono { font-family: var(--font-mono); }
+
+.ac-statgrid { display: flex; gap: 26px; flex-wrap: wrap; }
+.ac-stat { display: flex; flex-direction: column; gap: 3px; }
+.ac-stat-v { font-family: var(--font-mono); font-size: 21px; font-weight: 600; color: var(--text-primary); }
+.ac-stat-l { font-size: 10.5px; color: var(--text-tertiary); }
+.ac-stat-note { font-size: 10px; color: var(--text-faint); }
+
+/* ── Progress bars (review gates) ────────────────────────────────────────── */
+.ac-gate { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ac-gate-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ac-gate-role { font-size: 11.5px; font-weight: 600; color: var(--text-primary); }
+.ac-gate-n { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
+.ac-bar { height: 5px; border-radius: 99px; background: var(--surface-sunken); overflow: hidden; }
+.ac-bar-fill { height: 100%; border-radius: 99px; background: var(--role-accent); }
+.ac-gate-note { font-size: 10.5px; color: var(--text-tertiary); }
+
+/* ── Rows / tables ───────────────────────────────────────────────────────── */
+.ac-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.ac-table th {
+  position: sticky; top: 0; z-index: 1;
+  text-align: left; padding: 9px 12px; white-space: nowrap;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-tertiary); background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-strong);
+}
+.ac-table td {
+  padding: 10px 12px; font-size: 12px; color: var(--text-primary);
+  border-top: 1px solid var(--border); vertical-align: middle;
+}
+.ac-table tbody tr:hover td { background: var(--surface-sunken); }
+.ac-tablewrap { overflow: auto; max-height: 62vh; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+
+.ac-sub2 { font-size: 11px; color: var(--text-tertiary); }
+.ac-badge {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
+  border-radius: 99px; font-size: 10px; font-weight: 600;
+  background: var(--surface-sunken); color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.ac-select {
+  height: 30px; padding: 0 8px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-primary); font-family: var(--font-sans); font-size: 11.5px;
+}
+.ac-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ac-search {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 11px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-tertiary);
+}
+.ac-search input {
+  border: none; outline: none; background: transparent; width: 220px;
+  font-family: var(--font-sans); font-size: 12px; color: var(--text-primary);
+}
+.ac-search:focus-within { border-color: var(--accent); }
+.ac-filterbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 14px; }
+
+/* ── Permission matrix ───────────────────────────────────────────────────── */
+.ac-matrix td, .ac-matrix th { border-right: 1px solid var(--border-subtle); }
+.ac-matrix-role { position: sticky; left: 0; background: var(--surface); z-index: 2; min-width: 190px; }
+.ac-matrix th.ac-matrix-role { z-index: 3; background: var(--surface-sunken); }
+.ac-cell {
+  width: 26px; height: 22px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-sunken);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; color: var(--text-tertiary); padding: 0;
+}
+.ac-cell[data-v="1"] { background: var(--gold-soft); border-color: var(--accent); color: var(--accent-dim); }
+.ac-cell[data-v="2"] { background: var(--accent); border-color: var(--accent); color: var(--ink-text); }
+.ac-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ac-legend { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--text-secondary); }
+
+/* ── States ──────────────────────────────────────────────────────────────── */
+.ac-msg { font-size: 13px; color: var(--text-secondary); padding: 26px 2px; }
+.ac-empty {
+  border: 1px dashed var(--border-strong); border-radius: 12px;
+  padding: 34px 24px; text-align: center; color: var(--text-tertiary); font-size: 12.5px;
+  background: var(--surface-raised);
+}
+
+/* A screen whose data layer does not exist yet. States the reason plainly
+   rather than rendering a convincing screen against placeholder data. */
+.ac-pending {
+  border: 1px dashed var(--border-strong); border-radius: 14px;
+  padding: 34px 30px; background: var(--surface-raised);
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+}
+.ac-pending-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.ac-pending-body { font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); max-width: 560px; }
+.ac-pending-list { margin: 0; padding-left: 20px; font-size: 12px; color: var(--text-secondary); line-height: 1.7; }
+.ac-pending-tag {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--st-wait-fg); background: var(--st-wait-bg);
+  border: 1px solid var(--st-wait-fg); border-radius: 99px; padding: 3px 9px;
+}
+
+@media (max-width: 860px) {
+  [data-console] { --console-nav-w: 100%; }
+  .ac-body { flex-direction: column; }
+  .ac-nav { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+}

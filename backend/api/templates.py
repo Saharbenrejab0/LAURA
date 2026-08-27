@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.auth import get_current_user
 from backend.models.database import get_db
+from backend.api.ordering import newest_first
 from backend.models.loa import LOA
 from backend.engines.loa_display import compute_display_title
 from backend.models.user import User
@@ -168,8 +169,8 @@ def list_templates(
     activity_type: str | None = None,
     status:        str | None = Query(None, description="approved | closed | any"),
     fy:            int | None = None,
-    sort:          str = Query("most_reusable",
-                               regex="^(most_reusable|recently_approved|highest_budget|fy_desc)$"),
+    sort:          str = Query("newest",
+                               regex="^(newest|most_reusable|recently_approved|highest_budget|fy_desc)$"),
     limit:         int = Query(50, ge=1, le=200),
     offset:        int = Query(0,  ge=0),
 ):
@@ -199,12 +200,16 @@ def list_templates(
 
     total = q.count()
 
+    # Newest-first is the DEFAULT branch (shared project rule). The other
+    # branches stay available because this list has an explicit user-chosen sort.
     if sort == "highest_budget":
         q = q.order_by(LOA.fy_2026_total.desc().nullslast())
-    elif sort == "fy_desc":
-        q = q.order_by(LOA.created_at.desc())
     elif sort == "recently_approved":
         q = q.order_by(LOA.approved_at.desc().nullslast())
+    else:
+        # newest | fy_desc | most_reusable — all start from newest-first, so
+        # `most_reusable` re-ranks a deterministic page instead of an arbitrary one.
+        q = newest_first(q, LOA)
 
     rows = q.offset(offset).limit(limit).all()
 

@@ -22,6 +22,7 @@ import api from '@/lib/api';
 import StatusBadge from '@/components/StatusBadge';
 import LauraPicks from '@/components/LauraPicks';
 import { color, font, motion, radius, space } from '@/styles/tokens';
+import { activityLabel } from '@/types/loa'
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
@@ -30,6 +31,7 @@ interface Template {
   id: string;
   loa_draft_id: string;
   title: string;
+  display_title?: string;
   status: string;
   cluster: string | null;
   country: string | null;
@@ -491,7 +493,7 @@ function PreviewContent({ template, onUse, onClose, disabled }: {
       </PreviewSection>
       <PreviewSection label="Classification">
         <PreviewRow label="Brand" value={template.brand} />
-        <PreviewRow label="Activity" value={template.activity_type} />
+        <PreviewRow label="Activity" value={activityLabel(template.activity_type)} />
       </PreviewSection>
       <PreviewSection label="Financials">
         <PreviewRow label="Budget total" value={formatMoney(template.budget_total)} mono />

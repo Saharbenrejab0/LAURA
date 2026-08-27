@@ -47,10 +47,15 @@ from backend.models.role_permission import RolePermission
 CLUSTERS = ['FRANCE', 'ITALY', 'DACH', 'IBERIA', 'NORTH', 'META',
             'EAST', 'RUSSIA']
 
+# Every status a permission can be granted on. This list had drifted: it was
+# missing `local_alignment` and `returned`, which are real statuses an LOA sits
+# at. The visible symptom was the super-admin block below — it grants on ALL
+# statuses, so the two omissions left Thibault, Vanessa and Sandrine with no
+# access at all to an LOA waiting at local_alignment.
 ALL_STATUSES = [
-    'draft', 'emea_review', 'global_review', 'emea_post_global_review',
-    'cmo_cfo_review', 'emea_final_review', 'corporate_review',
-    'approved', 'rejected',
+    'draft', 'local_alignment', 'emea_review', 'global_review',
+    'emea_post_global_review', 'cmo_cfo_review', 'emea_final_review',
+    'corporate_review', 'approved', 'rejected', 'returned',
 ]
 
 

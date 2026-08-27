@@ -1,7 +1,12 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import {
+  paginateRows, isEventActivity, standardCells, eventCells, totalCells,
+  STANDARD_HEADERS, EVENT_HEADERS, STANDARD_WIDTHS, EVENT_WIDTHS,
+  type SlideRow, type SlideShared,
+} from '@/lib/slideRows'
 
 interface PreviewModalProps {
   isOpen: boolean
@@ -19,6 +24,14 @@ interface PreviewModalProps {
   activityType: string
   detail: string
   photos: { index: number; url: string }[]
+  /** Per-row values on a multi-brand / multi-activity LOA. Empty on a standard one. */
+  rows?: SlideRow[]
+  customer?: string
+  vendor?: string
+  sapEventCode?: string
+  eventType?: string
+  numCustomers?: number
+  startDate?: string
 }
 
 function formatEuros(n: number) {
@@ -33,13 +46,56 @@ export default function PreviewModal({
   category, country, brand, fyTotal,
   description, tools, kpi, costDrillDown,
   numDoors, avgPerDoor, activityType, detail, photos,
+  rows = [], customer, vendor, sapEventCode, eventType, numCustomers, startDate,
 }: PreviewModalProps) {
+  const [page, setPage] = useState(0)
+
+  // ── What the deck will actually contain ──────────────────────────────────
+  //
+  // Events are single-row on purpose: ppt.py's `_render_events_layout` does
+  // `del rows` because the event columns (SAP code, brand split, # customers)
+  // are LOA-level. Everything else shows one table row per LOA row, paginated
+  // by the same rule the engine uses.
+  const isEvent = isEventActivity(activityType)
+  const shared: SlideShared = {
+    country, activityType, brand, detail, customer, vendor, numDoors,
+    sapEventCode, eventType, description, numCustomers, startDate, fyTotal,
+  }
+  // A standard LOA is its own single row.
+  const allRows: SlideRow[] = rows.length > 0 ? rows : [{
+    brand, activityType, customer, vendor, detail, numDoors,
+    // Quarters are not passed in for a standard LOA — fyTotal already holds the
+    // sum, so hand it to the row as a single quarter to keep the maths honest.
+    q1: fyTotal,
+  }]
+  const pages = isEvent ? [allRows.slice(0, 1)] : paginateRows(allRows)
+  const totalPages = pages.length
+  const pageIndex = Math.min(page, totalPages - 1)
+  const pageRows = pages[pageIndex] ?? []
+  // The last page is the one that carries the description and the photos —
+  // matching `is_last` / `with_content` in ppt.py's generate_loa_slide loop.
+  const showContent = pageIndex === totalPages - 1
+  const headers = isEvent ? EVENT_HEADERS : STANDARD_HEADERS
+  const widths  = isEvent ? EVENT_WIDTHS  : STANDARD_WIDTHS
+  const bodyRows = isEvent
+    ? [eventCells(shared, formatEuros)]
+    : pageRows.map(r => standardCells(r, shared, formatEuros))
+  // The engine only prints the TOTAL strip on a real multi-row table.
+  const showTotal = !isEvent && allRows.length > 1
+
+  // Reset to page 1 whenever the row count changes under us.
+  useEffect(() => { setPage(0) }, [totalPages])
+
   useEffect(() => {
     if (!isOpen) return
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowRight') setPage(p => Math.min(p + 1, totalPages - 1))
+      if (e.key === 'ArrowLeft')  setPage(p => Math.max(p - 1, 0))
+    }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [isOpen, onClose])
+  }, [isOpen, onClose, totalPages])
 
   // Lock body scroll when modal is open
   useEffect(() => {
@@ -153,47 +209,59 @@ export default function PreviewModal({
               }}>
                 <p style={{ fontSize: '15px', fontWeight: 700, color: '#0D1B2A', margin: 0, lineHeight: 1.3 }}>
                   {slideTitle}
+                  {/* ppt.py `_render_title` appends "(n / total)" only when split. */}
+                  {totalPages > 1 && ` (${pageIndex + 1} / ${totalPages})`}
                 </p>
               </div>
 
-              {/* Table header + data row */}
+              {/* Table header + one data row per LOA row */}
               <div style={{ flexShrink: 0 }}>
                 <div style={{
                   background: '#F2F2F2',
                   padding: '5px 16px',
                   borderBottom: '1px solid #ddd',
                 }}>
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1.2fr 1.1fr 1.3fr 2.5fr 0.6fr 0.8fr 1.2fr 0.75fr 1.5fr',
-                    gap: '4px',
-                  }}>
-                    {['SAP CODE', 'EVENT TYPE', 'BRANDS', 'DESCRIPTION', '# CUST', 'AVG/CUST', 'VENDOR', 'BUDGET', 'DATE'].map(h => (
+                  <div style={{ display: 'grid', gridTemplateColumns: widths, gap: '4px' }}>
+                    {headers.map(h => (
                       <span key={h} style={{ color: '#666', fontWeight: 700, fontSize: '7px', letterSpacing: '0.03em' }}>{h}</span>
                     ))}
                   </div>
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1.2fr 1.1fr 1.3fr 2.5fr 0.6fr 0.8fr 1.2fr 0.75fr 1.5fr',
-                    gap: '4px',
-                    marginTop: '3px',
-                  }}>
-                    {[
-                      'TBC',
-                      activityType?.slice(0, 14) || '—',
-                      brand?.slice(0, 12) || '—',
-                      (description?.slice(0, 55) + (description?.length > 55 ? '…' : '')) || '—',
-                      '—', '—', '—',
-                      formatEuros(fyTotal),
-                      '—',
-                    ].map((v, i) => (
-                      <span key={i} style={{ color: '#222', fontSize: '8px' }}>{v}</span>
-                    ))}
-                  </div>
+                  {bodyRows.map((cells, r) => (
+                    <div key={r} style={{
+                      display: 'grid', gridTemplateColumns: widths, gap: '4px',
+                      marginTop: '3px',
+                      paddingTop: r > 0 ? '3px' : 0,
+                      borderTop: r > 0 ? '1px solid #e2e2e2' : 'none',
+                    }}>
+                      {cells.map((v, i) => (
+                        <span key={i} style={{ color: '#222', fontSize: '8px' }}>{v}</span>
+                      ))}
+                    </div>
+                  ))}
+                  {showTotal && (
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: widths, gap: '4px',
+                      marginTop: '3px', paddingTop: '3px', borderTop: '1.5px solid #0D1B2A',
+                    }}>
+                      {totalCells(pageRows, formatEuros).map((v, i) => (
+                        <span key={i} style={{ color: '#0D1B2A', fontSize: '8px', fontWeight: 700 }}>{v}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Main content area — flex:1 fills remaining space */}
+              {/* Main content area — flex:1 fills remaining space.
+                  Only the LAST page carries it: a continuation page in the real
+                  deck is table rows and nothing else (`with_content=is_last`). */}
+              {!showContent ? (
+                <div style={{ flex: 1, minHeight: 0, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <p style={{ fontSize: '10px', color: '#bbb', fontStyle: 'italic', textAlign: 'center' }}>
+                    Continuation page — rows only.<br />
+                    Description, KPI and photos are on page {totalPages}.
+                  </p>
+                </div>
+              ) : (
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: '1fr 240px',
@@ -272,6 +340,7 @@ export default function PreviewModal({
                   })}
                 </div>
               </div>
+              )}
 
               {/* Footer — inside the flex column, not absolutely positioned */}
               <div style={{
@@ -298,9 +367,37 @@ export default function PreviewModal({
           textAlign: 'center',
           background: 'var(--bg-surface)',
         }}>
-          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>
-            Press Esc or click outside to close · Download the real PPT from the detail page
-          </p>
+          {totalPages > 1 ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+              <button
+                onClick={() => setPage(p => Math.max(p - 1, 0))}
+                disabled={pageIndex === 0}
+                style={{
+                  background: 'none', border: '1px solid var(--border)', borderRadius: '6px',
+                  padding: '3px 10px', fontSize: '11px', color: 'var(--text-primary)',
+                  cursor: pageIndex === 0 ? 'not-allowed' : 'pointer',
+                  opacity: pageIndex === 0 ? 0.4 : 1,
+                }}
+              >← Prev</button>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                Slide {pageIndex + 1} of {totalPages} · {allRows.length} rows
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(p + 1, totalPages - 1))}
+                disabled={pageIndex === totalPages - 1}
+                style={{
+                  background: 'none', border: '1px solid var(--border)', borderRadius: '6px',
+                  padding: '3px 10px', fontSize: '11px', color: 'var(--text-primary)',
+                  cursor: pageIndex === totalPages - 1 ? 'not-allowed' : 'pointer',
+                  opacity: pageIndex === totalPages - 1 ? 0.4 : 1,
+                }}
+              >Next →</button>
+            </div>
+          ) : (
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>
+              Press Esc or click outside to close · Download the real PPT from the detail page
+            </p>
+          )}
         </div>
       </div>
     </div>

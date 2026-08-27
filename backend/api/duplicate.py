@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.auth import get_current_user
 from backend.models.database import get_db
-from backend.models.loa import LOA
+from backend.models.loa import LOA, LOALine
 from backend.models.user import User
 from backend.reference_data import (
     ACTIVITY_TYPES, ADV_SELLING, CAPEX_OPEX, CATEGORIES,
@@ -76,6 +76,11 @@ COT_MAP: dict[str, str] = {
 _NEVER_COPY = frozenset({
     "id", "loa_number", "loa_draft_id",
     "requestor_email",          # re-assigned to the caller explicitly
+    "cycle_id",                 # a duplicate is a new draft in the OPEN cycle,
+                                # never the source's (possibly closed) one
+    "source",                   # duplicating history produces a LIVE draft
+    "import_batch_id",          # ...which belongs to no import batch
+    "source_file",              # and carries no historical filename
     "status", "is_demo", "is_locked",
     "submitted_at", "approved_at", "created_at", "updated_at",
     "cmo_approved", "cfo_approved", "cmo_comment", "rejection_reason",
@@ -255,22 +260,48 @@ def duplicate_loa(
     _check_required(payload, warnings)
 
     # Identity and ownership of the new draft - the critical part.
+    from backend.services.cycle_service import resolve_cycle_for_new_loa
+    from backend.models.loa import SOURCE_LAURA_CREATED
+    cycle = resolve_cycle_for_new_loa(db, is_emergency=bool(payload.get("is_emergency")))
+
     new_loa = LOA(
         **payload,
         loa_draft_id    = _next_draft_id(db, now),
         status          = "draft",
         requestor_email = user.email,    # <-- THE fix. The draft belongs to the caller.
+        cycle_id        = cycle.id,      # the open cycle, not the source's
+        source          = SOURCE_LAURA_CREATED,
         is_demo         = True,
         is_locked       = False,
         created_at      = now,
         updated_at      = now,
     )
 
-    # Audit trail: only set if the column exists in the model.
-    if hasattr(LOA, "duplicated_from_id"):
-        new_loa.duplicated_from_id = source.id
+    new_loa.duplicated_from_id = source.id
 
     db.add(new_loa)
+    db.flush()  # get new_loa.id before adding child lines
+
+    # Copy child lines for multi-brand / multi-activity LOAs.
+    # Without this, a multi-type LOA would be saved with loa_type='multi_*'
+    # but zero lines, which fails the MIN_LOA_LINES validation on resubmit.
+    for src_line in source.lines:
+        db.add(LOALine(
+            loa_id        = new_loa.id,
+            position      = src_line.position,
+            brand         = src_line.brand,
+            activity_type = src_line.activity_type,
+            customer      = src_line.customer,
+            vendor        = src_line.vendor,
+            detail        = src_line.detail,
+            num_doors     = src_line.num_doors,
+            cost_drill_down = src_line.cost_drill_down,
+            q4_2025       = src_line.q4_2025,
+            q1_2026       = src_line.q1_2026,
+            q2_2026       = src_line.q2_2026,
+            q3_2026       = src_line.q3_2026,
+            q4_2026       = src_line.q4_2026,
+        ))
 
     # Recompute derived totals from the copied financial fields.
     if hasattr(new_loa, "calculate_totals"):

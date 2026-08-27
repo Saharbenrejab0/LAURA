@@ -1,6 +1,5 @@
 // ============================================================
-// LAURA — Admin API client (Sprint 3)
-// Separate file: no need to edit the main api.ts
+// LAURA — Admin API client
 // ============================================================
 
 import axios from 'axios'
@@ -10,7 +9,6 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Attach JWT token
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('laura_token')
@@ -56,6 +54,14 @@ export interface AdminRole {
   user_count: number
 }
 
+export interface CreateUserPayload {
+  email: string
+  full_name: string
+  password: string
+  role_code: string
+  is_active?: boolean
+}
+
 // ── API calls ──────────────────────────────────────────────────────────
 
 export async function getAdminStats(): Promise<AdminStats> {
@@ -73,7 +79,26 @@ export async function getAdminRoles(): Promise<AdminRole[]> {
   return data
 }
 
-export async function updateUserRole(userId: string, roleId: number) {
-  const { data } = await api.patch(`/admin/users/${userId}`, { role_id: roleId })
+/** Change a user's role. Payload uses role_code (string), not role_id. */
+export async function updateUserRole(userId: string, roleCode: string) {
+  const { data } = await api.patch(`/admin/users/${userId}/role`, { role_code: roleCode })
+  return data
+}
+
+/** Create a new user with role assignment. */
+export async function createUser(payload: CreateUserPayload) {
+  const { data } = await api.post('/admin/users', payload)
+  return data
+}
+
+/** Soft-deactivate a user (revokes login, history preserved). */
+export async function deactivateUser(userId: string) {
+  const { data } = await api.patch(`/admin/users/${userId}/deactivate`)
+  return data
+}
+
+/** Re-activate a previously deactivated user. */
+export async function reactivateUser(userId: string) {
+  const { data } = await api.patch(`/admin/users/${userId}/reactivate`)
   return data
 }

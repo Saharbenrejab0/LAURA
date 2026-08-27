@@ -681,3 +681,17 @@
   border-color: var(--gold, #B08D2F) !important;
   box-shadow: 0 0 0 3px var(--gold-soft, #F3EAD3) !important;
 }
+
+/* Spinner used by PhotoUploader uploading state */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Alignment review · Excel row strip.
+   Overlay scrollbars hide the fact that TOOLS and the fields past it are
+   reachable, so the track is forced visible on this one element. */
+.excel-row-scroll { scrollbar-width: thin; scrollbar-color: #C2BDB6 #F0EFEC; }
+.excel-row-scroll::-webkit-scrollbar { height: 9px; }
+.excel-row-scroll::-webkit-scrollbar-track { background: #F0EFEC; border-radius: 99px; }
+.excel-row-scroll::-webkit-scrollbar-thumb { background: #C2BDB6; border-radius: 99px; }
+.excel-row-scroll::-webkit-scrollbar-thumb:hover { background: #A8A29A; }

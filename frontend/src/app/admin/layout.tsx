@@ -1,45 +1,16 @@
-'use client'
-
 /**
- * Admin route segment layout — access-gated.
+ * Admin route segment layout.
  *
- * Only super-admins (or roles that can override locks) may see /admin.
- * While the role is loading we show a neutral checking state; non-admins
- * are redirected to the tracker. This is the CLIENT-side guard — the backend
- * must also enforce admin-only on its /admin endpoints (defence in depth).
+ * Deliberately thin. The client-side access gate used to live here, duplicating
+ * the check `RouteGuard` now performs from `canSeeAdmin()` — two copies of one
+ * rule, which is how a menu and a route end up disagreeing. There is one client
+ * gate (RouteGuard, reading lib/roles.ts) and the backend enforces admin-only on
+ * every /admin endpoint independently.
+ *
+ * It also carried `data-admin-scope`, which activated a parallel `--admin-*`
+ * token set in admin-tokens.css. The console reads the same semantic tokens as
+ * the rest of the app, so that second palette is gone.
  */
-
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { useMyRole } from '@/hooks/usePermissions'
-
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { role, loading } = useMyRole()
-  const router = useRouter()
-
-  const isAdmin = role?.role_code === 'super_admin' || role?.can_override_lock === true
-
-  useEffect(() => {
-    if (!loading && !isAdmin) {
-      router.replace('/')
-    }
-  }, [loading, isAdmin, router])
-
-  if (loading) {
-    return (
-      <div data-admin-scope style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-        Checking access…
-      </div>
-    )
-  }
-
-  if (!isAdmin) {
-    return (
-      <div data-admin-scope style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-        Redirecting…
-      </div>
-    )
-  }
-
-  return <div data-admin-scope>{children}</div>
+  return <>{children}</>
 }

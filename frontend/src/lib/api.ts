@@ -5,6 +5,7 @@
 
 import axios from 'axios'
 import type { LOA, LOAFormValues, AISuggestion } from '@/types/loa'
+import { newestFirst } from './sort'
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -72,7 +73,9 @@ export const getLOAs = async (filters?: {
   include_historical?: boolean
 }): Promise<LOA[]> => {
   const { data } = await api.get('/loa', { params: filters })
-  return data
+  // Newest-first is guaranteed here, at the data layer, so no list component
+  // needs its own sort. See lib/sort.ts.
+  return newestFirst<LOA>(data)
 }
 
 export const getLOA = async (id: string): Promise<LOA> => {

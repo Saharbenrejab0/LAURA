@@ -1,859 +1,1587 @@
 'use client'
+/**
+ * Admin Console — built from `docs/LAURA Admin Console.html`.
+ *
+ * Structure, groups, screen titles and body copy come from that document.
+ * Eleven screens are listed; five are wired to real data, six state the schema
+ * they are waiting on (see `_nav.ts`).
+ *
+ * Absorbs the previous four-tab admin page entirely:
+ *   Pulse  → Admin home
+ *   People → Users & people
+ *   Access → Roles & permissions
+ *   Audit  → Cycles (the force-status override moves here as an admin action;
+ *            the real Audit log needs an `audit_log` table that does not exist)
+ *
+ * Not one hard-coded colour: every value is a semantic token, so both themes
+ * work from the first render rather than being retrofitted.
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import './console-tokens.css'
+import { SCREENS, GROUPS, byId, isPending, type ScreenId } from './_nav'
+import {
+  getAdminStats, getAdminUsers, getAdminRoles,
+  updateUserRole, createUser, deactivateUser, reactivateUser,
+  type AdminUser, type AdminRole, type CreateUserPayload,
+} from '@/lib/admin-api'
+import api from '@/lib/api'
+import {
+  fetchCycles, createCycle, updateCycle, setCycleStatus, closeCycle, deleteCycle,
+  type Cycle, type CycleStatus, type CycleType,
+  type CreateCyclePayload, type UpdateCyclePayload,
+} from '@/lib/cycles-api'
+import { fetchImportBatches, type ImportBatch } from '@/lib/historical-api'
+import { formatBudget } from '@/lib/euro'
+import { newestFirst } from '@/lib/sort'
+import { useMyRole } from '@/hooks/usePermissions'
+import { useToast } from '@/components/Toast'
+import { buildChain } from '@/lib/workflow'
+import { statusBadge } from '@/styles/tokens'
+
+// ── Screens without a data layer ────────────────────────────────────────────
+
+function PendingScreen({ id }: { id: ScreenId }) {
+  const s = byId(id)
+  return (
+    <div className="ac-pending">
+      <span className="ac-pending-tag">Pending database audit</span>
+      <span className="ac-pending-title">{s.title} is designed but not yet buildable</span>
+      <p className="ac-pending-body">
+        This screen needs tables the database does not have. Rather than render it
+        against placeholder data — which would look finished and create an
+        expectation the data layer cannot meet — it states what is missing:
+      </p>
+      <ul className="ac-pending-list">
+        {s.pending!.map(p => <li key={p}>{p}</li>)}
+      </ul>
+      <p className="ac-pending-body">
+        Reported, not created. Unplanned schema from a UI build is what the queued
+        database audit exists to prevent.
+      </p>
+    </div>
+  )
+}
+
+// ── 01 Admin home ───────────────────────────────────────────────────────────
+
+const BUDGET_ALERT_THRESHOLD = 50_000
+
+interface HighValueLOA {
+  id: string
+  cycle_id: string | null
+  draft_id?: string
+  cluster?: string
+  country?: string
+  brand?: string
+  fy_2026_total: number
+  status: string
+}
+
+interface Stats {
+  status_counts?: Record<string, number>
+  total_loas?: number
+  total_fy26?: number
+  total_users?: number
+  locked_count?: number
+  pipeline_count?: number
+  source_counts?: Record<string, number>
+  high_value_loas?: HighValueLOA[]
+}
+
+function AdminHome({
+  stats, users, cycles, batches, onGoto,
+}: {
+  stats: Stats | null
+  users: AdminUser[]
+  cycles: Cycle[]
+  batches: ImportBatch[]
+  onGoto: (id: ScreenId) => void
+}) {
+  const open = cycles.find(c => c.isActive) ?? null
+  const noRole = users.filter(u => !u.role_code)
+  const counts = stats?.status_counts ?? {}
+
+  // Review progress by gate, from the live status counts. Derived from the same
+  // chain as everything else — this used to be a hand-written five, which hid
+  // the two EMEA re-reviews and undercounted every LOA sitting in one.
+  const GATES: [string, string][] = buildChain('')
+    .filter(s => !s.terminal)
+    .map(s => [s.key, s.label])
+  const inCycle = GATES.reduce((n, [k]) => n + (counts[k] ?? 0), 0)
+
+  const attention = [
+    noRole.length > 0 && {
+      icon: '◔',
+      title: `${noRole.length} user${noRole.length === 1 ? '' : 's'} without a role`,
+      sub: noRole.slice(0, 3).map(u => u.email).join(', ') || '—',
+      cta: 'Assign', go: 'users' as ScreenId,
+    },
+    (counts.corporate_review ?? 0) > 0 && {
+      icon: '◷',
+      title: `${counts.corporate_review} awaiting Corporate Review`,
+      sub: 'The final gate before approved',
+      cta: 'View', go: 'cycles' as ScreenId,
+    },
+    (stats?.locked_count ?? 0) > 0 && {
+      icon: '⚿',
+      title: `${stats!.locked_count} locked LOA${stats!.locked_count === 1 ? '' : 's'}`,
+      sub: 'Locked records cannot be edited by their author',
+      cta: 'Cycles', go: 'cycles' as ScreenId,
+    },
+    !open && {
+      icon: '⚑', title: 'No normal cycle is open',
+      sub: 'Marketers cannot submit until one is opened',
+      cta: 'Open one', go: 'cycles' as ScreenId,
+    },
+  ].filter(Boolean) as { icon: string; title: string; sub: string; cta: string; go: ScreenId }[]
+
+  return (
+    <div className="ac-stack">
+      <div className="ac-card ac-card-strong ac-stack">
+        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {open ? <span className="ac-pill"><span className="ac-dot" />Open</span>
+                    : <span className="ac-card-note">No open cycle</span>}
+              <span className="ac-mono ac-card-note">{open?.code || open?.name || '—'}</span>
+            </div>
+            <p style={{ margin: '9px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
+              {open
+                ? `${open.name}${open.daysRemaining != null ? ` — ${open.daysRemaining} day${open.daysRemaining === 1 ? '' : 's'} remaining` : ''}`
+                : 'Open a cycle so marketers can submit.'}
+            </p>
+            <div className="ac-statgrid" style={{ marginTop: 16 }}>
+              {[
+                [String(inCycle), 'LOAs in review'],
+                [formatBudget(stats?.total_fy26 ?? 0), 'FY26 requested'],
+                [String(counts.approved ?? 0), 'Approved'],
+                [String(counts.rejected ?? 0), 'Rejected'],
+              ].map(([v, l]) => (
+                <div className="ac-stat" key={l}>
+                  <span className="ac-stat-v">{v}</span>
+                  <span className="ac-stat-l">{l}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <button className="ac-btn" onClick={() => onGoto('cycles')}>Cycle settings</button>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+            <span className="ac-card-title">Review progress by gate</span>
+            <span className="ac-card-note">{inCycle} LOAs across the chain</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 18 }}>
+            {GATES.map(([key, label]) => {
+              const n = counts[key] ?? 0
+              const pct = inCycle > 0 ? Math.round((n / inCycle) * 100) : 0
+              return (
+                <div className="ac-gate" key={key}>
+                  <div className="ac-gate-top">
+                    <span className="ac-gate-role">{label}</span>
+                    <span className="ac-gate-n">{n}</span>
+                  </div>
+                  <div className="ac-bar"><div className="ac-bar-fill" style={{ width: `${pct}%` }} /></div>
+                  <span className="ac-gate-note">{n === 0 ? 'nothing waiting' : `${pct}% of the chain`}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="ac-cols">
+        <div className="ac-card">
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 }}>
+            <span className="ac-card-title">Needs an admin</span>
+            <span className="ac-mono ac-card-note">{attention.length}</span>
+          </div>
+          {attention.length === 0 ? (
+            <p className="ac-card-note" style={{ marginTop: 10 }}>Nothing else is blocked right now.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', marginTop: 8 }}>
+              {attention.map(a => (
+                <button
+                  key={a.title}
+                  onClick={() => onGoto(a.go)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+                    padding: '11px 4px', background: 'transparent', cursor: 'pointer',
+                    border: 'none', borderTop: '1px solid var(--border)', fontFamily: 'var(--font-sans)',
+                  }}
+                >
+                  <span style={{ fontSize: 14, color: 'var(--accent-dim)' }} aria-hidden="true">{a.icon}</span>
+                  <span style={{ minWidth: 0, flex: 1 }}>
+                    <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{a.title}</span>
+                    <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.sub}</span>
+                  </span>
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--accent-dim)', whiteSpace: 'nowrap' }}>{a.cta} →</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="ac-stack">
+          <div className="ac-card">
+            <span className="ac-card-title">Platform at a glance</span>
+            <div className="ac-statgrid" style={{ marginTop: 14 }}>
+              {[
+                [String(stats?.total_loas ?? 0), 'LOAs', 'all sources'],
+                [String(stats?.total_users ?? 0), 'users', `${new Set(users.map(u => u.role_code)).size} roles in use`],
+                [String(cycles.length), 'cycles', `${cycles.filter(c => c.isActive).length} open`],
+                [String(batches.length), 'import batches', 'all reversible'],
+              ].map(([v, l, note]) => (
+                <div className="ac-stat" key={l}>
+                  <span className="ac-stat-v">{v}</span>
+                  <span className="ac-stat-l">{l}</span>
+                  <span className="ac-stat-note">{note}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="ac-card">
+            {(() => {
+              const sc = stats?.source_counts ?? {}
+              const total = Object.values(sc).reduce((a, b) => a + b, 0)
+              const SOURCES: [string, string, string][] = [
+                ['laura_created', 'Live', 'var(--accent)'],
+                ['historical_import', 'Historical', 'var(--accent-dim)'],
+                ['demo_seed', 'Demo', 'var(--border)'],
+              ]
+              return (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}>
+                    <span className="ac-card-title">LOAs by source</span>
+                    <span className="ac-mono ac-card-note" style={{ marginLeft: 'auto' }}>{total} rows total</span>
+                  </div>
+                  <div style={{ height: 9, borderRadius: 99, overflow: 'hidden', display: 'flex', background: 'var(--surface-sunken)' }}>
+                    {SOURCES.map(([key, , color]) => {
+                      const pct = total > 0 ? (sc[key] ?? 0) / total * 100 : 0
+                      return pct > 0 ? <div key={key} style={{ width: `${pct}%`, background: color }} /> : null
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 12 }}>
+                    {SOURCES.map(([key, label, color]) => (
+                      <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: color, flexShrink: 0 }} />
+                        <span style={{ fontSize: 11.5, fontWeight: 500, flex: 1, color: 'var(--text-secondary)' }}>{label}</span>
+                        <span className="ac-mono ac-card-note">{sc[key] ?? 0}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )
+            })()}
+          </div>
+        </div>
+      </div>
+
+      {(stats?.high_value_loas?.length ?? 0) > 0 && (
+        <div className="ac-card">
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
+            <span className="ac-card-title">High-value LOAs</span>
+            <span className="ac-card-note">over {formatBudget(BUDGET_ALERT_THRESHOLD)} — highest first</span>
+            <span className="ac-mono ac-card-note" style={{ marginLeft: 'auto' }}>{stats!.high_value_loas!.length}</span>
+          </div>
+          <div className="ac-tablewrap">
+            <table className="ac-table">
+              <thead>
+                <tr>{['Brand', 'Cluster', 'Country', 'Status', 'FY26 Total'].map(h => <th key={h}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {stats!.high_value_loas!.map(loa => (
+                  <tr key={loa.id}
+                    style={{ cursor: loa.cycle_id ? 'pointer' : 'default' }}
+                    onClick={() => loa.cycle_id && (window.location.href = `/cycles/${loa.cycle_id}/both?loa=${loa.id}`)}
+                  >
+                    <td style={{ fontWeight: 600 }}>{loa.brand || '—'}</td>
+                    <td>{loa.cluster || '—'}</td>
+                    <td>{loa.country || '—'}</td>
+                    <td><span className="ac-badge">{loa.status}</span></td>
+                    <td className="ac-mono" style={{ fontWeight: 600, color: 'var(--accent-dim)' }}>{formatBudget(loa.fy_2026_total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 02 Users & people ───────────────────────────────────────────────────────
+
+const BLANK_FORM: CreateUserPayload = { email: '', full_name: '', password: '', role_code: '', is_active: true }
+
+function UsersScreen({
+  users, roles, onChangeRole, onAddUser, onDeactivate, onReactivate,
+}: {
+  users: AdminUser[]
+  roles: AdminRole[]
+  onChangeRole:  (userId: string, roleCode: string) => void
+  onAddUser:     (payload: CreateUserPayload) => Promise<void>
+  onDeactivate:  (userId: string) => Promise<void>
+  onReactivate:  (userId: string) => Promise<void>
+}) {
+  const [q, setQ]               = useState('')
+  const [roleFilter, setRoleFilter] = useState('')
+  const [modalOpen, setModalOpen]   = useState(false)
+  const [form, setForm]             = useState<CreateUserPayload>(BLANK_FORM)
+  const [formErr, setFormErr]       = useState<string | null>(null)
+  const [saving, setSaving]         = useState(false)
+
+  const shown = useMemo(() => {
+    const t = q.trim().toLowerCase()
+    return users.filter(u => {
+      if (roleFilter && u.role_code !== roleFilter) return false
+      if (!t) return true
+      return [u.full_name, u.email, u.role_display_name, u.role_code]
+        .filter(Boolean).some(v => String(v).toLowerCase().includes(t))
+    })
+  }, [users, q, roleFilter])
+
+  const openModal = () => { setForm(BLANK_FORM); setFormErr(null); setModalOpen(true) }
+  const closeModal = () => { if (!saving) setModalOpen(false) }
+
+  const handleAdd = async () => {
+    if (!form.email.trim() || !form.full_name.trim() || !form.password.trim() || !form.role_code) {
+      setFormErr('Name, email, password, and role are all required.')
+      return
+    }
+    setSaving(true); setFormErr(null)
+    try {
+      await onAddUser(form)
+      setModalOpen(false)
+    } catch (e: any) {
+      setFormErr(e?.response?.data?.detail || e?.message || 'Could not create user.')
+    } finally { setSaving(false) }
+  }
+
+  const scopeLabel = (u: AdminUser) => {
+    if (u.role_scope_type === 'all') return 'All LOAs'
+    if (u.role_scope_type === 'author_only') return 'Own LOAs'
+    if (u.role_scope_value?.length) return u.role_scope_value.join(', ')
+    return u.role_scope_type || '—'
+  }
+
+  return (
+    <>
+      <div className="ac-filterbar">
+        <label className="ac-search">
+          <span aria-hidden="true">⌕</span>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, email or role" aria-label="Search users" />
+        </label>
+        <select className="ac-select" value={roleFilter} onChange={e => setRoleFilter(e.target.value)} aria-label="Filter by role">
+          <option value="">Role: all</option>
+          {roles.map(r => <option key={r.code} value={r.code}>{r.display_name}</option>)}
+        </select>
+        <span className="ac-card-note" style={{ marginRight: 'auto' }}>Showing {shown.length} of {users.length}</span>
+        <button className="ac-btn-primary" onClick={openModal}>+ Add user</button>
+      </div>
+
+      {shown.length === 0 ? (
+        <div className="ac-empty">No user matches that search.</div>
+      ) : (
+        <div className="ac-tablewrap">
+          <table className="ac-table">
+            <thead>
+              <tr>
+                {['Name / email', 'Role & scope', 'Status', 'Last active', 'Change role', 'Actions'].map(h => <th key={h}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map(u => (
+                <tr key={u.id}>
+                  <td>
+                    <span style={{ display: 'block', fontWeight: 600 }}>{u.full_name || '—'}</span>
+                    <span className="ac-sub2">{u.email}</span>
+                  </td>
+                  <td>
+                    <span style={{ display: 'block' }}>{u.role_display_name || <em>no role</em>}</span>
+                    <span className="ac-sub2">{scopeLabel(u)}</span>
+                  </td>
+                  <td>
+                    <span className="ac-badge" style={{ background: u.is_active ? undefined : 'var(--st-rejected-bg)', color: u.is_active ? undefined : 'var(--st-rejected-fg)' }}>
+                      {u.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="ac-mono ac-sub2">
+                    {u.last_login ? new Date(u.last_login).toLocaleDateString('en-GB') : 'never'}
+                  </td>
+                  <td>
+                    <select
+                      className="ac-select"
+                      value={u.role_code ?? ''}
+                      onChange={e => onChangeRole(u.id, e.target.value)}
+                      aria-label={`Role for ${u.email}`}
+                    >
+                      <option value="" disabled>Select…</option>
+                      {roles.map(r => <option key={r.code} value={r.code}>{r.display_name}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    {u.is_active
+                      ? <button className="ac-btn" style={{ fontSize: 11.5 }} onClick={() => onDeactivate(u.id)}>Deactivate</button>
+                      : <button className="ac-btn" style={{ fontSize: 11.5 }} onClick={() => onReactivate(u.id)}>Reactivate</button>
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="ac-card-note" style={{ marginTop: 10 }}>
+        Deactivating revokes login immediately but preserves all historical actions (comments, approvals, verdicts).
+      </p>
+
+      {/* Add user modal */}
+      {modalOpen && (
+        <div
+          onClick={closeModal}
+          style={{ position: 'fixed', inset: 0, zIndex: 600, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'var(--surface)', borderRadius: 14, padding: '28px 32px',
+            maxWidth: 480, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,.25)',
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 20, color: 'var(--text-primary)' }}>Add new user</div>
+
+            {[
+              { label: 'Full name', key: 'full_name', type: 'text', placeholder: 'Jane Smith' },
+              { label: 'Email', key: 'email', type: 'email', placeholder: 'jane@example.com' },
+              { label: 'Temporary password', key: 'password', type: 'password', placeholder: '••••••••' },
+            ].map(f => (
+              <div key={f.key} style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 5, color: 'var(--text-secondary)' }}>{f.label}</label>
+                <input
+                  type={f.type}
+                  value={(form as any)[f.key]}
+                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  placeholder={f.placeholder}
+                  style={{
+                    width: '100%', boxSizing: 'border-box', padding: '9px 12px',
+                    borderRadius: 8, border: '1.5px solid var(--border-strong)',
+                    background: 'var(--surface-raised)', color: 'var(--text-primary)',
+                    fontSize: 13, outline: 'none',
+                  }}
+                />
+              </div>
+            ))}
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 5, color: 'var(--text-secondary)' }}>Role</label>
+              <select
+                className="ac-select"
+                value={form.role_code}
+                onChange={e => setForm(p => ({ ...p, role_code: e.target.value }))}
+                style={{ width: '100%' }}
+              >
+                <option value="" disabled>Select a role…</option>
+                {roles.map(r => (
+                  <option key={r.code} value={r.code}>
+                    {r.display_name}
+                    {r.scope_value?.length ? ` · ${r.scope_value.join(', ')}` : r.scope_type !== 'all' ? ` · ${r.scope_type}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 5 }}>
+                Scope is determined by the role. Each role is pre-configured for a specific cluster, brand, or function.
+              </p>
+            </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 20, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={form.is_active ?? true}
+                onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))}
+              />
+              Active immediately
+            </label>
+
+            {formErr && (
+              <div style={{ padding: '8px 12px', background: 'var(--st-rejected-bg)', color: 'var(--st-rejected-fg)', borderRadius: 8, fontSize: 12, marginBottom: 14 }}>
+                {formErr}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="ac-btn" onClick={closeModal} disabled={saving}>Cancel</button>
+              <button className="ac-btn-primary" onClick={handleAdd} disabled={saving}>
+                {saving ? 'Creating…' : 'Create user'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+// ── 03 Roles & permissions ──────────────────────────────────────────────────
 
 /**
- * LAURA — Admin Dashboard · Editorial Finance redesign (Phase 4 v2)
- * -----------------------------------------------------------------
- * Full visual parity with prototype: Gauge, Donut, PipelineFlow,
- * AreaTrend, AttentionCards, colored permission matrix, audit trail.
+ * Exactly what GET /admin/permission-matrix returns.
  *
- * All data contracts and write operations preserved verbatim:
- *   GET   /admin/stats · /admin/users · /admin/roles · /admin/permission-matrix
- *   PATCH /admin/users/{id}/role          { role_code }
- *   PATCH /admin/permission-matrix        { entries }
- *   POST  /admin/loa/{id}/force-status    { new_status, reason }
+ * One permission per (role, status) — not a set — so a cell is a single choice,
+ * and PATCH takes `'none'` to revoke. Guessing a richer shape here is what broke
+ * the whole console page: `matrix.roles.map` on an undefined field threw during
+ * render, so every screen went blank, not just this one.
  */
-
-import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { useMyRole } from '@/hooks/usePermissions'
-import { ThemeToggle } from '@/components/ThemeProvider'
-import { useToast } from '@/components/Toast'
-import { Pill, Btn, Avatar, initialsOf, Overline, Spark, statusKind, KIND_VARS } from '@/components/ui/atoms'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-const F = { display: 'var(--font-display)', sans: 'var(--font-sans)', mono: 'var(--font-mono)' }
-
-/* ──────────── Types ──────────── */
-
-interface DashStats {
-  status_counts: Record<string, number>
-  total_loas: number; total_fy26: number; total_users: number
-  locked_count: number; pipeline_count: number
-  cluster_budgets: { cluster: string; total: number }[]
-  activity_budgets: { activity: string; total: number }[]
-  recent_loas: {
-    id: string; draft_id: string; status: string; cluster: string
-    country: string; brand: string; fy_2026_total: number
-    updated_at: string | null; requestor_email: string
-  }[]
-}
-
-interface AdminUser {
-  id: string; email: string; full_name: string; is_active: boolean
-  role_code: string | null; role_name: string; scope_type: string | null
-  can_override_lock: boolean; created_at: string | null
-}
-
-interface AdminRole {
-  id: number; code: string; display_name: string; scope_type: string
-  scope_value: string[] | null; can_override_lock: boolean; user_count: number
-}
-
-interface MatrixData {
+interface MatrixResponse {
   statuses: string[]
   matrix: { role_code: string; role_name: string; permissions: Record<string, string> }[]
 }
 
-type Tab = 'pulse' | 'people' | 'access' | 'audit'
+interface PermissionDef { code: string; display_name: string; description?: string | null }
 
-/* ──────────── Helpers ──────────── */
+/** Revoking is a value, not a delete, in the PATCH contract. */
+const NONE = 'none'
 
-async function adminFetch(path: string, opts: RequestInit = {}) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null
-  const res = await fetch(`${API}${path}`, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
-  }
-  return res.json()
+function RolesScreen({
+  matrix, permissions, edits, onCell, onSave, onDiscard, saving,
+}: {
+  matrix: MatrixResponse | null
+  permissions: PermissionDef[]
+  /** key = `${role_code}|${status}`, value = permission code or NONE. */
+  edits: Record<string, string>
+  onCell: (key: string, next: string) => void
+  onSave: () => void
+  onDiscard: () => void
+  saving: boolean
+}) {
+  const [q, setQ] = useState('')
+  if (!matrix) return <p className="ac-msg">Loading the permission matrix…</p>
+
+  const dirty = Object.keys(edits).length
+  const t = q.trim().toLowerCase()
+  const rows = t
+    ? matrix.matrix.filter(r => r.role_code.toLowerCase().includes(t) || r.role_name.toLowerCase().includes(t))
+    : matrix.matrix
+
+  return (
+    <>
+      <div className="ac-filterbar">
+        <label className="ac-search">
+          <span aria-hidden="true">⌕</span>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search role" aria-label="Search roles" />
+        </label>
+        <span className="ac-card-note">{rows.length} of {matrix.matrix.length} roles</span>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 9 }}>
+          <button className="ac-btn" onClick={onDiscard} disabled={!dirty || saving}>
+            Discard{dirty ? ` (${dirty})` : ''}
+          </button>
+          <button className="ac-btn-primary" onClick={onSave} disabled={!dirty || saving}>
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="ac-empty">No role matches that search.</div>
+      ) : (
+        <div className="ac-tablewrap">
+          <table className="ac-table ac-matrix">
+            <thead>
+              <tr>
+                <th className="ac-matrix-role">Role</th>
+                {matrix.statuses.map(st => <th key={st} title={st}>{st.replace(/_/g, ' ')}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.role_code}>
+                  <td className="ac-matrix-role">
+                    <span style={{ display: 'block', fontWeight: 600 }}>{r.role_name}</span>
+                    <span className="ac-sub2 ac-mono">{r.role_code}</span>
+                  </td>
+                  {matrix.statuses.map(st => {
+                    const key = `${r.role_code}|${st}`
+                    const base = r.permissions[st] ?? NONE
+                    const val = key in edits ? edits[key] : base
+                    const changed = key in edits && edits[key] !== base
+                    return (
+                      <td key={st}>
+                        <select
+                          className="ac-select"
+                          value={val}
+                          onChange={e => onCell(key, e.target.value)}
+                          aria-label={`${r.role_name} on ${st}`}
+                          style={changed ? { borderColor: 'var(--accent)', fontWeight: 600 } : undefined}
+                        >
+                          <option value={NONE}>—</option>
+                          {permissions.map(p => (
+                            <option key={p.code} value={p.code}>{p.display_name}</option>
+                          ))}
+                        </select>
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )
 }
 
-function fmtEuro(n: number): string {
-  if (!n) return '€0'
-  if (n >= 1_000_000) return `€${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `€${Math.round(n / 1_000)}k`
-  return `€${Math.round(n)}`
+// ── 06 Cycles ───────────────────────────────────────────────────────────────
+
+const CYCLE_STATUS_LABEL: Record<CycleStatus, string> = {
+  draft: 'Draft', open: 'Open', under_review: 'In Review', closed: 'Closed',
 }
 
-function timeAgo(iso: string | null): string {
-  if (!iso) return '—'
-  const d = Date.now() - new Date(iso).getTime()
-  if (d < 60_000) return 'just now'
-  if (d < 3_600_000) return `${Math.floor(d / 60_000)}m ago`
-  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h ago`
-  if (d < 30 * 86_400_000) return `${Math.floor(d / 86_400_000)}d ago`
-  return new Date(iso).toLocaleDateString()
+/** Badge colours read straight off the status tokens, so both themes work. */
+const CYCLE_STATUS_STYLE: Record<CycleStatus, React.CSSProperties> = {
+  draft:        { background: 'transparent', color: 'var(--text-tertiary)', border: '1px solid var(--border-strong)' },
+  open:         { background: 'var(--st-approved-bg)', color: 'var(--st-approved-fg)', border: '1px solid var(--st-approved-fg)' },
+  under_review: { background: 'var(--st-rework-bg)', color: 'var(--st-rework-fg)', border: '1px solid var(--st-rework-fg)' },
+  closed:       { background: 'var(--surface-sunken)', color: 'var(--text-tertiary)', border: '1px solid var(--border)' },
 }
 
-const V3_REVIEW = [
-  'emea_review', 'global_brand_review', 'emea_brand_rework',
-  'global_functions_review', 'emea_functions_rework',
-  'cmo_cfo_review', 'emea_cmo_rework', 'corporate_review',
-]
-
-const PIPELINE_STEPS: [string, string][] = [
-  ['Draft', 'draft'], ['EMEA', 'emea_review'], ['Brand', 'global_brand_review'],
-  ['Functions', 'global_functions_review'], ['CMO/CFO', 'cmo_cfo_review'],
-  ['Corporate', 'corporate_review'], ['Approved', 'approved'],
-]
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: 'Draft', emea_review: 'EMEA', global_brand_review: 'Brand review',
-  emea_brand_rework: 'B-rework', global_functions_review: 'Functions',
-  emea_functions_rework: 'F-rework', cmo_cfo_review: 'CMO/CFO',
-  emea_cmo_rework: 'C-rework', corporate_review: 'Corporate',
-  approved: 'Approved', rejected: 'Rejected',
+/**
+ * The one forward transition offered from each state, with the sentence the
+ * admin has to agree to. Each step is one-way — that is the point of confirming.
+ */
+const CYCLE_NEXT: Partial<Record<CycleStatus, { to: CycleStatus; label: string; confirm: (c: Cycle) => string }>> = {
+  draft: {
+    to: 'open', label: 'Open',
+    confirm: c => `Open "${c.name}"? Marketers will be able to submit LOAs into it immediately.`,
+  },
+  open: {
+    to: 'under_review', label: 'Close submissions',
+    confirm: c => `Close the submission window?\n\nMarketers will no longer be able to submit new LOAs to "${c.name}". Its ${c.totalLoas} LOA${c.totalLoas === 1 ? '' : 's'} stay in review.`,
+  },
+  under_review: {
+    to: 'closed', label: 'Close cycle',
+    confirm: c => `Close "${c.name}" for good?\n\nIt is frozen read-only, the workbook is exported and the close announcement goes out.`,
+  },
 }
 
-const WORKFLOW_ORDER = [
-  'draft', 'emea_review', 'global_brand_review', 'emea_brand_rework',
-  'global_functions_review', 'emea_functions_rework',
-  'cmo_cfo_review', 'emea_cmo_rework', 'corporate_review', 'approved', 'rejected',
-]
-
-const PERM_OPTIONS = ['advance_phase', 'validate', 'edit', 'comment', 'view', 'none'] as const
-
-const CELL_STYLE: Record<string, { bg: string; fg: string; label: string; name: string }> = {
-  advance_phase: { bg: 'var(--gold-soft)', fg: 'var(--gold)', label: 'A', name: 'Advance' },
-  validate:      { bg: 'var(--st-decision-bg)', fg: 'var(--st-decision-fg)', label: 'V', name: 'Validate' },
-  edit:          { bg: 'var(--st-review-bg)', fg: 'var(--st-review-fg)', label: 'E', name: 'Edit' },
-  comment:       { bg: 'var(--st-wait-bg)', fg: 'var(--st-wait-fg)', label: 'C', name: 'Comment' },
-  view:          { bg: 'var(--surface)', fg: 'var(--text-secondary)', label: 'R', name: 'Read' },
-  none:          { bg: 'transparent', fg: 'var(--text-tertiary)', label: '—', name: 'None' },
+/** The backwards move, offered only where it makes sense. Always confirmed twice. */
+const CYCLE_REOPEN: Partial<Record<CycleStatus, { to: CycleStatus; label: string; confirm: (c: Cycle) => string }>> = {
+  under_review: {
+    to: 'open', label: 'Reopen',
+    confirm: c => `Reopen submissions on "${c.name}"?\n\nReviewers have already started working through this cycle. New LOAs will join it mid-review.`,
+  },
+  closed: {
+    to: 'under_review', label: 'Reopen',
+    confirm: c => `Reopen "${c.name}"?\n\nIt has already been exported and announced as closed. Reopening does not retract that announcement.`,
+  },
 }
 
-function roleGroup(r: AdminRole): string {
-  const c = r.code
-  if (c === 'super_admin') return 'Super Admin'
-  if (c.startsWith('corporate')) return 'Corporate'
-  if (c.startsWith('global_brand')) return 'Global Brands'
-  if (c.startsWith('global_function')) return 'Global Functions'
-  if (c.endsWith('_finance')) return 'Local Finance'
-  if (c.endsWith('_marketer')) return 'Local Marketers'
-  if (c === 'regional_cmo' || c === 'regional_cfo') return 'CMO / CFO'
-  return 'Other'
+const BLANK_CYCLE: CreateCyclePayload = {
+  name: '', cycle_type: 'normal', start_date: '', end_date: '',
+  is_test: false, reason: '', authorized_emails: [],
 }
 
-/* ════════════════════════════════════════════════════════════════
-   Page
-   ════════════════════════════════════════════════════════════════ */
+/**
+ * Who can be named on an emergency cycle, with the role shown beside the name.
+ * An admin picking people needs to see that they are covering both sides —
+ * someone to write the LOAs and someone to approve them.
+ */
+function PeoplePicker({
+  users, selected, onToggle,
+}: {
+  users: AdminUser[]
+  selected: string[]
+  onToggle: (email: string) => void
+}) {
+  const [q, setQ] = useState('')
+  const t = q.trim().toLowerCase()
+  const shown = t
+    ? users.filter(u => [u.full_name, u.email, u.role_display_name]
+        .filter(Boolean).some(v => String(v).toLowerCase().includes(t)))
+    : users
 
-export default function AdminPage() {
-  const router = useRouter()
-  const { role, loading: roleLoading } = useMyRole()
-  const { success, error: toastError } = useToast()
+  return (
+    <>
+      <input
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        placeholder="Search people by name, email or role"
+        style={{ ...INPUT, marginBottom: 6 }}
+      />
+      <div style={{
+        maxHeight: 200, overflowY: 'auto', border: '1.5px solid var(--border-strong)',
+        borderRadius: 8, padding: 6, background: 'var(--surface-raised)',
+      }}>
+        {shown.length === 0 ? (
+          <p className="ac-card-note" style={{ padding: 6 }}>
+            {users.length === 0 ? 'No users to pick from.' : 'Nobody matches that search.'}
+          </p>
+        ) : shown.map(u => (
+          <label key={u.id} style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px',
+            fontSize: 12.5, cursor: 'pointer', borderRadius: 6,
+          }}>
+            <input
+              type="checkbox"
+              checked={selected.includes(u.email)}
+              onChange={() => onToggle(u.email)}
+            />
+            <span style={{ minWidth: 0, flex: 1 }}>
+              <span style={{ display: 'block', fontWeight: 600, color: 'var(--text-primary)' }}>
+                {u.full_name || u.email}
+                {u.role_display_name && (
+                  <span style={{ fontWeight: 400, color: 'var(--text-tertiary)' }}> ({u.role_display_name})</span>
+                )}
+              </span>
+              <span className="ac-sub2">
+                {u.email}{u.can_override_lock ? ' · admin' : ''}
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </>
+  )
+}
 
-  const [tab, setTab] = useState<Tab>('pulse')
-  const [stats, setStats] = useState<DashStats | null>(null)
-  const [users, setUsers] = useState<AdminUser[]>([])
-  const [roles, setRoles] = useState<AdminRole[]>([])
-  const [matrix, setMatrix] = useState<MatrixData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+/** Emergency cycles need cover on both sides: someone to write, someone to approve. */
+function peopleShortfall(users: AdminUser[], selected: string[]): string | null {
+  if (selected.length === 0) return 'Pick at least one involved person. Nobody else will be able to see this cycle.'
+  const picked = users.filter(u => selected.includes(u.email))
+  // Unknown emails count as neither — better to prompt than to assume cover.
+  const hasMarketer = picked.some(u => (u.role_code ?? '').endsWith('_marketer'))
+  const hasAdmin = picked.some(u => u.can_override_lock)
+  if (!hasMarketer) return 'Include at least one marketer — otherwise nobody can create LOAs in this cycle.'
+  if (!hasAdmin) return 'Include at least one admin — otherwise nobody can manage this cycle.'
+  return null
+}
 
-  const [overrideLoaId, setOverrideLoaId] = useState('')
-  const [overrideStatus, setOverrideStatus] = useState('emea_review')
-  const [overrideReason, setOverrideReason] = useState('')
-  const [overrideConfirm, setOverrideConfirm] = useState('')
-  const [overriding, setOverriding] = useState(false)
+function CyclesScreen({
+  cycles, users, onCreate, onEdit, onAdvance, onClose, onDelete, busyId, openCreate, onCreateHandled,
+}: {
+  cycles: Cycle[]
+  users: AdminUser[]
+  onCreate: (payload: CreateCyclePayload) => Promise<void>
+  onEdit: (cycle: Cycle, payload: UpdateCyclePayload) => Promise<void>
+  onAdvance: (cycle: Cycle, to: CycleStatus, reopen?: boolean) => Promise<void>
+  onClose: (cycle: Cycle) => Promise<void>
+  onDelete: (cycle: Cycle) => Promise<void>
+  busyId: string | null
+  /** Set by the header's "+ New cycle" button, which lives outside this screen. */
+  openCreate: boolean
+  onCreateHandled: () => void
+}) {
+  const [modalOpen, setModalOpen] = useState(false)
+  /** null = creating; a Cycle = editing that one. */
+  const [editing, setEditing] = useState<Cycle | null>(null)
+  const [form, setForm] = useState<CreateCyclePayload>(BLANK_CYCLE)
+  const [formErr, setFormErr] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
-  const [matrixEdits, setMatrixEdits] = useState<Record<string, string>>({})
-  const [savingMatrix, setSavingMatrix] = useState(false)
-  const [userSearch, setUserSearch] = useState('')
+  const isEmergency = form.cycle_type === 'emergency'
+  const openNormal = cycles.find(c => c.cycleType === 'normal' && c.status === 'open') ?? null
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [s, u, r, m] = await Promise.all([
-          adminFetch('/admin/stats'), adminFetch('/admin/users'),
-          adminFetch('/admin/roles'), adminFetch('/admin/permission-matrix'),
-        ])
-        setStats(s); setUsers(u); setRoles(r); setMatrix(m)
-      } catch (e: any) { setError(e.message) }
-      finally { setLoading(false) }
-    })()
+  const openCreateModal = useCallback(() => {
+    setEditing(null); setForm(BLANK_CYCLE); setFormErr(null); setModalOpen(true)
   }, [])
 
-  /* ── Write operations ── */
-  async function handleChangeRole(userId: string, roleCode: string) {
-    try {
-      await adminFetch(`/admin/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role_code: roleCode }) })
-      success('Role updated')
-      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role_code: roleCode, role_name: roles.find(r => r.code === roleCode)?.display_name || roleCode } : u))
-    } catch (e: any) { toastError(e.message) }
-  }
+  // The header button lives in the console shell, so it asks via this flag.
+  useEffect(() => {
+    if (openCreate) { openCreateModal(); onCreateHandled() }
+  }, [openCreate, openCreateModal, onCreateHandled])
 
-  async function handleOverride() {
-    if (!overrideLoaId.trim()) return
-    setOverriding(true)
-    try {
-      const result = await adminFetch(`/admin/loa/${overrideLoaId.trim()}/force-status`, { method: 'POST', body: JSON.stringify({ new_status: overrideStatus, reason: overrideReason }) })
-      success(`Override applied: ${result.draft_id} ${result.old_status} → ${result.new_status}`)
-      setOverrideLoaId(''); setOverrideReason(''); setOverrideConfirm('')
-    } catch (e: any) { toastError(e.message) }
-    finally { setOverriding(false) }
-  }
-
-  function setMatrixCell(roleCode: string, status: string, perm: string) {
-    setMatrixEdits(prev => ({ ...prev, [`${roleCode}:${status}`]: perm }))
-  }
-
-  async function saveMatrix() {
-    const entries = Object.entries(matrixEdits).map(([key, perm]) => {
-      const [role_code, loa_status] = key.split(':')
-      return { role_code, loa_status, permission_code: perm }
+  const openEditModal = (c: Cycle) => {
+    setEditing(c)
+    setForm({
+      name: c.name,
+      cycle_type: c.cycleType,
+      start_date: c.startDate ? c.startDate.slice(0, 10) : '',
+      end_date: c.endDate ? c.endDate.slice(0, 10) : '',
+      is_test: c.isTest,
+      reason: c.emergencyReason ?? '',
+      authorized_emails: c.authorizedEmails ?? [],
     })
-    if (entries.length === 0) return
-    setSavingMatrix(true)
-    try {
-      const result = await adminFetch('/admin/permission-matrix', { method: 'PATCH', body: JSON.stringify({ entries }) })
-      success(`Matrix saved: ${result.updated} updated, ${result.created} created, ${result.deleted} removed`)
-      setMatrixEdits({})
-      setMatrix(await adminFetch('/admin/permission-matrix'))
-    } catch (e: any) { toastError(e.message) }
-    finally { setSavingMatrix(false) }
+    setFormErr(null); setModalOpen(true)
   }
 
-  /* ── Gates ── */
-  if (loading || roleLoading) return <Gate msg="Loading admin…" />
-  if (role && role.can_override_lock !== true) return <Gate msg="Admins only" sub="This area requires super-admin access." action={() => router.push('/')} actionLabel="← Back to tracker" />
-  if (error) return <Gate msg="Couldn't load admin data" sub={error} action={() => location.reload()} actionLabel="Retry" />
+  const closeModal = () => { if (!saving) setModalOpen(false) }
 
-  const userName = (() => { try { const u = JSON.parse(localStorage.getItem('laura_user') || '{}'); return u.full_name?.split(' ')[0] || 'there' } catch { return 'there' } })()
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+  // What an edit is still allowed to touch, per the API's own rules.
+  const windowEditable = !editing || editing.status === 'draft' || editing.status === 'open'
 
-  const tabs: [Tab, string, string][] = [['pulse', '◉', 'Pulse'], ['people', '◇', 'People'], ['access', '▦', 'Access'], ['audit', '⚡', 'Audit']]
+  const submit = async () => {
+    if (!form.name.trim()) { setFormErr('A name is required.'); return }
+    // Emergency cycles have no fixed window — an admin opens and closes them.
+    if (!isEmergency) {
+      if (!form.start_date || !form.end_date) {
+        setFormErr('A normal cycle needs a submission window — both dates.'); return
+      }
+      if (form.end_date <= form.start_date) {
+        setFormErr('The end date must be after the start date.'); return
+      }
+    }
+    if (isEmergency) {
+      if (!form.reason?.trim()) {
+        setFormErr('An emergency cycle needs a reason — it is the audit trail for going off-cycle.'); return
+      }
+      const short = peopleShortfall(users, form.authorized_emails ?? [])
+      if (short) { setFormErr(short); return }
+    }
 
-  return (
-    <div style={{ minHeight: '100vh', background: 'var(--canvas)', fontFamily: F.sans }}>
-      {/* Topbar */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 40, display: 'flex', alignItems: 'center', gap: 18, padding: '0 26px', height: 56, background: 'var(--canvas)', borderBottom: '1px solid var(--border)' }}>
-        <button className="la-link" onClick={() => router.push('/')} style={{ fontSize: 13 }}>← Back</button>
-        <span style={{ color: 'var(--border-strong)' }}>|</span>
-        <span style={{ fontFamily: F.display, fontSize: 20, fontWeight: 600, color: 'var(--text-primary)' }}>Admin</span>
-        <div style={{ flex: 1 }} />
-        <nav style={{ display: 'flex', gap: 2 }}>
-          {tabs.map(([k, ic, label]) => (
-            <button key={k} className={`la-tab ${tab === k ? 'la-tab-on' : ''}`} onClick={() => setTab(k)}>
-              <span style={{ marginRight: 6, opacity: .6, fontSize: 11 }}>{ic}</span>{label}
-            </button>
-          ))}
-        </nav>
-        <ThemeToggle />
-      </div>
+    setSaving(true); setFormErr(null)
+    try {
+      if (editing) {
+        const patch: UpdateCyclePayload = { name: form.name.trim() }
+        if (windowEditable && form.end_date) patch.end_date = form.end_date
+        if (editing.cycleType === 'emergency') {
+          patch.reason = form.reason
+          patch.authorized_emails = form.authorized_emails
+        }
+        await onEdit(editing, patch)
+      } else {
+        await onCreate({
+          ...form,
+          start_date: isEmergency ? undefined : form.start_date,
+          end_date: isEmergency ? undefined : form.end_date,
+          reason: isEmergency ? form.reason : undefined,
+          authorized_emails: isEmergency ? form.authorized_emails : undefined,
+        })
+      }
+      setModalOpen(false)
+    } catch (e: any) {
+      setFormErr(e?.response?.data?.detail || e?.message || 'Could not save that cycle.')
+    } finally { setSaving(false) }
+  }
 
-      <main className="la-page la-fade" style={{ maxWidth: 1280 }}>
-        {tab === 'pulse' && stats && <PulseTab stats={stats} users={users} router={router} greeting={greeting} userName={userName} />}
-        {tab === 'people' && <PeopleTab users={users} roles={roles} search={userSearch} onSearchChange={setUserSearch} onChangeRole={handleChangeRole} />}
-        {tab === 'access' && matrix && <AccessTab matrix={matrix} edits={matrixEdits} saving={savingMatrix} onCellChange={setMatrixCell} onDiscard={() => setMatrixEdits({})} onSave={saveMatrix} />}
-        {tab === 'audit' && <AuditTab loaId={overrideLoaId} setLoaId={setOverrideLoaId} status={overrideStatus} setStatus={setOverrideStatus} reason={overrideReason} setReason={setOverrideReason} confirm={overrideConfirm} setConfirm={setOverrideConfirm} overriding={overriding} onSubmit={handleOverride} recentLoas={stats?.recent_loas || []} />}
-      </main>
-    </div>
-  )
-}
-
-function Gate({ msg, sub, action, actionLabel }: { msg: string; sub?: string; action?: () => void; actionLabel?: string }) {
-  return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center', justifyContent: 'center', background: 'var(--canvas)', fontFamily: F.sans }}>
-      <div style={{ fontFamily: F.display, fontSize: 28, color: 'var(--text-primary)' }}>{msg}</div>
-      {sub && <p style={{ margin: 0, fontSize: 13, color: 'var(--text-tertiary)', maxWidth: 500, textAlign: 'center', fontFamily: F.mono }}>{sub}</p>}
-      {action && <Btn variant="secondary" onClick={action}>{actionLabel}</Btn>}
-    </div>
-  )
-}
-
-/* ════════════════════════════════════════════════════════════════
-   Pulse (Overview)
-   ════════════════════════════════════════════════════════════════ */
-
-function PulseTab({ stats, users, router, greeting, userName }: { stats: DashStats; users: AdminUser[]; router: any; greeting: string; userName: string }) {
-  const sc = stats.status_counts || {}
-  const activeReview = V3_REVIEW.reduce((s, k) => s + (sc[k] || 0), 0)
-  const rejected = sc['rejected'] || 0
-  const approved = sc['approved'] || 0
-  const approvalRate = stats.total_loas > 0 ? ((approved / stats.total_loas) * 100).toFixed(1) : '0'
-  const noRoleUsers = users.filter(u => !u.role_code)
-
-  const bottleneck = useMemo(() => {
-    let best: { key: string; count: number } | null = null
-    for (const k of V3_REVIEW) { const c = sc[k] || 0; if (c > 0 && (!best || c > best.count)) best = { key: k, count: c } }
-    return best
-  }, [sc])
-
-  const maxCluster = Math.max(1, ...stats.cluster_budgets.map(c => c.total))
-  const activityTotal = stats.activity_budgets.reduce((s, a) => s + a.total, 0)
+  const toggleEmail = (email: string) => setForm(p => {
+    const cur = p.authorized_emails ?? []
+    return { ...p, authorized_emails: cur.includes(email) ? cur.filter(e => e !== email) : [...cur, email] }
+  })
 
   return (
-    <div style={{ display: 'grid', gap: 18 }}>
-      {/* Greeting */}
-      <KickoffBar />
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-        <div>
-          <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 500, margin: 0, color: 'var(--text-primary)' }}>{greeting}, {userName}</h2>
-          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-            {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}
-            {bottleneck && <> · <b>{bottleneck.count} LOA{bottleneck.count > 1 ? 's' : ''} bottlenecked</b> at {STATUS_LABELS[bottleneck.key]}</>}
-          </div>
+    <div className="ac-stack">
+      <div className="ac-card">
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          <span className="ac-card-title">Kickoff rules</span>
+          <span style={{ marginLeft: 'auto' }}>
+            <button className="ac-btn-primary" onClick={openCreateModal}>+ New cycle</button>
+          </span>
         </div>
+        <p className="ac-card-note" style={{ marginTop: 8 }}>
+          <strong>1</strong> — One normal cycle may be Open at a time. Close the current one before opening the next.
+          Historical and off-cycle batches can be imported without affecting the open cycle.
+        </p>
+        <p className="ac-card-note" style={{ marginTop: 6 }}>
+          <strong>2</strong> — The lifecycle runs one way: Draft → Open → In Review → Closed. Submissions are accepted
+          only while a cycle is Open; an emergency cycle runs the full nine-gate chain, but only the people named on it
+          can see it or anything inside it.
+        </p>
+        {!openNormal && (
+          <p className="ac-card-note" style={{ marginTop: 6, color: 'var(--st-rejected-fg)' }}>
+            No normal cycle is open right now — marketers cannot submit.
+          </p>
+        )}
       </div>
 
-      {/* Gauge + KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16 }} className="la-form-grid">
-        <div className="la-card" style={{ padding: '20px 22px 14px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <Overline style={{ alignSelf: 'flex-start', marginBottom: 8 }}>FY26 budget envelope</Overline>
-          <GaugeSVG value={stats.total_fy26 / 1_000_000} max={110} />
-          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 4 }}>
-            <span style={{ fontFamily: F.mono, color: 'var(--text-secondary)' }}>{fmtEuro(110_000_000 - stats.total_fy26)}</span> remaining
-          </div>
-        </div>
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }} className="la-form-grid">
-            <KpiCard n={String(activeReview)} label="in active review" data={[14, 12, 13, 11, activeReview]} good={activeReview < 15} />
-            <KpiCard n={`${approvalRate}%`} label="approval rate FY26" data={[94.5, 95.1, 95.8, 96.4, parseFloat(approvalRate)]} good={true} delta={`${approved.toLocaleString()} of ${stats.total_loas.toLocaleString()}`} />
-            <KpiCard n={String(stats.total_users)} label="active users" data={[42, 44, 46, 48, stats.total_users]} good={true} />
-          </div>
-          {/* Budget trend placeholder */}
-          <div className="la-card" style={{ padding: '14px 18px 8px' }}>
-            <Overline style={{ marginBottom: 6 }}>Committed budget</Overline>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-              <span style={{ fontFamily: F.display, fontSize: 38, fontWeight: 600, color: 'var(--text-primary)' }}>{fmtEuro(stats.total_fy26)}</span>
-              <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>across {stats.total_loas.toLocaleString('fr-FR')} LOAs</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Attention cards */}
-      <div>
-        <Overline style={{ marginBottom: 10 }}>Needs your attention</Overline>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }} className="la-form-grid">
-          {bottleneck && (
-            <AttentionCard icon="⏳" kind="Wait" title={`${STATUS_LABELS[bottleneck.key]} bottleneck`}
-              sub={`${bottleneck.count} LOA${bottleneck.count > 1 ? 's' : ''} waiting at ${STATUS_LABELS[bottleneck.key]}.`}
-              cta="View queue" onClick={() => router.push('/')} />
-          )}
-          {rejected > 0 && (
-            <AttentionCard icon="✕" kind="Rejected" title={`${rejected} rejection${rejected > 1 ? 's' : ''}`}
-              sub={`${rejected} LOA${rejected > 1 ? 's have' : ' has'} been rejected and may need rework.`}
-              cta="Review rejections" onClick={() => router.push('/')} />
-          )}
-          {noRoleUsers.length > 0 && (
-            <AttentionCard icon="◇" kind="Review" title={`${noRoleUsers.length} user${noRoleUsers.length > 1 ? 's' : ''} without role`}
-              sub={noRoleUsers.slice(0, 3).map(u => u.full_name || u.email.split('@')[0]).join(', ') + (noRoleUsers.length > 3 ? ` and ${noRoleUsers.length - 3} more` : '')}
-              cta="Assign roles" onClick={() => {}} />
-          )}
-          {!bottleneck && rejected === 0 && noRoleUsers.length === 0 && (
-            <AttentionCard icon="✓" kind="Approved" title="All clear" sub="No bottlenecks, no rejections, all users assigned." cta="" />
-          )}
-        </div>
-      </div>
-
-      {/* Pipeline flow */}
-      <div className="la-card" style={{ padding: '20px 22px 10px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Overline>Where LOAs are right now</Overline>
-          <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Bubble size = number of LOAs</span>
-        </div>
-        <PipelineFlowSVG sc={sc} onClick={() => router.push('/')} />
-      </div>
-
-      {/* Budget + Activity */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 16 }} className="la-form-grid">
-        <div className="la-card" style={{ padding: 20 }}>
-          <Overline style={{ marginBottom: 12 }}>Budget by cluster</Overline>
-          {stats.cluster_budgets.map((c, i) => (
-            <div key={c.cluster || '—'} style={{ display: 'grid', gridTemplateColumns: '18px 80px 1fr 90px', gap: 10, alignItems: 'center', padding: '8px 0' }}>
-              <span style={{ fontFamily: F.mono, fontSize: 11, color: i === 0 ? 'var(--gold)' : 'var(--text-tertiary)', fontWeight: 600 }}>{i + 1}</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{c.cluster || '—'}</span>
-              <div style={{ height: 7, background: 'var(--surface-sunken)', borderRadius: 99 }}>
-                <div style={{ width: `${(c.total / maxCluster) * 100}%`, height: '100%', background: 'var(--gold)', borderRadius: 99, opacity: 1 - i * 0.12 }} />
-              </div>
-              <span style={{ textAlign: 'right', fontFamily: F.mono, fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{fmtEuro(c.total)}</span>
-            </div>
-          ))}
-        </div>
-        <div className="la-card" style={{ padding: 20 }}>
-          <Overline style={{ marginBottom: 14 }}>Activity mix</Overline>
-          <DonutSVG activities={stats.activity_budgets} total={activityTotal} />
-        </div>
-      </div>
-
-      {/* Recent activity */}
-      <div className="la-card" style={{ padding: '20px 20px 10px' }}>
-        <Overline style={{ marginBottom: 10 }}>Latest activity</Overline>
-        {stats.recent_loas.map(l => {
-          const k = statusKind(l.status)
-          const [bg, fg] = KIND_VARS[k]
-          return (
-            <button key={l.id} className="la-row" onClick={() => router.push(`/loa/${l.id}`)} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', width: '100%', background: 'transparent', border: 'none', textAlign: 'left', fontFamily: F.sans, cursor: 'pointer' }}>
-              <span style={{ width: 22, height: 22, borderRadius: 99, flexShrink: 0, fontSize: 10.5, background: `var(${bg})`, color: `var(${fg})`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>◆</span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--text-primary)' }}>
-                  <b>{l.brand || '—'}</b> · {l.country || '—'} · <Pill status={l.status} />
-                </div>
-                <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 1 }}>
-                  {l.requestor_email?.split('@')[0] || '—'} · {timeAgo(l.updated_at)} · {fmtEuro(l.fy_2026_total || 0)}
-                </div>
-              </div>
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-/* ── SVG: Gauge ── */
-function GaugeSVG({ value, max }: { value: number; max: number }) {
-  const pct = Math.min(value / max, 1)
-  const startAngle = -210, endAngle = 30, range = endAngle - startAngle
-  const angle = startAngle + pct * range
-  const r = 64, cx = 80, cy = 80
-  const toRad = (a: number) => (a * Math.PI) / 180
-  const arcEnd = (a: number) => [cx + r * Math.cos(toRad(a)), cy + r * Math.sin(toRad(a))]
-  const [sx, sy] = arcEnd(startAngle), [ex, ey] = arcEnd(endAngle), [nx, ny] = arcEnd(angle)
-  const largeArc = range > 180 ? 1 : 0, largeArcFilled = (angle - startAngle) > 180 ? 1 : 0
-  const bgD = `M ${sx} ${sy} A ${r} ${r} 0 ${largeArc} 1 ${ex} ${ey}`
-  const fillD = `M ${sx} ${sy} A ${r} ${r} 0 ${largeArcFilled} 1 ${nx} ${ny}`
-  const needleLen = r - 10
-  const [tipX, tipY] = [cx + needleLen * Math.cos(toRad(angle)), cy + needleLen * Math.sin(toRad(angle))]
-  return (
-    <svg viewBox="0 0 160 120" style={{ width: 200 }}>
-      <path d={bgD} fill="none" stroke="var(--surface-sunken)" strokeWidth="12" strokeLinecap="round" />
-      <path d={fillD} fill="none" stroke="var(--gold)" strokeWidth="12" strokeLinecap="round" className="la-gauge" />
-      <line x1={cx} y1={cy} x2={tipX} y2={tipY} stroke="var(--text-primary)" strokeWidth="2.5" strokeLinecap="round" />
-      <circle cx={cx} cy={cy} r="4" fill="var(--text-primary)" />
-      <text x={cx} y={cy + 22} textAnchor="middle" style={{ fontFamily: F.display, fontSize: 20, fontWeight: 600, fill: 'var(--text-primary)' }}>€{value.toFixed(1)}M</text>
-      <text x={cx} y={cy + 34} textAnchor="middle" style={{ fontSize: 8, fill: 'var(--text-tertiary)' }}>of €{max}M envelope</text>
-    </svg>
-  )
-}
-
-/* ── SVG: Donut ── */
-function DonutSVG({ activities, total }: { activities: { activity: string; total: number }[]; total: number }) {
-  const r = 52, c = 2 * Math.PI * r, ops = [1, .68, .44, .26, .18, .14, .1, .08, .06, .05]
-  let acc = 0
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap' }}>
-      <svg viewBox="0 0 140 140" style={{ width: 132, flexShrink: 0 }}>
-        {activities.map((a, i) => {
-          const frac = total > 0 ? a.total / total : 0, off = acc; acc += frac
-          return <circle key={a.activity} cx="70" cy="70" r={r} fill="none" stroke="var(--gold)" strokeOpacity={ops[i] || .05} strokeWidth="15" strokeDasharray={`${frac * c - 2} ${c}`} strokeDashoffset={-off * c} transform="rotate(-90 70 70)" />
-        })}
-        <text x="70" y="66" textAnchor="middle" style={{ fontFamily: F.display, fontSize: 21, fontWeight: 600, fill: 'var(--text-primary)' }}>{fmtEuro(total)}</text>
-        <text x="70" y="82" textAnchor="middle" style={{ fontSize: 9, fill: 'var(--text-tertiary)' }}>{activities.length} types</text>
-      </svg>
-      <div style={{ display: 'grid', gap: 7, flex: 1, minWidth: 170 }}>
-        {activities.slice(0, 6).map((a, i) => (
-          <div key={a.activity} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5 }}>
-            <span style={{ width: 9, height: 9, borderRadius: 3, background: 'var(--gold)', opacity: ops[i] || .1, flexShrink: 0 }} />
-            <span style={{ fontWeight: 500, flex: 1, color: 'var(--text-primary)' }}>{a.activity || '—'}</span>
-            <span style={{ fontFamily: F.mono, fontSize: 12, color: 'var(--text-secondary)' }}>{fmtEuro(a.total)}</span>
-            <span style={{ fontFamily: F.mono, fontSize: 10.5, color: 'var(--text-tertiary)', width: 34, textAlign: 'right' }}>{total > 0 ? Math.round((a.total / total) * 100) : 0}%</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/* ── SVG: PipelineFlow ── */
-function PipelineFlowSVG({ sc, onClick }: { sc: Record<string, number>; onClick: () => void }) {
-  const W = 920, mainY = 74
-  const xs = PIPELINE_STEPS.map((_, i) => 60 + i * ((W - 120) / (PIPELINE_STEPS.length - 1)))
-  const rad = (n: number) => n === 0 ? 7 : Math.min(30, 9 + Math.sqrt(n) * 0.85)
-  const rej = sc['rejected'] || 0
-
-  return (
-    <svg viewBox={`0 0 ${W} 160`} style={{ width: '100%', marginTop: 8 }}>
-      <line x1={xs[0]} y1={mainY} x2={xs[xs.length - 1]} y2={mainY} stroke="var(--border-strong)" strokeWidth="1.5" />
-      <line x1={xs[0]} y1={mainY} x2={xs[xs.length - 1]} y2={mainY} stroke="var(--gold)" strokeWidth="1.5" strokeDasharray="3 9" className="la-flowline" opacity=".8" />
-      {PIPELINE_STEPS.map(([label, key], i) => {
-        const n = (sc[key] || 0) + (key === 'global_brand_review' ? (sc['emea_brand_rework'] || 0) : key === 'global_functions_review' ? (sc['emea_functions_rework'] || 0) : key === 'cmo_cfo_review' ? (sc['emea_cmo_rework'] || 0) : 0)
-        const r = rad(n)
-        const kind = key === 'approved' ? 'Approved' : key === 'draft' ? 'Draft' : 'Wait'
-        const fillC = n === 0 ? 'var(--surface-sunken)' : kind === 'Approved' ? 'var(--st-approved-bg)' : kind === 'Draft' ? 'var(--st-draft-bg)' : 'var(--gold-soft)'
-        const strokeC = n === 0 ? 'var(--border-strong)' : kind === 'Approved' ? 'var(--st-approved-fg)' : kind === 'Draft' ? 'var(--st-draft-fg)' : 'var(--gold)'
-        return (
-          <g key={key} onClick={onClick} style={{ cursor: 'pointer' }}>
-            <circle cx={xs[i]} cy={mainY} r={r} fill={fillC} stroke={strokeC} strokeWidth="1.6" className={n > 3 ? 'la-pulse' : ''} />
-            <text x={xs[i]} y={mainY + (r >= 13 ? 4 : -r - 7)} textAnchor="middle" style={{ fontFamily: F.mono, fontSize: r >= 13 ? 11.5 : 10.5, fontWeight: 600, fill: n === 0 ? 'var(--text-tertiary)' : strokeC }}>{n > 0 ? n.toLocaleString() : '0'}</text>
-            <text x={xs[i]} y={126} textAnchor="middle" style={{ fontFamily: F.sans, fontSize: 10.5, fontWeight: 600, letterSpacing: '.05em', fill: 'var(--text-secondary)', textTransform: 'uppercase' } as any}>{label}</text>
-          </g>
-        )
-      })}
-      {rej > 0 && (
-        <>
-          <circle cx={xs[2] + 70} cy={mainY + 50} r={11} fill="var(--st-rejected-bg)" stroke="var(--st-rejected-fg)" strokeWidth="1.4" />
-          <text x={xs[2] + 70} y={mainY + 54} textAnchor="middle" style={{ fontFamily: F.mono, fontSize: 10, fontWeight: 600, fill: 'var(--st-rejected-fg)' }}>{rej}</text>
-          <text x={xs[2] + 90} y={mainY + 54} style={{ fontSize: 10.5, fill: 'var(--st-rejected-fg)' }}>Rejected</text>
-        </>
-      )}
-    </svg>
-  )
-}
-
-/* ── Attention card ── */
-function AttentionCard({ icon, kind, title, sub, cta, onClick }: { icon: string; kind: string; title: string; sub: string; cta: string; onClick?: () => void }) {
-  const [bg, fg] = KIND_VARS[kind as keyof typeof KIND_VARS] || ['--st-draft-bg', '--st-draft-fg']
-  return (
-    <div className="la-card la-hover" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ width: 32, height: 32, borderRadius: 9, background: `var(${bg})`, color: `var(${fg})`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>{icon}</span>
-        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
-      </div>
-      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{sub}</div>
-      {cta && <button className="la-link" style={{ fontSize: 12.5, marginTop: 'auto', color: `var(${fg})` }} onClick={onClick}>{cta} →</button>}
-    </div>
-  )
-}
-
-function KpiCard({ n, label, data, good, delta }: { n: string; label: string; data: number[]; good: boolean; delta?: string }) {
-  return (
-    <div className="la-card" style={{ padding: '16px 18px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ fontFamily: F.mono, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>{n}</div>
-        <Spark data={data} good={good} />
-      </div>
-      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>{label}</div>
-      {delta && <div style={{ fontSize: 11, color: good ? 'var(--st-approved-fg)' : 'var(--text-tertiary)', marginTop: 3, fontWeight: 600 }}>{delta}</div>}
-    </div>
-  )
-}
-
-/* ════════════════════════════════════════════════════════════════
-   People (Users)
-   ════════════════════════════════════════════════════════════════ */
-
-function PeopleTab({ users, roles, search, onSearchChange, onChangeRole }: { users: AdminUser[]; roles: AdminRole[]; search: string; onSearchChange: (v: string) => void; onChangeRole: (id: string, rc: string) => void }) {
-  const noRole = users.filter(u => !u.role_code)
-  const filtered = useMemo(() => {
-    if (!search) return users
-    const q = search.toLowerCase()
-    return users.filter(u => u.email.toLowerCase().includes(q) || (u.full_name || '').toLowerCase().includes(q) || (u.role_name || '').toLowerCase().includes(q))
-  }, [users, search])
-
-  const groups = useMemo(() => {
-    const m = new Map<string, number>()
-    roles.forEach(r => { const g = roleGroup(r); m.set(g, (m.get(g) || 0) + 1) })
-    return m
-  }, [roles])
-
-  return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      {/* Stats */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        {[[String(users.length), 'users'], [String(groups.size), 'role groups'], [noRole.length > 0 ? `${noRole.length} unassigned` : '100% assigned', 'role coverage']].map(([n, l]) => (
-          <div key={l} className="la-card" style={{ padding: '10px 18px', display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontFamily: F.mono, fontSize: 19, fontWeight: 600, color: 'var(--text-primary)' }}>{n}</span>
-            <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{l}</span>
-          </div>
-        ))}
-        <div className="la-search" style={{ marginLeft: 'auto' }}>
-          <span style={{ opacity: .5 }}>⌕</span>
-          <input placeholder="Search email, name, role…" value={search} onChange={(e) => onSearchChange(e.target.value)} />
-        </div>
-      </div>
-
-      {/* No-role card */}
-      {noRole.length > 0 && (
-        <div className="la-card" style={{ padding: 18, borderLeft: '3px solid var(--gold)' }}>
-          <Overline style={{ color: 'var(--text-secondary)', marginBottom: 12 }}>{noRole.length} user{noRole.length > 1 ? 's' : ''} need a role</Overline>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }} className="la-form-grid">
-            {noRole.slice(0, 6).map(u => (
-              <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--surface-raised)', border: '1px solid var(--border)', borderRadius: 10 }}>
-                <Avatar initials={initialsOf(u.full_name || u.email)} size={30} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-primary)' }}>{u.full_name || u.email.split('@')[0]}</div>
-                  <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.email}</div>
-                </div>
-                <select className="la-input" onChange={(e) => e.target.value && onChangeRole(u.id, e.target.value)} defaultValue="" style={{ height: 28, fontSize: 11, padding: '0 6px', width: 120, cursor: 'pointer' }}>
-                  <option value="">Assign…</option>
-                  {roles.map(r => <option key={r.code} value={r.code}>{r.display_name}</option>)}
-                </select>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Full table */}
-      <div className="la-card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="la-thead" style={{ display: 'grid', gridTemplateColumns: '44px 1.15fr 1fr 160px 120px 110px' }}>
-          <div /><div>User</div><div>Email</div><div>Role</div><div>Scope</div><div />
-        </div>
-        {filtered.map(u => (
-          <div key={u.id} className="la-row" style={{ display: 'grid', gridTemplateColumns: '44px 1.15fr 1fr 160px 120px 110px', alignItems: 'center', cursor: 'default' }}>
-            <Avatar initials={initialsOf(u.full_name || u.email)} size={28} />
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>
-              {u.full_name || '—'} {u.can_override_lock && <span title="Admin" style={{ color: 'var(--gold)', fontSize: 11 }}>◆</span>}
-            </div>
-            <div style={{ fontFamily: F.mono, fontSize: 11.5, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 10 }}>{u.email}</div>
-            <div><Pill status={u.role_code || 'draft'} label={u.role_name || 'No role'} kind={u.role_code ? undefined : 'Draft'} /></div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{u.scope_type || '—'}</div>
-            <div style={{ textAlign: 'right' }}>
-              <select className="la-input" value={u.role_code || ''} onChange={(e) => e.target.value && onChangeRole(u.id, e.target.value)} style={{ height: 28, fontSize: 11, padding: '0 6px', cursor: 'pointer' }}>
-                {!u.role_code && <option value="">—</option>}
-                {roles.map(r => <option key={r.code} value={r.code}>{r.display_name}</option>)}
-              </select>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/* ════════════════════════════════════════════════════════════════
-   Access (Permission matrix)
-   ════════════════════════════════════════════════════════════════ */
-
-function AccessTab({ matrix, edits, saving, onCellChange, onDiscard, onSave }: { matrix: MatrixData; edits: Record<string, string>; saving: boolean; onCellChange: (rc: string, s: string, p: string) => void; onDiscard: () => void; onSave: () => void }) {
-  const editCount = Object.keys(edits).length
-  return (
-    <div style={{ display: 'grid', gap: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', maxWidth: 460, lineHeight: 1.55 }}>
-          Who can do what, at every workflow step. One glance — no guessing.
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {Object.entries(CELL_STYLE).filter(([k]) => k !== 'none').map(([k, s]) => (
-            <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-secondary)' }}>
-              <span style={{ width: 20, height: 20, borderRadius: 6, background: s.bg, color: s.fg, border: k === 'view' ? '1px solid var(--border)' : '1px solid transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10.5, fontWeight: 700 }}>{s.label}</span>
-              {s.name}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {editCount > 0 && (
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Btn variant="primary" onClick={onSave} disabled={saving}>{saving ? 'Saving…' : `Save ${editCount} change${editCount > 1 ? 's' : ''}`}</Btn>
-          <Btn variant="ghost" onClick={onDiscard} disabled={saving}>Discard</Btn>
-        </div>
-      )}
-
-      <div className="la-card" style={{ padding: 0, overflow: 'auto' }}>
-        <div style={{ minWidth: 760 }}>
-          <div className="la-thead" style={{ display: 'grid', gridTemplateColumns: `200px repeat(${matrix.statuses.length}, 1fr)` }}>
-            <div>Role</div>
-            {matrix.statuses.map(s => <div key={s} style={{ textAlign: 'center' }}>{STATUS_LABELS[s] || s}</div>)}
-          </div>
-          {matrix.matrix.map(row => (
-            <div key={row.role_code} className="la-row" style={{ display: 'grid', gridTemplateColumns: `200px repeat(${matrix.statuses.length}, 1fr)`, alignItems: 'center', cursor: 'default' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{row.role_name}</div>
-              {matrix.statuses.map(s => {
-                const key = `${row.role_code}:${s}`
-                const current = edits[key] ?? row.permissions[s] ?? 'none'
-                const edited = key in edits
-                const cs = CELL_STYLE[current] || CELL_STYLE.none
-                return (
-                  <div key={s} style={{ textAlign: 'center' }} title={`${row.role_name} — ${cs.name} at ${s}`}>
-                    <select value={current} onChange={(e) => onCellChange(row.role_code, s, e.target.value)} style={{
-                      width: 26, height: 26, borderRadius: 7, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      background: cs.bg, color: cs.fg, fontSize: 12, fontWeight: 700,
-                      border: edited ? '2px solid var(--gold)' : current === 'view' ? '1px solid var(--border)' : '1px solid transparent',
-                      appearance: 'none', cursor: 'pointer', textAlign: 'center', fontFamily: F.mono, outline: 'none',
-                    }}>
-                      {PERM_OPTIONS.map(p => <option key={p} value={p}>{CELL_STYLE[p].label}</option>)}
-                    </select>
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-      <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-        A = Advance · V = Validate · E = Edit · C = Comment · R = Read · — = None. Click a cell to change. Edited cells have a gold border.
-      </div>
-    </div>
-  )
-}
-
-/* ════════════════════════════════════════════════════════════════
-   Audit (Overrides)
-   ════════════════════════════════════════════════════════════════ */
-
-function AuditTab({ loaId, setLoaId, status, setStatus, reason, setReason, confirm, setConfirm, overriding, onSubmit, recentLoas }: {
-  loaId: string; setLoaId: (v: string) => void; status: string; setStatus: (v: string) => void
-  reason: string; setReason: (v: string) => void; confirm: string; setConfirm: (v: string) => void
-  overriding: boolean; onSubmit: () => void; recentLoas: DashStats['recent_loas']
-}) {
-  const armed = confirm.trim().toUpperCase() === 'OVERRIDE' && loaId.trim().length > 0
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '440px 1fr', gap: 20, alignItems: 'start' }} className="la-form-grid">
-      <div>
-        <div style={{ padding: '13px 16px', borderRadius: 10, background: 'var(--st-rejected-bg)', color: 'var(--st-rejected-fg)', display: 'flex', gap: 11, alignItems: 'flex-start', marginBottom: 14 }}>
-          <span style={{ fontSize: 15 }}>⚠</span>
-          <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
-            <b>Emergency workflow override.</b> Bypasses permission checks and writes an audit event — logged with your name, timestamp and reason.
-          </div>
-        </div>
-        <div className="la-card" style={{ padding: 22, display: 'grid', gap: 16 }}>
-          <label>
-            <span className="la-flabel">LOA ID</span>
-            <input className="la-input" placeholder="UUID or LAURA-ID…" value={loaId} onChange={(e) => setLoaId(e.target.value)} style={{ marginTop: 7, fontFamily: F.mono, fontSize: 13 }} />
-          </label>
-          <label>
-            <span className="la-flabel">Move to</span>
-            <select className="la-input" value={status} onChange={(e) => setStatus(e.target.value)} style={{ marginTop: 7, cursor: 'pointer' }}>
-              {WORKFLOW_ORDER.map(s => <option key={s} value={s}>{STATUS_LABELS[s] || s} ({s})</option>)}
-            </select>
-          </label>
-          <label>
-            <span className="la-flabel">Reason <span style={{ color: 'var(--st-rejected-fg)' }}>*</span></span>
-            <textarea className="la-input" rows={3} placeholder="Why is this override necessary?" value={reason} onChange={(e) => setReason(e.target.value)} style={{ marginTop: 7, resize: 'vertical', paddingTop: 10, height: 'auto' }} />
-          </label>
-          <label>
-            <span className="la-flabel">Confirmation</span>
-            <input className="la-input" placeholder='Type OVERRIDE to confirm' value={confirm} onChange={(e) => setConfirm(e.target.value)} style={{ marginTop: 7, fontFamily: F.mono, fontSize: 13 }} />
-          </label>
-          <Btn variant="danger" onClick={onSubmit} disabled={!armed || overriding} style={{ width: '100%', justifyContent: 'center', height: 40 }}>
-            {overriding ? 'Applying…' : 'Create override'}
-          </Btn>
-          {!armed && (
-            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', textAlign: 'center' }}>
-              {!loaId.trim() ? 'Enter a LOA ID first' : !reason.trim() ? 'A reason is required' : 'Type OVERRIDE to enable'}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Audit trail (from recent_loas as proxy — real audit log endpoint is a TODO) */}
-      <div className="la-card" style={{ padding: '20px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-          <Overline>Recent LOA changes</Overline>
-          <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic' }}>Full audit log — coming soon</span>
-        </div>
-        <div style={{ position: 'relative', paddingLeft: 6 }}>
-          <div style={{ position: 'absolute', left: 16, top: 8, bottom: 8, width: 1.5, background: 'var(--border)' }} />
-          {recentLoas.map((l, i) => {
-            const k = statusKind(l.status)
-            const [bg, fg] = KIND_VARS[k]
+      {cycles.length === 0 ? <div className="ac-empty">No cycles yet.</div> : (
+      <div className="ac-tablewrap">
+      <table className="ac-table">
+        <thead>
+          <tr>{['Cycle', 'Type', 'Status', 'Window', 'LOAs', 'Budget', 'Reference', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {cycles.map(c => {
+            const next = CYCLE_NEXT[c.status]
+            const back = CYCLE_REOPEN[c.status]
+            const busy = busyId === c.id
+            // Deleting real submissions is never on the table — the API refuses
+            // it too, so the button is simply absent rather than failing on click.
+            const deletable = c.isTest || (c.totalLoas ?? 0) === 0
+            // A backend older than the cycle-CRUD work omits this field, and a
+            // stale dev server is the normal case — never dereference it bare.
+            const emails = c.authorizedEmails ?? []
             return (
-              <div key={l.id} style={{ display: 'flex', gap: 14, padding: '10px 0', position: 'relative' }}>
-                <span style={{ width: 22, height: 22, borderRadius: 99, flexShrink: 0, zIndex: 1, fontSize: 10.5, background: `var(${bg})`, color: `var(${fg})`, border: '2px solid var(--surface)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>◆</span>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{STATUS_LABELS[l.status] || l.status}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: F.mono }}>{l.requestor_email?.split('@')[0]} · {timeAgo(l.updated_at)}</span>
+            <tr key={c.id}>
+              <td>
+                <span style={{ fontWeight: 600 }}>{c.name}</span>
+                {c.cycleType === 'emergency' && c.emergencyReason && (
+                  <span className="ac-sub2" style={{ display: 'block' }}>{c.emergencyReason}</span>
+                )}
+                {c.cycleType === 'emergency' && emails.length > 0 && (
+                  <span className="ac-sub2" style={{ display: 'block' }}>
+                    {emails.length} involved · {emails.slice(0, 2).join(', ')}
+                    {emails.length > 2 ? ` +${emails.length - 2}` : ''}
+                  </span>
+                )}
+              </td>
+              <td className="ac-sub2">
+                {c.cycleType === 'emergency'
+                  ? <span className="ac-badge" style={{ background: 'var(--st-rejected-bg)', color: 'var(--st-rejected-fg)' }}>emergency</span>
+                  : 'normal'}
+                {c.isTest && <span className="ac-badge" style={{ marginLeft: 5 }}>test</span>}
+              </td>
+              <td>
+                <span className="ac-badge" style={CYCLE_STATUS_STYLE[c.status]}>
+                  {CYCLE_STATUS_LABEL[c.status] ?? c.status}
+                </span>
+              </td>
+              <td className="ac-mono ac-sub2">
+                {c.cycleType === 'emergency' ? (
+                  <span>no fixed window</span>
+                ) : (<>
+                  {c.startDate ? new Date(c.startDate).toLocaleDateString('en-GB') : '—'}
+                  {' → '}
+                  {c.endDate ? new Date(c.endDate).toLocaleDateString('en-GB') : '—'}
+                  {c.status === 'open' && c.daysRemaining != null && (
+                    <span style={{ display: 'block' }}>
+                      {c.daysRemaining < 0 ? `${-c.daysRemaining}d overdue`
+                        : c.daysRemaining === 0 ? 'ends today' : `${c.daysRemaining}d left`}
+                    </span>
+                  )}
+                </>)}
+              </td>
+              <td className="ac-mono">{c.totalLoas ?? '—'}</td>
+              <td className="ac-mono">{formatBudget(c.totalBudget ?? 0)}</td>
+              <td className="ac-mono ac-sub2">{c.code || '—'}</td>
+              <td>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                  {next && (
+                    <button
+                      className="ac-btn" style={ACTION_BTN} disabled={busy}
+                      onClick={() => {
+                        if (!window.confirm(next.confirm(c))) return
+                        if (next.to === 'closed') onClose(c); else onAdvance(c, next.to)
+                      }}
+                    >{busy ? '…' : next.label}</button>
+                  )}
+                  <button
+                    className="ac-btn" style={ACTION_BTN} disabled={busy}
+                    onClick={() => openEditModal(c)}
+                  >Edit</button>
+                  {back && (
+                    <button
+                      className="ac-btn" style={ACTION_BTN} disabled={busy}
+                      onClick={() => {
+                        if (!window.confirm(back.confirm(c))) return
+                        onAdvance(c, back.to, true)
+                      }}
+                    >{back.label}</button>
+                  )}
+                  {deletable && (
+                    <button
+                      className="ac-btn"
+                      style={{ ...ACTION_BTN, color: 'var(--st-rejected-fg)' }}
+                      disabled={busy}
+                      onClick={() => onDelete(c)}
+                    >Delete</button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          )})}
+        </tbody>
+      </table>
+      </div>
+      )}
+
+      {/* Create / edit modal — one form, two modes */}
+      {modalOpen && (
+        <div
+          onClick={closeModal}
+          style={{ position: 'fixed', inset: 0, zIndex: 600, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'var(--surface)', borderRadius: 14, padding: '28px 32px',
+            maxWidth: 540, width: '100%', maxHeight: '88vh', overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,.25)',
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, color: 'var(--text-primary)' }}>
+              {editing ? `Edit ${editing.code || editing.name}` : 'New cycle'}
+            </div>
+            <p className="ac-card-note" style={{ marginBottom: 20 }}>
+              {editing
+                ? 'The type and start date are fixed — they are what this cycle’s LOAs were filed under.'
+                : 'It is created as a Draft. Nothing can be submitted into it until you open it.'}
+            </p>
+
+            {/* Type is chosen once, at creation. */}
+            {!editing && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                {(['normal', 'emergency'] as CycleType[]).map(t => (
+                  <button
+                    key={t}
+                    className={form.cycle_type === t ? 'ac-btn-primary' : 'ac-btn'}
+                    onClick={() => setForm(p => ({ ...p, cycle_type: t }))}
+                    style={{ flex: 1 }}
+                  >
+                    {t === 'normal' ? 'Normal' : 'Emergency'}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <Field label="Name">
+              <input
+                value={form.name}
+                onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                placeholder={isEmergency ? 'Emergency — Q3 product launch' : 'Cycle 4 2026'}
+                style={INPUT}
+              />
+            </Field>
+
+            {/* An emergency cycle runs until an admin closes it — no dates to set. */}
+            {!isEmergency && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label={editing ? 'Opens (fixed)' : 'Opens'}>
+                  <input
+                    type="date" value={form.start_date ?? ''} disabled={!!editing}
+                    onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))}
+                    style={{ ...INPUT, opacity: editing ? 0.55 : 1 }}
+                  />
+                </Field>
+                <Field label={windowEditable ? 'Closes' : 'Closes (fixed)'}>
+                  <input
+                    type="date" value={form.end_date ?? ''} disabled={!windowEditable}
+                    onChange={e => setForm(p => ({ ...p, end_date: e.target.value }))}
+                    style={{ ...INPUT, opacity: windowEditable ? 1 : 0.55 }}
+                  />
+                </Field>
+              </div>
+            )}
+            {editing && !isEmergency && windowEditable && (
+              <p className="ac-card-note" style={{ marginTop: -6, marginBottom: 14 }}>
+                Extending the closing date keeps the window open longer. It can no longer be changed once
+                submissions close.
+              </p>
+            )}
+
+            {isEmergency && (
+              <>
+                <Field label="Reason">
+                  <textarea
+                    value={form.reason ?? ''}
+                    onChange={e => setForm(p => ({ ...p, reason: e.target.value }))}
+                    placeholder="Why this has to run outside the normal window"
+                    rows={2}
+                    style={{ ...INPUT, resize: 'vertical', fontFamily: 'inherit' }}
+                  />
+                </Field>
+
+                <Field label={`Involved people${form.authorized_emails?.length ? ` (${form.authorized_emails.length})` : ''}`}>
+                  <PeoplePicker
+                    users={users}
+                    selected={form.authorized_emails ?? []}
+                    onToggle={toggleEmail}
+                  />
+                  <p className="ac-card-note" style={{ marginTop: 6 }}>
+                    Only these people — and admins — can see this cycle or the LOAs in it. Everyone else gets nothing
+                    back from the API, not a hidden row. Changes take effect the moment you save.
+                  </p>
+                </Field>
+              </>
+            )}
+
+            {!editing && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '6px 0 20px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.is_test ?? false}
+                  onChange={e => setForm(p => ({ ...p, is_test: e.target.checked }))} />
+                Test cycle — bannered in the UI, and deletable along with its LOAs
+              </label>
+            )}
+
+            {formErr && (
+              <div style={{ padding: '8px 12px', background: 'var(--st-rejected-bg)', color: 'var(--st-rejected-fg)', borderRadius: 8, fontSize: 12, margin: '14px 0' }}>
+                {formErr}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+              <button className="ac-btn" onClick={closeModal} disabled={saving}>Cancel</button>
+              <button className="ac-btn-primary" onClick={submit} disabled={saving}>
+                {saving ? 'Saving…' : editing ? 'Save changes' : 'Create cycle'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const ACTION_BTN: React.CSSProperties = { fontSize: 11.5, whiteSpace: 'nowrap', padding: '4px 9px' }
+
+const INPUT: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box', padding: '9px 12px',
+  borderRadius: 8, border: '1.5px solid var(--border-strong)',
+  background: 'var(--surface-raised)', color: 'var(--text-primary)',
+  fontSize: 13, outline: 'none',
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 5, color: 'var(--text-secondary)' }}>{label}</label>
+      {children}
+    </div>
+  )
+}
+
+// ── 09 Data & imports ───────────────────────────────────────────────────────
+
+function ImportsScreen({ batches, stats }: { batches: ImportBatch[]; stats: Stats | null }) {
+  return (
+    <div className="ac-stack">
+      <div className="ac-card">
+        <span className="ac-card-title">Rows by source</span>
+        <div className="ac-statgrid" style={{ marginTop: 14 }}>
+          <div className="ac-stat">
+            <span className="ac-stat-v">{stats?.total_loas ?? 0}</span>
+            <span className="ac-stat-l">rows total</span>
+          </div>
+          <div className="ac-stat">
+            <span className="ac-stat-v">{batches.reduce((n, b) => n + (b.rowCount ?? 0), 0)}</span>
+            <span className="ac-stat-l">historical, imported</span>
+            <span className="ac-stat-note">{batches.length} batches</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ac-card">
+        <p className="ac-card-note">Every batch is reversible for 90 days. Demo rows never appear in CMO or CFO review — they are filtered at query time and do not affect approval counts.</p>
+      </div>
+
+      {batches.length === 0 ? (
+        <div className="ac-empty">No import batches.</div>
+      ) : (
+        <div className="ac-tablewrap">
+          <table className="ac-table">
+            <thead><tr>{['Batch', 'Rows', 'Imported', 'Notes'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+            <tbody>
+              {batches.map(b => (
+                <tr key={b.id}>
+                  <td style={{ fontWeight: 600 }}>{b.label}</td>
+                  <td className="ac-mono">{b.rowCount}</td>
+                  <td className="ac-mono ac-sub2">
+                    {b.importedAt ? new Date(b.importedAt).toLocaleDateString('en-GB') : '—'}
+                  </td>
+                  <td className="ac-sub2">{b.notes || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 05 Approval chain (read-only) ───────────────────────────────────────────
+
+function ChainScreen({ stats }: { stats: Stats | null }) {
+  const counts = stats?.status_counts ?? {}
+  // Same source as the split-screen stepper: buildChain() off WORKFLOW_ORDER.
+  // The gate owners used to be a second map here, which is exactly how this
+  // screen and the stepper would drift apart.
+  const activeSteps = buildChain('')
+
+  return (
+    <div className="ac-stack">
+      <div className="ac-card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <span className="ac-card-title">Live gate sequence</span>
+          <span className="ac-card-note">read-only · rendered from WORKFLOW_ORDER</span>
+        </div>
+        <p className="ac-card-note" style={{ marginTop: 6, marginBottom: 18 }}>
+          Editing gate owners, reassigning reviewers and publishing chain changes need
+          the <code>approval_chain</code> and <code>approval_gate</code> tables (queued for
+          database audit). This view reflects the authoritative state machine in code.
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {activeSteps.map((step, i) => {
+            const stage = step.key
+            const badge = statusBadge[stage as keyof typeof statusBadge]
+            const n = counts[stage] ?? 0
+            const isTerminal = step.terminal
+            return (
+              <div key={stage} style={{ display: 'flex', gap: 0 }}>
+                {/* connector line */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 32, flexShrink: 0 }}>
+                  <div style={{
+                    width: 12, height: 12, borderRadius: 99, flexShrink: 0, marginTop: 14,
+                    background: isTerminal ? 'var(--accent)' : n > 0 ? 'var(--accent-dim)' : 'var(--border-strong)',
+                    border: `2px solid ${isTerminal ? 'var(--accent)' : 'var(--border-strong)'}`,
+                  }} />
+                  {i < activeSteps.length - 1 && (
+                    <div style={{ width: 2, flex: 1, minHeight: 16, background: 'var(--border)' }} />
+                  )}
+                </div>
+
+                <div style={{
+                  flex: 1, padding: '10px 14px 16px', marginBottom: 0,
+                  borderBottom: i < activeSteps.length - 1 ? '1px solid var(--border)' : 'none',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    {step.index && (
+                      <span className="ac-mono" style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>
+                        {step.index}
+                      </span>
+                    )}
+                    <span style={{
+                      fontSize: 10.5, fontWeight: 600, letterSpacing: '.04em',
+                      color: badge?.text ?? 'var(--text-secondary)',
+                      background: badge?.bg ?? 'var(--bg-surface)',
+                      border: `1px solid ${badge?.border ?? 'var(--border)'}`,
+                      borderRadius: 6, padding: '2px 8px',
+                    }}>
+                      {step.label}
+                    </span>
+                    {n > 0 && (
+                      <span style={{
+                        fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5,
+                        color: 'var(--accent)', fontWeight: 600,
+                      }}>
+                        {n} LOA{n === 1 ? '' : 's'} here now
+                      </span>
+                    )}
                   </div>
-                  <div style={{ color: 'var(--text-secondary)', marginTop: 3, fontFamily: F.mono, fontSize: 11.5 }}>
-                    {l.draft_id} · {l.brand} · {l.country} · {fmtEuro(l.fy_2026_total || 0)}
-                  </div>
+                  <p style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '5px 0 0', lineHeight: 1.5 }}>
+                    {step.owner}
+                  </p>
                 </div>
               </div>
             )
           })}
         </div>
       </div>
+
+      <div className="ac-card">
+        <span className="ac-card-title" style={{ display: 'block', marginBottom: 10 }}>What editing needs</span>
+        <ul className="ac-pending-list">
+          <li>approval_chain — an ordered chain per activity type</li>
+          <li>approval_gate — the gates in a chain and the role that owns each</li>
+        </ul>
+        <p className="ac-card-note" style={{ marginTop: 10 }}>
+          Until those tables exist, chain changes require a code deploy.
+          The read-only view above reflects the current deployed state machine.
+        </p>
+      </div>
     </div>
   )
 }
 
+// ── Console ─────────────────────────────────────────────────────────────────
 
-function KickoffBar() {
-  const [open, setOpen] = useState<null | 'normal' | 'emergency'>(null)
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
-  const [marketers, setMarketers] = useState<{ email: string; full_name: string }[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+export default function AdminConsolePage() {
+  const router = useRouter()
+  const toast = useToast()
+  const { role } = useMyRole()
+
+  const [screen, setScreen] = useState<ScreenId>('overview')
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [users, setUsers] = useState<AdminUser[]>([])
+  const [roles, setRoles] = useState<AdminRole[]>([])
+  const [cycles, setCycles] = useState<Cycle[]>([])
+  const [batches, setBatches] = useState<ImportBatch[]>([])
+  const [matrix, setMatrix] = useState<MatrixResponse | null>(null)
+  const [permissions, setPermissions] = useState<PermissionDef[]>([])
+  const [edits, setEdits] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [cycleBusy, setCycleBusy] = useState<string | null>(null)
+  // The header's "+ New cycle" sits outside CyclesScreen, so it asks via a flag.
+  const [wantCreateCycle, setWantCreateCycle] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  // The screen lives in the URL hash so Back inside the console works and a
+  // link to a specific screen can be shared.
+  useEffect(() => {
+    const apply = () => {
+      const h = window.location.hash.replace('#', '') as ScreenId
+      if (SCREENS.some(s => s.id === h)) setScreen(h)
+    }
+    apply()
+    window.addEventListener('hashchange', apply)
+    return () => window.removeEventListener('hashchange', apply)
+  }, [])
+
+  const goto = useCallback((id: ScreenId) => {
+    setScreen(id)
+    if (typeof window !== 'undefined') window.location.hash = id
+  }, [])
 
   useEffect(() => {
-    if (open !== 'emergency' || marketers.length > 0) return
-    const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null
-    fetch('http://localhost:8000/admin/users', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-      .then(r => r.json())
-      .then(data => {
-        const list = (data.users || data || []).filter((u: any) => (u.role_code || u.role || '').endsWith('_marketer'))
-        setMarketers(list.map((u: any) => ({ email: u.email, full_name: u.full_name })))
-      })
-      .catch(() => {})
-  }, [open, marketers.length])
-
-  function toggle(email: string) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(email)) next.delete(email); else next.add(email)
-      return next
+    let alive = true
+    Promise.allSettled([
+      getAdminStats(), getAdminUsers(), getAdminRoles(),
+      fetchCycles(), fetchImportBatches(),
+      api.get('/admin/permission-matrix').then(r => r.data),
+      api.get('/admin/permissions').then(r => r.data),
+    ]).then(([s, u, r, c, b, m, pm]) => {
+      if (!alive) return
+      if (s.status === 'fulfilled') setStats(s.value as Stats)
+      if (u.status === 'fulfilled') setUsers(newestFirst<AdminUser>(u.value as AdminUser[]))
+      if (r.status === 'fulfilled') setRoles(r.value as AdminRole[])
+      if (c.status === 'fulfilled') setCycles(c.value as Cycle[])
+      if (b.status === 'fulfilled') setBatches(b.value as ImportBatch[])
+      if (m.status === 'fulfilled') setMatrix(m.value as MatrixResponse)
+      if (pm.status === 'fulfilled') setPermissions(pm.value as PermissionDef[])
+      setLoading(false)
     })
-  }
+    return () => { alive = false }
+  }, [])
 
-  async function launch() {
-    if (!startDate || !endDate) { setMsg('Pick both dates.'); return }
-    setBusy(true); setMsg(null)
+  const changeRole = useCallback(async (userId: string, roleCode: string) => {
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('laura_token') : null
-      const res = await fetch('http://localhost:8000/admin/cycle/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({
-          cycle_type: open, start_date: startDate, end_date: endDate,
-          authorized_emails: open === 'emergency' ? Array.from(selected) : null,
-        }),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      const data = await res.json()
-      setMsg(`Started: ${data.name}`)
-      setOpen(null); setStartDate(''); setEndDate('')
-    } catch (e: any) {
-      setMsg('Failed: ' + (e?.message || 'unknown error'))
-    } finally {
-      setBusy(false)
+      await updateUserRole(userId, roleCode)
+      const role = roles.find(r => r.code === roleCode)
+      setUsers(prev => prev.map(u => u.id === userId
+        ? { ...u, role_id: role?.id ?? u.role_id, role_code: roleCode, role_display_name: role?.display_name ?? u.role_display_name, role_scope_type: role?.scope_type ?? u.role_scope_type, role_scope_value: role?.scope_value ?? u.role_scope_value }
+        : u))
+      toast.success('Role updated')
+    } catch {
+      toast.error('Could not update that role')
     }
-  }
+  }, [roles, toast])
+
+  const addUser = useCallback(async (payload: CreateUserPayload) => {
+    const created = await createUser(payload)
+    const role = roles.find(r => r.code === payload.role_code)
+    const newUser: AdminUser = {
+      id:                created.id,
+      email:             created.email,
+      full_name:         created.full_name,
+      is_active:         created.is_active,
+      role_id:           role?.id ?? null,
+      role_code:         role?.code ?? null,
+      role_display_name: role?.display_name ?? null,
+      role_scope_type:   role?.scope_type ?? null,
+      role_scope_value:  role?.scope_value ?? null,
+      can_override_lock: role?.can_override_lock ?? false,
+      last_login:        null,
+      created_at:        created.created_at,
+    }
+    setUsers(prev => [newUser, ...prev])
+    toast.success('User created')
+  }, [roles, toast])
+
+  const doDeactivate = useCallback(async (userId: string) => {
+    try {
+      await deactivateUser(userId)
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: false } : u))
+      toast.success('User deactivated')
+    } catch {
+      toast.error('Could not deactivate user')
+    }
+  }, [toast])
+
+  const doReactivate = useCallback(async (userId: string) => {
+    try {
+      await reactivateUser(userId)
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: true } : u))
+      toast.success('User reactivated')
+    } catch {
+      toast.error('Could not reactivate user')
+    }
+  }, [toast])
+
+  const addCycle = useCallback(async (payload: CreateCyclePayload) => {
+    const created = await createCycle(payload)
+    setCycles(prev => [created, ...prev])
+    toast.success(`Cycle created — ${created.code || created.name}`)
+  }, [toast])
+
+  const editCycle = useCallback(async (cycle: Cycle, payload: UpdateCyclePayload) => {
+    const updated = await updateCycle(cycle.id, payload)
+    setCycles(prev => prev.map(c => c.id === cycle.id ? updated : c))
+    toast.success('Cycle updated')
+  }, [toast])
+
+  const advanceCycle = useCallback(async (cycle: Cycle, to: CycleStatus, reopen = false) => {
+    setCycleBusy(cycle.id)
+    try {
+      const updated = await setCycleStatus(cycle.id, to, reopen)
+      setCycles(prev => prev.map(c => c.id === cycle.id ? updated : c))
+      toast.success(
+        reopen ? 'Cycle reopened'
+          : to === 'open' ? 'Cycle opened'
+          : 'Submissions closed — cycle is now in review',
+      )
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || 'Could not move that cycle')
+    } finally { setCycleBusy(null) }
+  }, [toast])
+
+  const removeCycle = useCallback(async (cycle: Cycle) => {
+    const n = cycle.totalLoas ?? 0
+    // A test cycle takes its LOAs with it, so that one is typed to confirm.
+    if (cycle.isTest && n > 0) {
+      const typed = window.prompt(
+        `Deleting "${cycle.name}" also deletes its ${n} LOA${n === 1 ? '' : 's'} and every comment, verdict and photo on them. This cannot be undone.\n\nType the cycle name to confirm:`,
+      )
+      if (typed !== cycle.name) {
+        if (typed !== null) toast.error('That did not match — nothing was deleted')
+        return
+      }
+    } else if (!window.confirm(`Delete "${cycle.name}"? It holds no LOAs, so nothing else is removed.`)) {
+      return
+    }
+    setCycleBusy(cycle.id)
+    try {
+      await deleteCycle(cycle.id)
+      setCycles(prev => prev.filter(c => c.id !== cycle.id))
+      toast.success('Cycle deleted')
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || 'Could not delete that cycle')
+    } finally { setCycleBusy(null) }
+  }, [toast])
+
+  const finishCycle = useCallback(async (cycle: Cycle) => {
+    setCycleBusy(cycle.id)
+    try {
+      const res = await closeCycle(cycle.id)
+      // The close response is a report, not a cycle row — refetch so the table
+      // shows the real post-close stats rather than a hand-patched guess.
+      setCycles(await fetchCycles())
+      toast.success(
+        res.notification.delivered
+          ? `Cycle closed — ${res.notification.recipients} notified`
+          : 'Cycle closed. The announcement could not be delivered.',
+      )
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || 'Could not close that cycle')
+    } finally { setCycleBusy(null) }
+  }, [toast])
+
+  const saveMatrix = useCallback(async () => {
+    setSaving(true)
+    try {
+      // The PATCH contract is `entries`, and `'none'` revokes — it is not a
+      // boolean grant flag.
+      const entries = Object.entries(edits).map(([key, permission_code]) => {
+        const [role_code, loa_status] = key.split('|')
+        return { role_code, loa_status, permission_code }
+      })
+      const res = await api.patch('/admin/permission-matrix', { entries })
+      const fresh = await api.get('/admin/permission-matrix').then(r => r.data)
+      setMatrix(fresh as MatrixResponse)
+      setEdits({})
+      const d = res.data || {}
+      toast.success(`Saved · ${d.created ?? 0} added, ${d.updated ?? 0} changed, ${d.deleted ?? 0} revoked`)
+    } catch {
+      toast.error('Could not save those permissions')
+    } finally {
+      setSaving(false)
+    }
+  }, [edits, toast])
+
+  const s = byId(screen)
 
   return (
-    <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: 0.5 }}>LOA CYCLE</span>
-        <button onClick={() => setOpen(open === 'normal' ? null : 'normal')}
-          style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border-strong)', background: open === 'normal' ? 'var(--accent)' : 'transparent', color: open === 'normal' ? 'var(--accent-text)' : 'var(--text-primary)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
-          Start Normal Cycle
-        </button>
-        <button onClick={() => setOpen(open === 'emergency' ? null : 'emergency')}
-          style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #c0392b', background: open === 'emergency' ? '#c0392b' : 'transparent', color: open === 'emergency' ? '#fff' : '#c0392b', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
-          Start Emergency
-        </button>
-        {msg && <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{msg}</span>}
-      </div>
-      {open && (
-        <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Start
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-              style={{ marginLeft: 6, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-strong)' }} />
-          </label>
-          <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>End
-            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-              style={{ marginLeft: 6, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-strong)' }} />
-          </label>
-          {open === 'emergency' && (
-            <div style={{ width: '100%', marginTop: 4, marginBottom: 4 }}>
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 6 }}>Authorized marketers for this emergency:</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflowY: 'auto' }}>
-                {marketers.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Loading marketers…</span>}
-                {marketers.map(m => (
-                  <label key={m.email} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 999, border: '1px solid var(--border-strong)', background: selected.has(m.email) ? '#c0392b' : 'transparent', color: selected.has(m.email) ? '#fff' : 'var(--text-primary)', fontSize: 11.5, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={selected.has(m.email)} onChange={() => toggle(m.email)} style={{ display: 'none' }} />
-                    {m.full_name || m.email}
-                  </label>
-                ))}
+    <div data-console>
+      <div className="ac-body">
+        <nav className="ac-nav" aria-label="Admin console">
+          {GROUPS.map(g => {
+            const items = SCREENS.filter(x => x.group === g)
+            if (items.length === 0) return null
+            return (
+              <div className="ac-nav-group" key={g}>
+                <span className="ac-nav-label">{g}</span>
+                {items.map(item => {
+                  const pending = isPending(item.id)
+                  return (
+                    <button
+                      key={item.id}
+                      className={item.id === screen ? 'ac-nav-item is-on' : 'ac-nav-item'}
+                      onClick={() => goto(item.id)}
+                      disabled={pending}
+                      aria-current={item.id === screen ? 'page' : undefined}
+                      title={pending ? 'Designed, but waiting on the database audit' : undefined}
+                    >
+                      <span className="ac-nav-item-icon" aria-hidden="true">{item.icon}</span>
+                      <span className="ac-nav-item-label">{item.label}</span>
+                      {pending
+                        ? <span className="ac-nav-item-pending">pending</span>
+                        : item.id === 'users' && users.length > 0
+                          ? <span className="ac-nav-item-badge">{users.length}</span>
+                          : item.id === 'cycles' && cycles.length > 0
+                            ? <span className="ac-nav-item-badge">{cycles.length}</span>
+                            : null}
+                    </button>
+                  )
+                })}
               </div>
+            )
+          })}
+          <div style={{ flex: 1 }} />
+          <div className="ac-nav-foot">
+            <span className="ac-nav-foot-line">
+              <span className="ac-dot" />
+              {role?.role_display_name || 'Admin'}
+            </span>
+            <span className="ac-nav-build">
+              {SCREENS.length - SCREENS.filter(x => isPending(x.id)).length} of {SCREENS.length} screens wired
+            </span>
+          </div>
+        </nav>
+
+        <main className="ac-main">
+          <div className="ac-head">
+            <div style={{ minWidth: 0 }}>
+              <span className="ac-kicker">{s.kicker}</span>
+              <h2 className="ac-title">{s.title}</h2>
             </div>
-          )}
-          <button onClick={launch} disabled={busy}
-            style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: 'var(--ink)', color: 'var(--ink-text)', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>
-            {busy ? 'Starting30' : `Confirm ${open === 'emergency' ? 'Emergency' : 'Normal'} Kickoff`}
-          </button>
-        </div>
-      )}
+            <p className="ac-sub">{s.sub}</p>
+            <div className="ac-head-actions">
+              {screen === 'cycles' && (
+                <button className="ac-btn-primary" onClick={() => setWantCreateCycle(true)}>+ New cycle</button>
+              )}
+              <button className="ac-btn" onClick={() => router.push('/cycles')}>← Folder page</button>
+            </div>
+          </div>
+
+          <div className="ac-scroll">
+            {loading ? (
+              <p className="ac-msg">Loading the console…</p>
+            ) : isPending(screen) ? (
+              <PendingScreen id={screen} />
+            ) : screen === 'overview' ? (
+              <AdminHome stats={stats} users={users} cycles={cycles} batches={batches} onGoto={goto} />
+            ) : screen === 'users' ? (
+              <UsersScreen users={users} roles={roles} onChangeRole={changeRole} onAddUser={addUser} onDeactivate={doDeactivate} onReactivate={doReactivate} />
+            ) : screen === 'roles' ? (
+              <RolesScreen
+                matrix={matrix}
+                permissions={permissions}
+                edits={edits}
+                onCell={(k, v) => setEdits(p => ({ ...p, [k]: v }))}
+                onSave={saveMatrix}
+                onDiscard={() => setEdits({})}
+                saving={saving}
+              />
+            ) : screen === 'cycles' ? (
+              <CyclesScreen
+                cycles={cycles}
+                users={users}
+                onCreate={addCycle}
+                onEdit={editCycle}
+                onAdvance={advanceCycle}
+                onClose={finishCycle}
+                onDelete={removeCycle}
+                busyId={cycleBusy}
+                openCreate={wantCreateCycle}
+                onCreateHandled={() => setWantCreateCycle(false)}
+              />
+            ) : screen === 'imports' ? (
+              <ImportsScreen batches={batches} stats={stats} />
+            ) : screen === 'chain' ? (
+              <ChainScreen stats={stats} />
+            ) : null}
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

@@ -479,9 +479,23 @@ def _extract_quarters(loa: Any) -> dict[str, float]:
     return out
 
 
-def loa_to_row(loa: Any) -> LoaRow:
+def loa_to_row(loa: Any, line: Any = None) -> LoaRow:
+    """
+    Flatten one LOA to a spreadsheet row.
+
+    When `line` is given (a loa_line of a multi-brand / multi-activity LOA), the
+    per-row fields come from the line and everything shared still comes from the
+    parent — so each line lands as its own row in the CFO spreadsheet.
+    """
     def s(attr: str) -> str:
         v = getattr(loa, attr, None)
+        return _sanitize_text(v) if v else ""
+
+    def ls(attr: str) -> str:
+        """Line value, falling back to the parent's."""
+        v = getattr(line, attr, None) if line is not None else None
+        if v in (None, ""):
+            v = getattr(loa, attr, None)
         return _sanitize_text(v) if v else ""
 
     cat = getattr(loa, "category", None)
@@ -490,25 +504,27 @@ def loa_to_row(loa: Any) -> LoaRow:
     else:
         cat_str = _sanitize_text(cat) if cat else ""
 
+    budget_src = line if line is not None else loa
+
     return LoaRow(
         cluster=s("cluster"),
         country=s("country"),
         legal_entity=s("legal_entity"),
-        activity_type=s("activity_type"),
+        activity_type=ls("activity_type"),
         category=cat_str,
-        brand=s("brand"),
+        brand=ls("brand"),
         cot=s("cot"),
-        customer=s("customer"),
-        vendor=s("vendor"),
-        detail=s("detail"),
-        doors=_int(getattr(loa, "num_doors", None)),
+        customer=ls("customer"),
+        vendor=ls("vendor"),
+        detail=ls("detail"),
+        doors=_int(getattr(budget_src, "num_doors", None)),
         customers=_int(getattr(loa, "num_customers", None)),
         currency=s("currency"),
-        quarters=_extract_quarters(loa),
+        quarters=_extract_quarters(budget_src),
         description=s("description"),
         tools=s("tools"),
         kpi=s("kpi"),
-        cost_drill_down=s("cost_drill_down"),
+        cost_drill_down=ls("cost_drill_down"),
         start_date=s("start_date"),
         end_date=s("end_date"),
         capex_opex=s("capex_opex"),
@@ -528,4 +544,17 @@ def loa_to_row(loa: Any) -> LoaRow:
 
 
 def loas_to_rows(loas: Iterable[Any]) -> list[LoaRow]:
-    return [loa_to_row(loa) for loa in loas]
+    """
+    Flatten LOAs to spreadsheet rows.
+
+    A standard LOA is one row. A multi-brand / multi-activity LOA expands to one
+    row per line, which is exactly how the client's spreadsheets represent them.
+    """
+    rows: list[LoaRow] = []
+    for loa in loas:
+        lines = getattr(loa, "lines", None) or []
+        if lines and getattr(loa, "loa_type", "standard") != "standard":
+            rows.extend(loa_to_row(loa, line) for line in lines)
+        else:
+            rows.append(loa_to_row(loa))
+    return rows

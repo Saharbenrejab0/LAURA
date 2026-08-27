@@ -243,6 +243,7 @@ def run():
                     updated += 1
                     tag = "updated"
                 else:
+                    row.setdefault('source', 'demo_seed')  # fixtures, never live data
                     db.add(LOA(**row))
                     db.commit()
                     created += 1

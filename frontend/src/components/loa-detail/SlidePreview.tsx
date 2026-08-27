@@ -23,7 +23,13 @@
 import { formatEuros } from '@/lib/format'
 import { API_BASE } from '@/lib/api'
 
-const EVENT_ACTIVITY_TYPES = ['Events', 'Medical Affairs']
+/**
+ * Was a local `['Events', 'Medical Affairs']`. `activity_type` holds the stored
+ * CODE (`EVENTS` / `MEDICAL_AFFAIRS`), so that check never matched and no LOA
+ * ever got the event layout here — every event rendered with standard columns.
+ */
+import { isEventActivity } from '@/lib/slideRows'
+import { activityLabel } from '@/types/loa'
 
 export interface SlideData {
   activity_type: string
@@ -93,8 +99,9 @@ export function SlidePreview({
   onComment?: (fieldKey: string) => void
   onFieldHover?: (fieldKey: string | null) => void
 }) {
-  const isEvent = EVENT_ACTIVITY_TYPES.includes(loa.activity_type)
-  const slideTitle = loa.brand ? `${loa.brand}: ${loa.activity_type}` : loa.activity_type || 'Activity title'
+  const isEvent = isEventActivity(loa.activity_type)
+  const activityText = activityLabel(loa.activity_type)
+  const slideTitle = loa.brand ? `${loa.brand}: ${activityText}` : activityText || 'Activity title'
 
   const headers = isEvent
     ? ['SAP EVENT CODE', 'EVENT TYPE', 'BRANDS / TOPIC', 'DESCRIPTION', 'PARTICIPANT', '# PAX', 'VENDOR', 'BUDGET', 'DATE']
@@ -114,7 +121,7 @@ export function SlidePreview({
       ]
     : [
         loa.country || '—',
-        loa.activity_type?.slice(0, 16) || '—',
+        activityText.slice(0, 16) || '—',
         clip(loa.customer, 18),
         loa.brand?.slice(0, 14) || '—',
         clip(loa.detail, 16),

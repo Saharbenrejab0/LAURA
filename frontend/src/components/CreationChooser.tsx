@@ -71,7 +71,8 @@ export default function CreationChooser({
     onClose();
   };
 
-  const startBlank = () => { close(); router.push('/loa/new'); };
+  // Blank starts at the type selector, which then routes on to /loa/new.
+  const startBlank = () => { close(); router.push('/loa/new/type'); };
   const browse     = () => { close(); router.push('/past-campaigns'); };
 
   const search = async () => {

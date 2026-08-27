@@ -21,6 +21,7 @@ import CreationChooser from '@/components/CreationChooser';
 import { layout } from '@/styles/tokens';
 import { useTheme } from '@/lib/theme';
 import { useMyRole } from '@/hooks/usePermissions';
+import { useCycleWindow } from '@/hooks/useCycleWindow';
 import { Avatar, initialsOf } from '@/components/ui/atoms';
 
 const SIDEBAR_PINNED_KEY = 'laura.sidebar.pinned';
@@ -42,6 +43,7 @@ export default function Sidebar({ isAdmin = false }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { role, loading: roleLoading } = useMyRole();
+  const cycleWindow = useCycleWindow();
   // Admin button visibility comes from the loaded role, not the
   // async `isAdmin` prop, so it never flashes on first paint.
   const showAdmin = !roleLoading && (
@@ -186,26 +188,35 @@ export default function Sidebar({ isAdmin = false }: SidebarProps) {
           )}
         </header>
 
-        {/* + New LOA */}
+        {/* + New LOA — disabled while the submission window is shut */}
         <button
-          onClick={() => openChooser('chooser')}
-          title={!expanded ? 'New LOA' : undefined}
+          onClick={() => cycleWindow.canSubmit && openChooser('chooser')}
+          disabled={!cycleWindow.canSubmit}
+          title={cycleWindow.canSubmit ? (!expanded ? 'New LOA' : undefined) : cycleWindow.reason}
           style={{
             height: 38, borderRadius: 9,
             background: 'var(--ink)', color: 'var(--ink-text)',
             border: 'none', fontFamily: 'var(--font-sans)',
-            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            fontSize: 13, fontWeight: 600,
+            cursor: cycleWindow.canSubmit ? 'pointer' : 'not-allowed',
+            opacity: cycleWindow.canSubmit ? 1 : 0.4,
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-            marginBottom: 20, width: '100%',
+            marginBottom: cycleWindow.canSubmit ? 20 : 8, width: '100%',
             transition: 'opacity .15s ease',
             whiteSpace: 'nowrap', overflow: 'hidden',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.86'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+          onMouseEnter={(e) => { if (cycleWindow.canSubmit) e.currentTarget.style.opacity = '0.86'; }}
+          onMouseLeave={(e) => { if (cycleWindow.canSubmit) e.currentTarget.style.opacity = '1'; }}
         >
           <span style={{ fontSize: 15, lineHeight: 0 }}>+</span>
           {expanded && <span>New LOA</span>}
         </button>
+        {!cycleWindow.canSubmit && !cycleWindow.loading && expanded && (
+          <p style={{
+            margin: '0 0 20px', fontSize: 11, lineHeight: 1.45,
+            color: 'var(--text-tertiary)', fontFamily: 'var(--font-sans)',
+          }}>{cycleWindow.reason}</p>
+        )}
 
         {/* Nav */}
         <SectionLabel expanded={expanded}>Work</SectionLabel>

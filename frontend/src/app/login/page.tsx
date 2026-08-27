@@ -17,6 +17,7 @@ import { useRouter } from 'next/navigation'
 import { login } from '@/lib/api'
 import { useToast } from '@/components/Toast'
 import { Btn, Overline, Avatar, initialsOf } from '@/components/ui/atoms'
+import ThemeControl from '@/components/ThemeControl'
 
 interface Account {
   email: string
@@ -306,15 +307,21 @@ export default function LoginPage() {
           </span>
         </div>
 
-        <span style={{
-          padding: '4px 12px',
-          border: '1px solid var(--border-strong)',
-          borderRadius: 99,
-          fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase',
-          fontWeight: 600, color: 'var(--text-secondary)',
-        }}>
-          Preview
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Pre-auth theme control. Writes the same `laura.theme` key the app
+              reads, so a choice made before signing in is already in effect for
+              the session — no server round trip, no flash after login. */}
+          <ThemeControl variant="inline" />
+          <span style={{
+            padding: '4px 12px',
+            border: '1px solid var(--border-strong)',
+            borderRadius: 99,
+            fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase',
+            fontWeight: 600, color: 'var(--text-secondary)',
+          }}>
+            Preview
+          </span>
+        </div>
       </header>
 
       {/* ── Main ────────────────────────────────────────────────── */}

@@ -65,6 +65,7 @@ export const color = {
  */
 export const statusBadge = {
   draft:                   { text: 'var(--laura-text-secondary)', bg: 'var(--laura-bg-subtle)',       border: 'var(--laura-border-soft)',      label: 'Draft' },
+  local_alignment:         { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',         border: 'var(--laura-info-border)',      label: 'Alignment Review' },
   emea_review:             { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',         border: 'var(--laura-info-border)',      label: 'EMEA Review' },
   global_review:           { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',         border: 'var(--laura-info-border)',      label: 'Global Review' },
   emea_post_global_review: { text: 'var(--laura-info)',            bg: 'var(--laura-info-bg)',         border: 'var(--laura-info-border)',      label: 'EMEA Post-Review' },
@@ -73,7 +74,10 @@ export const statusBadge = {
   corporate_review:        { text: 'var(--laura-champagne-deep)',  bg: 'var(--laura-champagne-mist)', border: 'var(--laura-champagne-border)', label: 'Corporate Review' },
   approved:                { text: 'var(--laura-text-on-primary)', bg: 'var(--laura-action)',          border: 'var(--laura-action)',           label: 'Approved' },
   rejected:                { text: 'var(--laura-danger)',          bg: 'var(--laura-danger-bg)',       border: 'var(--laura-danger-border)',    label: 'Rejected' },
+  returned:                { text: 'var(--laura-danger)',          bg: 'var(--laura-danger-bg)',       border: 'var(--laura-danger-border)',    label: 'Returned' },
   closed:                  { text: 'var(--laura-text-secondary)',  bg: 'var(--laura-bg-subtle)',       border: 'var(--laura-border-soft)',      label: 'Closed' },
+  archived:                { text: 'var(--laura-text-secondary)',  bg: 'var(--laura-bg-subtle)',       border: 'var(--laura-border-soft)',      label: 'Archived' },
+  on_hold:                 { text: 'var(--laura-champagne-deep)',  bg: 'var(--laura-champagne-mist)',  border: 'var(--laura-champagne-border)', label: 'On Hold' },
 } as const;
 
 export const originBadge = {

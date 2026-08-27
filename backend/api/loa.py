@@ -22,18 +22,24 @@ Sprint 5 additions:
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
+from sqlalchemy import or_ as sa_or_
 import uuid
 import httpx
 import os
 import shutil
 
 from backend.models.database import get_db
-from backend.models.loa import LOA, LOAStatus
+from backend.models.loa import (
+    LOA, LOALine, LOAStatus,
+    LOA_TYPES, MIN_LOA_LINES, MAX_LOA_LINES,
+    LOA_TYPE_STANDARD, LOA_TYPE_MULTI_BRAND, LOA_TYPE_MULTI_ACTIVITY,
+)
 from backend.engines.loa_display import compute_display_title
+from backend.api.ordering import newest_first
 
 
 # -- Rejection rule (Rock 3) --
@@ -51,6 +57,7 @@ from backend.reference_data import (
     COT_OPTIONS,
     CAPEX_OPEX,
     ADV_SELLING,
+    normalise_activity_type,
     is_valid_cluster,
     is_valid_country,
     is_valid_activity_type,
@@ -58,8 +65,15 @@ from backend.reference_data import (
 from backend.models.user import User
 from backend.models.role import Role
 from backend.models.comment import Comment
+from backend.models.review import LOAReviewStage, ALIGNMENT_STAGES
 from backend.api.auth import get_current_user
 from backend.api.permission_middleware import require_permission
+from backend.models.loa import SOURCE_LAURA_CREATED
+from backend.models.loa_cycle import LoaCycle
+from backend.services.cycle_service import (
+    resolve_cycle_for_new_loa, assert_cycle_open_for_writes,
+    assert_cycle_accepts_submissions, can_view_cycle, hidden_cycle_ids,
+)
 
 router = APIRouter()
 
@@ -82,6 +96,27 @@ async def notify_n8n(event: str, loa_id: str, extra: dict = None):
 
 
 # ── Pydantic schemas ────────────────────────────────────────────────────
+
+class LOALineIn(BaseModel):
+    """One per-brand / per-activity row on a multi-row LOA."""
+    position: int = 0
+    # Exactly one axis is set — brand for multi_brand, activity_type for multi_activity.
+    brand: Optional[str] = None
+    activity_type: Optional[str] = None
+
+    customer: Optional[str] = None
+    vendor: Optional[str] = None
+    detail: Optional[str] = None
+    num_doors: Optional[int] = None
+    cost_drill_down: Optional[str] = None
+
+    q4_2025: float = 0
+    q1_2026: float = 0
+    q2_2026: float = 0
+    q3_2026: float = 0
+    q4_2026: float = 0
+
+
 class LOACreate(BaseModel):
     cluster: str = ""
     country: str = ""
@@ -100,6 +135,10 @@ class LOACreate(BaseModel):
     customer: Optional[str] = None
     vendor: Optional[str] = None
     cost_justification: Optional[str] = None
+    # LAURA is a single-currency product going forward: anything created here is
+    # in euros. Historical imports still hold CHF and GBP and are deliberately
+    # left alone — they are a separate re-import decision — but nothing new joins
+    # them, because every total in the product adds currencies blind.
     currency: str = "EUR"
     num_customers: Optional[int] = None
     num_doors: Optional[int] = None
@@ -122,6 +161,63 @@ class LOACreate(BaseModel):
     pct_central_budget: Optional[float] = None
     finance_validator_email: Optional[str] = None
     requestor_email: str = ""
+    # LOA cycles — set only when a marketer opens an emergency LOA from the
+    # tracker's emergency window (both default to a normal, non-emergency LOA).
+    is_emergency: bool = False
+    cycle_id: Optional[str] = None
+
+    # Multi-row shape. 'standard' keeps today's single-row behaviour and ignores `lines`.
+    loa_type: str = LOA_TYPE_STANDARD
+    lines: list[LOALineIn] = []
+
+    @field_validator("loa_type")
+    @classmethod
+    def validate_loa_type(cls, v: str):
+        if v and v not in LOA_TYPES:
+            raise ValueError(f"Invalid loa_type '{v}'. Allowed: {LOA_TYPES}")
+        return v or LOA_TYPE_STANDARD
+
+    @model_validator(mode="after")
+    def validate_multi_shape(self):
+        """A multi-row LOA needs 2-12 lines, each carrying the right axis."""
+        if self.loa_type == LOA_TYPE_STANDARD:
+            self.lines = []
+            return self
+
+        n = len(self.lines)
+        if n < MIN_LOA_LINES:
+            raise ValueError(
+                f"A {self.loa_type} LOA needs at least {MIN_LOA_LINES} rows (got {n})."
+            )
+        if n > MAX_LOA_LINES:
+            raise ValueError(
+                f"A {self.loa_type} LOA allows at most {MAX_LOA_LINES} rows (got {n})."
+            )
+
+        if self.loa_type == LOA_TYPE_MULTI_BRAND:
+            for i, ln in enumerate(self.lines):
+                if not (ln.brand or "").strip():
+                    raise ValueError(f"Row {i + 1}: brand is required on a multi-brand LOA.")
+                ln.activity_type = None
+            seen = [ln.brand for ln in self.lines]
+            dupes = {b for b in seen if seen.count(b) > 1}
+            if dupes:
+                raise ValueError(f"Duplicate brands across rows: {', '.join(sorted(dupes))}")
+
+        if self.loa_type == LOA_TYPE_MULTI_ACTIVITY:
+            for i, ln in enumerate(self.lines):
+                at = (ln.activity_type or "").strip()
+                if not at:
+                    raise ValueError(f"Row {i + 1}: activity_type is required on a multi-activity LOA.")
+                if at not in ACTIVITY_TYPES:
+                    raise ValueError(f"Row {i + 1}: invalid activity_type '{at}'.")
+                ln.brand = None
+            seen = [ln.activity_type for ln in self.lines]
+            dupes = {a for a in seen if seen.count(a) > 1}
+            if dupes:
+                raise ValueError(f"Duplicate activity types across rows: {', '.join(sorted(dupes))}")
+
+        return self
 
     @field_validator("category", mode="before")
     @classmethod
@@ -159,9 +255,32 @@ class LOACreate(BaseModel):
     @field_validator("activity_type")
     @classmethod
     def validate_activity_type(cls, v: str):
-        if v and not is_valid_activity_type(v):
+        if not v:
+            return v
+        if not is_valid_activity_type(v):
             raise ValueError(f"Invalid activity_type '{v}'. Allowed: {ACTIVITY_TYPES}")
-        return v
+        # Store the code, whatever spelling arrived — see reference_data.
+        return normalise_activity_type(v)
+
+    @field_validator("currency")
+    @classmethod
+    def validate_currency(cls, v: str):
+        """Everything created in LAURA is in euros.
+
+        Accepts the spellings the old importers produced ('euro', '€', …) and
+        normalises them, so a client sending a legacy value is corrected rather
+        than rejected. Anything genuinely other than euro is refused: the pivot,
+        the workbook and the deck all sum `fy_2026_total` without conversion, so
+        one CHF row makes every total above it quietly wrong.
+        """
+        if v is None:
+            return "EUR"
+        if str(v).strip().lower() in ("eur", "euro", "€", "e"):
+            return "EUR"
+        raise ValueError(
+            f"Invalid currency '{v}'. LOAs created in LAURA must be in EUR — "
+            "every budget total is summed without conversion."
+        )
 
     @field_validator("event_type")
     @classmethod
@@ -260,25 +379,50 @@ def _apply_scope_filter(query, user: User):
     if role.scope_type == 'cluster':
         query = query.filter(LOA.cluster.in_(role.scope_value or []))
     elif role.scope_type == 'brand':
-        query = query.filter(LOA.brand.in_(role.scope_value or []))
+        # On a multi-brand LOA the parent's brand is NULL and the brands live on
+        # loa_line, so the scope must match either place or brand reviewers would
+        # never see multi-brand LOAs at all.
+        scope = role.scope_value or []
+        query = query.filter(
+            LOA.brand.in_(scope) | LOA.lines.any(LOALine.brand.in_(scope))
+        )
     elif role.scope_type == 'function':
-        query = query.filter(LOA.activity_type.in_(role.scope_value or []))
+        # Same for multi-activity: activity_type is NULL on the parent.
+        scope = role.scope_value or []
+        query = query.filter(
+            LOA.activity_type.in_(scope) | LOA.lines.any(LOALine.activity_type.in_(scope))
+        )
     elif role.scope_type == 'all':
         pass
     elif role.scope_type == 'author_only':
         query = query.filter(LOA.requestor_email == user.email)
+
+    # Emergency cycles are confidential to the people named on them. Enforced
+    # here rather than at each call site so the list, the export and every other
+    # consumer of the scope filter hide the same rows.
+    hidden = hidden_cycle_ids(query.session, user)
+    if hidden:
+        query = query.filter(
+            sa_or_(LOA.cycle_id.is_(None), LOA.cycle_id.notin_(hidden))
+        )
     return query
 # -- Parallel gate helpers (Rock 3) ----------------------------------------
 
 def _has_brand_reviewer(loa: LOA, db: Session) -> bool:
-    """Check if any global_brand_* role with active users matches this LOA's brand."""
+    """Check if any global_brand_* role with active users matches this LOA's brand.
+
+    A multi-brand LOA has brand=NULL on the parent, so every line brand counts —
+    one matching brand is enough to keep the brand gate open.
+    """
     from backend.models.role import Role
-    if not loa.brand:
+    brands = [loa.brand] if loa.brand else loa.line_axis_values()
+    brands = [b for b in brands if b]
+    if not brands:
         return False
     brand_roles = db.query(Role).filter(Role.scope_type == 'brand').all()
     for role in brand_roles:
         scope_values = role.scope_value or []
-        if loa.brand in scope_values:
+        if any(b in scope_values for b in brands):
             user_count = db.query(User).filter(User.role_id == role.id).count()
             if user_count > 0:
                 return True
@@ -286,14 +430,20 @@ def _has_brand_reviewer(loa: LOA, db: Session) -> bool:
 
 
 def _has_function_reviewer(loa: LOA, db: Session) -> bool:
-    """Check if any global_function_* role with active users matches this LOA's activity_type."""
+    """Check if any global_function_* role with active users matches this LOA's activity_type.
+
+    A multi-activity LOA has activity_type=NULL on the parent, so every line
+    activity type counts.
+    """
     from backend.models.role import Role
-    if not loa.activity_type:
+    types = [loa.activity_type] if loa.activity_type else loa.line_axis_values()
+    types = [t for t in types if t]
+    if not types:
         return False
     func_roles = db.query(Role).filter(Role.scope_type == 'function').all()
     for role in func_roles:
         scope_values = role.scope_value or []
-        if loa.activity_type in scope_values:
+        if any(t in scope_values for t in types):
             user_count = db.query(User).filter(User.role_id == role.id).count()
             if user_count > 0:
                 return True
@@ -369,13 +519,94 @@ def _get_loa_photos(loa_id: str) -> list[dict]:
     return [{"index": idx, "url": f"/loa/{loa_id}/photos/{idx}"} for idx in matches]
 
 
-def _with_display_title(loa):
-    """Serialize an ORM LOA to dict + inject display_title + photos."""
+# can_* permission flags → flat action names exposed on the LOA response.
+_ACTION_FLAGS = [
+    ("view", "can_view"),
+    ("comment", "can_comment"),
+    ("edit", "can_edit"),
+    ("validate", "can_validate"),
+    ("delete", "can_delete"),
+    ("duplicate", "can_duplicate"),
+]
+
+
+def _serialize_line(ln: LOALine) -> dict:
+    return {
+        "id":                      str(ln.id),
+        "position":                ln.position,
+        "brand":                   ln.brand,
+        "activity_type":           ln.activity_type,
+        "customer":                ln.customer,
+        "vendor":                  ln.vendor,
+        "detail":                  ln.detail,
+        "num_doors":               ln.num_doors,
+        "avg_investment_per_door": ln.avg_investment_per_door,
+        "cost_drill_down":         ln.cost_drill_down,
+        "q4_2025":                 ln.q4_2025,
+        "q1_2026":                 ln.q1_2026,
+        "q2_2026":                 ln.q2_2026,
+        "q3_2026":                 ln.q3_2026,
+        "q4_2026":                 ln.q4_2026,
+        "fy_2026_total":           ln.fy_2026_total,
+    }
+
+
+def _sync_lines(loa: LOA, lines: list[LOALineIn]) -> None:
+    """
+    Replace the LOA's child rows with `lines`, in order.
+
+    Full replace rather than diff-merge: rows are reorderable and deletable in
+    the form, so positional identity is not stable enough to patch in place.
+    delete-orphan on the relationship removes the old rows.
+    """
+    loa.lines.clear()
+    for i, src in enumerate(lines):
+        loa.lines.append(LOALine(
+            position=i,
+            brand=src.brand,
+            activity_type=src.activity_type,
+            customer=src.customer,
+            vendor=src.vendor,
+            detail=src.detail,
+            num_doors=src.num_doors,
+            cost_drill_down=src.cost_drill_down,
+            q4_2025=src.q4_2025 or 0,
+            q1_2026=src.q1_2026 or 0,
+            q2_2026=src.q2_2026 or 0,
+            q3_2026=src.q3_2026 or 0,
+            q4_2026=src.q4_2026 or 0,
+        ))
+
+
+def _apply_axis_nulls(loa: LOA) -> None:
+    """
+    Enforce the ck_loas_axis_by_type invariant: the axis that varies per line is
+    NULL on the parent, the shared axis stays set.
+    """
+    if loa.loa_type == LOA_TYPE_MULTI_BRAND:
+        loa.brand = None
+    elif loa.loa_type == LOA_TYPE_MULTI_ACTIVITY:
+        loa.activity_type = None
+
+
+def _with_display_title(loa, user=None, db=None):
+    """Serialize an ORM LOA to dict + inject display_title + photos + actions."""
     if loa is None:
         return None
     data = {c.name: getattr(loa, c.name) for c in loa.__table__.columns}
     data["display_title"] = compute_display_title(loa)
     data["photos"] = _get_loa_photos(str(loa.id))
+    data["lines"] = [_serialize_line(ln) for ln in loa.lines]
+    data["available_actions"] = []
+    # Map the current user's effective permissions on this LOA to a flat action
+    # list. Anonymous/public (no user or db context) → stays an empty list.
+    if user is not None and db is not None:
+        try:
+            from backend.api.permissions import compute_permissions
+            perms = compute_permissions(user, loa, db)
+            data["available_actions"] = [a for a, flag in _ACTION_FLAGS if perms.get(flag)]
+        except Exception:
+            pass
     return data
 
 @router.get("")
@@ -420,7 +651,9 @@ async def get_loas(
             (LOA.status != 'draft') | (LOA.requestor_email == user.email)
         )
 
-    return [_with_display_title(loa) for loa in query.all()]
+    query = newest_first(query, LOA)
+
+    return [_with_display_title(loa, user, db) for loa in query.all()]
 
 
 # ── Excel export (BEFORE /{loa_id} routes) ──────────────────────────────
@@ -498,18 +731,34 @@ async def create_loa(body: LOACreate, db: Session = Depends(get_db)):
     loa_id = str(uuid.uuid4())
     draft_id = f"LAURA-{datetime.now().strftime('%Y%m%d')}-{loa_id[:6].upper()}"
 
+    fields = body.model_dump()
+    # Neither the cycle nor the provenance is chosen by the submitter. An LOA
+    # belongs to whichever window was open when it was created, and anything
+    # created here is by definition a real submission.
+    fields.pop("cycle_id", None)
+    fields.pop("source", None)
+    fields.pop("import_batch_id", None)
+    # Child rows are attached via the relationship, not as a column kwarg.
+    fields.pop("lines", None)
+    cycle = resolve_cycle_for_new_loa(db, is_emergency=bool(fields.get("is_emergency")))
+
     loa = LOA(
         id=loa_id,
         loa_draft_id=draft_id,
         status="draft",
         is_demo=True,
-        **body.model_dump(),
+        cycle_id=cycle.id,
+        source=SOURCE_LAURA_CREATED,
+        **fields,
     )
+    if body.lines:
+        _sync_lines(loa, body.lines)
+    _apply_axis_nulls(loa)
     loa.calculate_totals()
     db.add(loa)
     db.commit()
     db.refresh(loa)
-    return loa
+    return _with_display_title(loa)
 
 
 @router.get("/{loa_id}")
@@ -526,13 +775,20 @@ async def get_loa(
     if role is None:
         raise HTTPException(status_code=403, detail="No role assigned")
 
+    # An emergency LOA is invisible to anyone not named on its cycle — 404, not
+    # 403, so the response cannot confirm that the record exists.
+    if loa.cycle_id is not None:
+        cycle = db.query(LoaCycle).filter(LoaCycle.id == loa.cycle_id).first()
+        if cycle is not None and not can_view_cycle(cycle, user):
+            raise HTTPException(status_code=404, detail="LOA not found")
+
     if not role.can_override_lock:
         if loa.status == 'draft' and loa.requestor_email != user.email:
             raise HTTPException(status_code=403, detail="Draft is private to its author")
         if not role.matches_loa(loa):
             raise HTTPException(status_code=403, detail="LOA outside your scope")
 
-    return _with_display_title(loa)
+    return _with_display_title(loa, user, db)
 
 
 @router.patch("/{loa_id}")
@@ -555,13 +811,24 @@ async def update_loa(
                 detail="LOA is locked. Only a super-admin can edit it while locked.",
             )
 
-    for field, value in body.model_dump(exclude_unset=True).items():
+    # A closed cycle is an archive — nothing inside it changes again.
+    assert_cycle_open_for_writes(db, loa.cycle_id, action="edited")
+
+    updates = body.model_dump(exclude_unset=True)
+    # cycle_id is set once, at creation. An LOA belongs to its cycle forever.
+    updates.pop("cycle_id", None)
+    # Child rows go through _sync_lines, not setattr.
+    lines_update = updates.pop("lines", None)
+    for field, value in updates.items():
         setattr(loa, field, value)
 
+    if lines_update is not None:
+        _sync_lines(loa, body.lines)
+    _apply_axis_nulls(loa)
     loa.calculate_totals()
     db.commit()
     db.refresh(loa)
-    return _with_display_title(loa)
+    return _with_display_title(loa, user, db)
 
 
 # ── Excel single-row download (detail page button) ─────────────────────
@@ -612,14 +879,22 @@ async def submit_loa(
         new_status = "local_alignment"
         event_name = "loa_submitted"
     elif loa.status == "rejected":
+        # Legacy path: rejected goes back to emea_review (skips local_alignment)
         new_status = "emea_review"
+        event_name = "loa_resubmitted"
+    elif loa.status == "returned":
+        # EMEA returned it to the marketer → full restart at local_alignment
+        new_status = "local_alignment"
         event_name = "loa_resubmitted"
     else:
         raise HTTPException(
             status_code=400,
             detail=f"Cannot submit a LOA in status '{loa.status}'. "
-                   f"Only 'draft' or 'rejected' LOAs can be submitted.",
+                   f"Only 'draft', 'rejected', or 'returned' LOAs can be submitted.",
         )
+
+    # Drafting stays possible outside the window; entering the chain does not.
+    assert_cycle_accepts_submissions(db, loa.cycle_id)
 
     issues = loa.validate()
     errors = [i for i in issues if i["type"] == "error"]
@@ -631,9 +906,19 @@ async def submit_loa(
         _compute_local_alignment_skip_flags(loa, db)
         if _is_local_alignment_complete(loa):
             loa.status = "emea_review"
+
+        # Create 3 alignment review stage rows (idempotent — skip if already present)
+        existing_stages = {
+            r.stage for r in db.query(LOAReviewStage).filter_by(loa_id=str(loa_id)).all()
+        }
+        for stage in ALIGNMENT_STAGES:
+            if stage not in existing_stages:
+                db.add(LOAReviewStage(loa_id=str(loa_id), stage=stage, status="pending"))
+
     loa.submitted_at = datetime.utcnow()
     if event_name == "loa_resubmitted":
-        loa.rejection_reason = None
+        loa.rejection_reason  = None
+        loa.rejected_by_stage = None
     db.commit()
     db.refresh(loa)
 
@@ -716,30 +1001,77 @@ async def validate_workflow_step(
 
     current_status = loa.status
 
-    # global_review advances automatically via comments, not via /validate
-    if current_status == "global_review":
-        raise HTTPException(
-            status_code=400,
-            detail="global_review advances automatically when reviewers comment.",
-        )
-
-    if current_status == "local_alignment":
-        raise HTTPException(
-            status_code=400,
-            detail="local_alignment advances automatically when finance, procurement, and compliance comment.",
-        )
-
     if current_status not in WORKFLOW_TRANSITIONS:
         raise HTTPException(
             status_code=400,
             detail=f"Cannot advance a LOA in status '{current_status}'.",
         )
 
-    permission_used = _check_workflow_permission(user, loa, db)
     skipped = []
 
+    # -- global_review parallel gate (brand + function) --
+    # A reviewer explicitly submitting their review flips ONLY their own side.
+    # The LOA advances only once BOTH brand and function are done (or skipped).
+    # (Previously this happened as a side-effect of commenting — now it requires
+    # an explicit submit, so one reviewer can never advance it alone.)
+    if current_status == "global_review":
+        from backend.api.permissions import compute_permissions
+        role = user.role_obj
+        perms = compute_permissions(user, loa, db)
+        if not (perms.get("can_validate") or perms.get("can_comment")):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to submit a review at this stage.",
+            )
+        if role and role.scope_type == "brand":
+            loa.brand_review_done = True
+        elif role and role.scope_type == "function":
+            loa.function_review_done = True
+        elif role and role.can_override_lock:
+            # Super-admin: complete both sides.
+            loa.brand_review_done = True
+            loa.function_review_done = True
+        permission_used = "validate"
+        if _is_global_review_complete(loa):
+            loa.status = WORKFLOW_TRANSITIONS[current_status]
+        else:
+            # This side done, still waiting on the other reviewer.
+            db.commit()
+            db.refresh(loa)
+            return loa
+
+    # -- local_alignment gate (finance + procurement + compliance) --
+    elif current_status == "local_alignment":
+        from backend.api.permissions import compute_permissions
+        role = user.role_obj
+        perms = compute_permissions(user, loa, db)
+        if not (perms.get("can_validate") or perms.get("can_comment")):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to submit a review at this stage.",
+            )
+        role_code = (role.code if role else "") or ""
+        if role_code.endswith("_finance"):
+            loa.finance_review_done = True
+        elif role_code.endswith("_procurement"):
+            loa.procurement_review_done = True
+        elif role_code.endswith("_compliance"):
+            loa.compliance_review_done = True
+        elif role and role.can_override_lock:
+            loa.finance_review_done = True
+            loa.procurement_review_done = True
+            loa.compliance_review_done = True
+        permission_used = "validate"
+        if _is_local_alignment_complete(loa):
+            loa.status = WORKFLOW_TRANSITIONS[current_status]
+        else:
+            db.commit()
+            db.refresh(loa)
+            return loa
+
     # -- CMO/CFO parallel gate --
-    if current_status == "cmo_cfo_review":
+    elif current_status == "cmo_cfo_review":
+        permission_used = _check_workflow_permission(user, loa, db)
         role = user.role_obj
         role_code = role.code if role else ""
 
@@ -763,6 +1095,7 @@ async def validate_workflow_step(
 
     # -- EMEA review -> global_review (with skip detection) --
     elif current_status == "emea_review":
+        permission_used = _check_workflow_permission(user, loa, db)
         _compute_skip_flags(loa, db)
         if loa.brand_review_done and loa.function_review_done:
             # Both skipped -> jump past global_review
@@ -773,6 +1106,7 @@ async def validate_workflow_step(
 
     # -- All other steps: linear advance --
     else:
+        permission_used = _check_workflow_permission(user, loa, db)
         new_status = WORKFLOW_TRANSITIONS.get(current_status)
         if not new_status:
             raise HTTPException(
@@ -827,13 +1161,57 @@ async def approve_loa(
     return await validate_workflow_step(loa_id, db, user)
 
 
+# Stages where EMEA (advance_phase) acts and needs to choose edit vs. return
+_EMEA_STAGES = frozenset({"emea_review", "emea_post_global_review", "emea_final_review"})
+
+# Stages that auto-route a rejection to emea_final_review
+_AUTO_ROUTE_TO_EMEA_FINAL = frozenset({"cmo_cfo_review", "corporate_review"})
+
+
+def _reset_all_gates(loa: LOA) -> None:
+    """Full gate reset. Called whenever a LOA returns to marketer (re-enters local_alignment)."""
+    loa.cmo_approved             = False
+    loa.cfo_approved             = False
+    loa.brand_review_done        = False
+    loa.function_review_done     = False
+    loa.brand_review_skipped     = False
+    loa.function_review_skipped  = False
+    loa.finance_review_done      = False
+    loa.procurement_review_done  = False
+    loa.compliance_review_done   = False
+
+
+class RejectRequest(BaseModel):
+    reason: str
+    # Required when rejecting at an EMEA stage. One of:
+    #   "edit_myself"        — EMEA edits the LOA inline; status stays at current EMEA stage.
+    #   "return_to_marketer" — LOA goes to `returned`; marketer re-edits and restarts chain.
+    # Ignored (and not required) for cmo_cfo_review / corporate_review rejections.
+    choice: str | None = None
+
+
 @router.post("/{loa_id}/reject")
 async def reject_loa(
     loa_id: str,
-    reason: str = "",
+    body: RejectRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """
+    Reject a LOA. Routing depends on the current stage:
+
+    EMEA stages (emea_review / emea_post_global_review / emea_final_review):
+      → body.choice == "edit_myself":
+            Status unchanged. EMEA edits the LOA form and then re-approves.
+      → body.choice == "return_to_marketer":
+            Status → `returned`. All gates reset. Marketer re-submits → local_alignment.
+
+    cmo_cfo_review or corporate_review:
+      → Status → `emea_final_review`. CMO/CFO gate flags reset.
+         EMEA sees the rejection reason and then chooses edit or return.
+
+    No other stages permit reject (permission check enforces this).
+    """
     loa = db.query(LOA).filter(LOA.id == loa_id).first()
     if not loa:
         raise HTTPException(status_code=404, detail="LOA not found")
@@ -841,41 +1219,83 @@ async def reject_loa(
     if loa.is_locked:
         raise HTTPException(status_code=423, detail="LOA is locked by a super-admin.")
 
-    if not reason or not reason.strip():
+    reason = (body.reason or "").strip()
+    if not reason:
         raise HTTPException(status_code=422, detail="A non-empty reason is required.")
 
-    if loa.status == "draft":
-        raise HTTPException(status_code=400, detail="Cannot reject a draft.")
-
-    if loa.status in ("approved", "rejected"):
+    if loa.status in ("draft", "approved", "returned", "rejected"):
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot reject a LOA already in status '{loa.status}'.",
+            detail=f"Cannot reject a LOA in status '{loa.status}'.",
         )
 
     _check_workflow_permission(user, loa, db)
 
     previous_status = loa.status
-    loa.status = "rejected"
-    loa.rejection_reason = reason.strip()
 
-    # Reset ALL gate booleans
-    loa.cmo_approved = False
-    loa.cfo_approved = False
-    loa.brand_review_done = False
-    loa.function_review_done = False
-    loa.brand_review_skipped = False
-    loa.function_review_skipped = False
+    # Who gets to choose what happens next, rather than having it routed for
+    # them: the EMEA stages, and the super-admins (Thibault, Vanessa, Sandrine).
+    # An admin rejecting anywhere in the chain is the person who then has to
+    # deal with it, so they pick — fix it here, or send it back to the marketer.
+    actor_is_admin = user.role_obj is not None and bool(user.role_obj.can_override_lock)
+    offers_choice = actor_is_admin or previous_status in _EMEA_STAGES
+
+    if offers_choice:
+        choice = body.choice
+        if choice not in ("edit_myself", "return_to_marketer"):
+            raise HTTPException(
+                status_code=422,
+                detail="This rejection requires choice: 'edit_myself' or 'return_to_marketer'.",
+            )
+        loa.rejection_reason  = reason
+        loa.rejected_by_stage = previous_status
+
+        if choice == "edit_myself":
+            # Status stays at the current EMEA stage. EMEA edits inline then re-approves.
+            db.commit()
+            db.refresh(loa)
+            await notify_n8n("loa_rejected", str(loa_id), {
+                "requestor_email":      loa.requestor_email,
+                "loa_draft_id":         loa.loa_draft_id,
+                "rejected_by":          user.email,
+                "rejected_from_status": previous_status,
+                "choice":               "edit_myself",
+                "reason":               reason,
+            })
+            return loa
+
+        # return_to_marketer
+        loa.status = "returned"
+        _reset_all_gates(loa)
+
+    elif previous_status in _AUTO_ROUTE_TO_EMEA_FINAL:
+        # CMO, CFO, or Corporate Finance rejected → EMEA decides next step
+        loa.status            = "emea_final_review"
+        loa.rejection_reason  = reason
+        loa.rejected_by_stage = previous_status
+        # Reset whichever parallel gate was open
+        loa.cmo_approved      = False
+        loa.cfo_approved      = False
+
+    else:
+        # Fallback for any other actionable stage (shouldn't normally reach here
+        # given the permission matrix, but keep behaviour deterministic)
+        loa.status            = "rejected"
+        loa.rejection_reason  = reason
+        loa.rejected_by_stage = previous_status
+        _reset_all_gates(loa)
 
     db.commit()
     db.refresh(loa)
 
     await notify_n8n("loa_rejected", str(loa_id), {
-        "requestor_email": loa.requestor_email,
-        "loa_draft_id": loa.loa_draft_id,
-        "rejected_by": user.email,
+        "requestor_email":      loa.requestor_email,
+        "loa_draft_id":         loa.loa_draft_id,
+        "rejected_by":          user.email,
         "rejected_from_status": previous_status,
-        "reason": reason.strip(),
+        "new_status":           loa.status,
+        "choice":               body.choice,
+        "reason":               reason,
     })
 
     return loa
@@ -931,39 +1351,13 @@ async def add_comment(
     else:
         loa.cmo_comment = entry
 
-    # -- Parallel gate tracking for global_review --
-    auto_advanced = False
-    if loa.status == "global_review":
-        if role.scope_type == "brand":
-            loa.brand_review_done = True
-        elif role.scope_type == "function":
-            loa.function_review_done = True
-
-        # Check if both gates are now complete -> auto-advance
-        if _is_global_review_complete(loa):
-            loa.status = "emea_post_global_review"
-            auto_advanced = True
-
+    # Adding a comment NEVER advances the workflow. The reviewer stays in the
+    # current stage and moves the LOA only by explicitly submitting their review
+    # via POST /{loa_id}/validate. Gate flags are intentionally left untouched.
     db.commit()
     db.refresh(loa)
 
-    result = {"status": "ok", "comment_added": entry}
-    if auto_advanced:
-        result["auto_advanced_to"] = "emea_post_global_review"
-        await notify_n8n("loa_validated", str(loa_id), {
-            "requestor_email": loa.requestor_email,
-            "loa_draft_id": loa.loa_draft_id,
-            "from_status": "global_review",
-            "to_status": "emea_post_global_review",
-            "skipped_steps": [],
-            "validated_by": "auto (both review gates complete)",
-            "permission_used": "comment",
-            "activity_type": loa.activity_type,
-            "country": loa.country,
-            "fy_total": loa.fy_2026_total,
-        })
-
-    return result
+    return {"status": "ok", "comment_added": entry}
 
 
 

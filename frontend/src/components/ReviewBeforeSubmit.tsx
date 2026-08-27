@@ -15,11 +15,22 @@ import { createPortal } from 'react-dom'
    actually run handleSubmit.
    ═══════════════════════════════════════════════════════════════════════ */
 
+/** One per-brand / per-activity row, as shown in the review table. */
+export interface ReviewLine {
+  axis: string
+  customer: string
+  vendor: string
+  total: number
+}
+
 interface ReviewProps {
   open: boolean
   onClose: () => void
   onConfirm: () => void
   saving: boolean
+  /** 'standard' hides the rows table and shows Brand / Activity Type as before. */
+  loaType?: 'standard' | 'multi_brand' | 'multi_activity'
+  lines?: ReviewLine[]
   cluster: string
   country: string
   legalEntity: string
@@ -194,6 +205,7 @@ function PhotoPreview({ photos }: { photos: { index: number; url: string }[] }) 
 export default function ReviewBeforeSubmit(props: ReviewProps) {
   const {
     open, onClose, onConfirm, saving, errors,
+    loaType = 'standard', lines = [],
     cluster, country, legalEntity, activityType, eventType, eventPurpose,
     sapEventCode, cot, category, brand, capexOpex, advSelling, currency,
     q4_2025, q1, q2, q3, q4, fyTotal, avgPerDoor, pptRequired,
@@ -226,6 +238,10 @@ export default function ReviewBeforeSubmit(props: ReviewProps) {
 
   const errorCount = Object.keys(errors).length
   const isEvent = ['Events', 'Medical Affairs'].includes(activityType)
+  const isMultiBrand = loaType === 'multi_brand'
+  const isMultiAct   = loaType === 'multi_activity'
+  const isMulti      = isMultiBrand || isMultiAct
+  const linesTotal   = lines.reduce((s, l) => s + l.total, 0)
   const categoryLabel = category.length > 0 ? category.join(' + ') : ''
 
   const quarters = [
@@ -338,9 +354,14 @@ export default function ReviewBeforeSubmit(props: ReviewProps) {
             <Field label="Cluster" value={cluster} error={errors.cluster} />
             <Field label="Country" value={country} error={errors.country} />
             <Field label="Legal entity" value={legalEntity} />
-            <Field label="Activity type" value={activityType} error={errors.activityType} />
+            {/* The axis that varies per row shows a count instead of a value. */}
+            {isMultiAct
+              ? <Field label="Activity types" value={`${lines.length} activity types`} error={errors.lines} />
+              : <Field label="Activity type" value={activityType} error={errors.activityType} />}
             <Field label="Category" value={categoryLabel} error={errors.category} />
-            <Field label="Brand" value={brand} error={errors.brand} />
+            {isMultiBrand
+              ? <Field label="Brands" value={`${lines.length} brands`} error={errors.lines} />
+              : <Field label="Brand" value={brand} error={errors.brand} />}
             <Field label="COT" value={cot} error={errors.cot} />
             <Field label="CapEx / OpEx" value={capexOpex} />
             <Field label="ADV / Selling" value={advSelling} />
@@ -353,11 +374,60 @@ export default function ReviewBeforeSubmit(props: ReviewProps) {
             )}
           </div>
 
+          {/* 1b · Per-brand / per-activity rows */}
+          {isMulti && (
+            <>
+              <SectionTitle>{isMultiBrand ? 'Brand rows' : 'Activity rows'}</SectionTitle>
+              <div style={{
+                marginBottom: '28px', border: '1px solid var(--border)',
+                borderRadius: '8px', overflow: 'hidden',
+              }}>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 1.2fr 0.8fr',
+                  gap: '10px', padding: '8px 12px',
+                  background: 'var(--bg-elevated)',
+                  borderBottom: '1px solid var(--border)',
+                  fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.06em',
+                  textTransform: 'uppercase', color: 'var(--text-muted)',
+                }}>
+                  <span>{isMultiBrand ? 'Brand' : 'Activity type'}</span>
+                  <span>Customer</span>
+                  <span>Vendor</span>
+                  <span style={{ textAlign: 'right' }}>Total</span>
+                </div>
+                {lines.map((l, i) => (
+                  <div key={i} style={{
+                    display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 1.2fr 0.8fr',
+                    gap: '10px', padding: '9px 12px', fontSize: '12.5px',
+                    borderBottom: i < lines.length - 1 ? '1px solid var(--border)' : 'none',
+                    color: 'var(--text-primary)',
+                  }}>
+                    <span style={{ fontWeight: 500 }}>{l.axis || <em style={{ color: 'var(--red)' }}>missing</em>}</span>
+                    <span style={{ color: 'var(--text-secondary)' }}>{l.customer || '—'}</span>
+                    <span style={{ color: l.vendor ? 'var(--text-secondary)' : 'var(--red)' }}>{l.vendor || 'missing'}</span>
+                    <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtEur(l.total)}</span>
+                  </div>
+                ))}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 1.2fr 0.8fr',
+                  gap: '10px', padding: '9px 12px',
+                  background: 'var(--bg-elevated)',
+                  borderTop: '1px solid var(--border-strong)',
+                  fontSize: '12.5px', fontWeight: 700, color: 'var(--text-primary)',
+                }}>
+                  <span>TOTAL</span><span /><span />
+                  <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtEur(linesTotal)}</span>
+                </div>
+              </div>
+            </>
+          )}
+
           {/* 2 · Stakeholders & targeting */}
           <SectionTitle>Stakeholders & targeting</SectionTitle>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '28px' }}>
-            <Field label="Customer" value={customer} />
-            <Field label="Vendor" value={vendor} error={errors.vendor} />
+            {/* Customer and Vendor are per-row on a multi LOA — shown in the table above. */}
+            {!isMulti && <Field label="Customer" value={customer} />}
+            {!isMulti && <Field label="Vendor" value={vendor} error={errors.vendor} />}
             <Field label="Currency" value={currency} />
             <Field label="# Doors" value={numDoors > 0 ? numDoors.toLocaleString() : ''} error={errors.numDoors} />
             {isEvent && (
