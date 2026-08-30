@@ -46,8 +46,16 @@ function shortDate(iso?: string): string {
   return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
 }
 
-const GOLD = '#C9A678'
-const GREEN = '#1D6B45'
+/**
+ * The gate colours live in redesign.css (--step-*) so they invert with the
+ * theme. They used to be hex constants here, which meant the dark rail drew a
+ * light champagne pill and then put --text-primary (near-white in dark) on it:
+ * the ACTIVE gate — the one thing the rail exists to show — was unreadable.
+ * Gold still marks "you are here" in both themes; what changed is that the
+ * text on the gold is ink, not the theme's body colour.
+ */
+const CURRENT_DOT_BG = 'var(--step-current-dot-bg)'
+const DONE_DOT_BG    = 'var(--step-done-dot-bg)'
 
 export default function StageStepper({
   stages, currentStage, viewerStage, allApproved,
@@ -126,17 +134,22 @@ export default function StageStepper({
                 aria-current={current ? 'step' : undefined}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
-                  background: current ? '#FAF5EA' : done ? '#F4F7F4' : 'transparent',
-                  border: `1px solid ${current ? '#E8D9B8' : done ? '#DCE6DC' : 'transparent'}`,
+                  background: current ? 'var(--step-current-bg)' : done ? 'var(--step-done-bg)' : 'transparent',
+                  border: `1px solid ${current ? 'var(--step-current-border)' : done ? 'var(--step-done-border)' : 'transparent'}`,
                   borderRadius: 99,
                   padding: showLabel ? '4px 11px 4px 5px' : '4px 5px',
                 }}
               >
                 <span style={{
                   width: 18, height: 18, borderRadius: 99, flexShrink: 0,
-                  background: done ? GREEN : current ? GOLD : 'var(--surface)',
-                  border: `1px solid ${done ? GREEN : current ? GOLD : 'var(--border)'}`,
-                  color: done || current ? 'var(--surface)' : 'var(--text-faint)',
+                  background: done ? DONE_DOT_BG : current ? CURRENT_DOT_BG : 'var(--surface)',
+                  border: `1px solid ${
+                    done ? 'var(--step-done-dot-border)'
+                      : current ? 'var(--step-current-dot-border)'
+                      : 'var(--border)'}`,
+                  color: done ? 'var(--step-done-dot-fg)'
+                    : current ? 'var(--step-current-dot-fg)'
+                    : 'var(--text-faint)',
                   fontSize: st.terminal && !done ? 9 : 8.5, fontWeight: 700,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
@@ -151,21 +164,21 @@ export default function StageStepper({
                       fontSize: current ? 11 : 10.5,
                       fontWeight: current ? 600 : 500,
                       color: current
-                        ? 'var(--text-primary)'
+                        ? 'var(--step-current-fg)'
                         : done ? 'var(--text-secondary)' : 'var(--text-tertiary)',
                       letterSpacing: '.01em', whiteSpace: 'nowrap',
                     }}>
                       {st.label}
                     </span>
                     {record && (
-                      <span style={{ fontSize: 9, color: '#7C9A87', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 9, color: 'var(--step-record-fg)', whiteSpace: 'nowrap' }}>
                         {record}
                       </span>
                     )}
                   </span>
                 )}
                 {!showLabel && record && (
-                  <span style={{ fontSize: 9, color: '#7C9A87', whiteSpace: 'nowrap', paddingRight: 4 }}>
+                  <span style={{ fontSize: 9, color: 'var(--step-record-fg)', whiteSpace: 'nowrap', paddingRight: 4 }}>
                     {record}
                   </span>
                 )}
@@ -174,7 +187,7 @@ export default function StageStepper({
               {i < chain.length - 1 && (
                 <span style={{
                   width: 10, height: 1, flexShrink: 0,
-                  background: done ? '#DCE6DC' : 'var(--border)',
+                  background: done ? 'var(--step-line-done)' : 'var(--border)',
                 }} />
               )}
             </div>

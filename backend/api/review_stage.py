@@ -18,6 +18,8 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
+from sqlalchemy import or_ as sa_or_
+
 from backend.models.database import get_db
 from backend.api.ordering import newest_first
 from backend.models.loa import LOA
@@ -25,7 +27,7 @@ from backend.models.user import User
 from backend.models.review import LOAReviewStage, ALIGNMENT_STAGES
 from backend.api.auth import get_current_user
 
-from backend.services.cycle_service import assert_cycle_open_for_writes
+from backend.services.cycle_service import assert_cycle_open_for_writes, hidden_cycle_ids
 
 router = APIRouter()
 
@@ -36,6 +38,53 @@ STAGE_ROLES: dict[str, tuple[str, ...]] = {
     "global_function_review": ("global_function_review",),
     "global_brand_review":    ("global_brand_review",),
 }
+
+# ── Where each alignment stage is actionable, in the real workflow ────────────
+#
+# ALIGNMENT_STAGES reads like a three-step chain, and the queue used to treat it
+# as one: to be actionable at stage S, the stage BEFORE S had to be approved.
+# That is wrong for the last two. `global_function_review` and
+# `global_brand_review` are not sequential — they are the two PARALLEL sides of
+# the single `global_review` gate, and loa.py advances the LOA only once both
+# `function_review_done` and `brand_review_done` are set (see the
+# `current_status == "global_review"` branch there). Neither side waits on the
+# other.
+#
+# The sequential reading made the Global Brand queue permanently empty. Nothing
+# in the live workflow ever flips a loa_review_stage row to `approved` for these
+# two stages — reviewers submit through POST /loa/{id}/validate, which writes
+# the *_review_done booleans and never touches loa_review_stage. So the
+# prerequisite "global_function_review is approved" could not become true, and
+# every global_brand_* role saw "0 LOAs at your stage" no matter what was
+# waiting on them.
+#
+# Actionability therefore comes from the same place the reviewer's own submit
+# button and compute_permissions() read: the LOA's workflow status plus the
+# sub-gate flags. loa_review_stage stays what its approve endpoint says it is —
+# a record of who signed off, not the gate.
+STAGE_STATUS: dict[str, str] = {
+    "local_alignment":        "local_alignment",
+    "global_function_review": "global_review",
+    "global_brand_review":    "global_review",
+}
+
+# The sub-gate flags each stage owns. A stage is still open while any of its
+# flags is unset — matching _is_local_alignment_complete / _is_global_review_
+# complete in loa.py.
+STAGE_DONE_FLAGS: dict[str, tuple[str, ...]] = {
+    "local_alignment": (
+        "finance_review_done", "procurement_review_done", "compliance_review_done",
+    ),
+    "global_function_review": ("function_review_done",),
+    "global_brand_review":    ("brand_review_done",),
+}
+
+
+def _stage_is_open(loa: LOA, stage: str) -> bool:
+    """True while this stage still has work outstanding on this LOA."""
+    return not all(
+        bool(getattr(loa, flag, False)) for flag in STAGE_DONE_FLAGS[stage]
+    )
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
@@ -105,44 +154,46 @@ def get_reviewer_queue(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Return LOAs whose alignment stage is currently actionable for the given stage.
+    """Return LOAs whose alignment stage is currently actionable for this viewer.
 
-    An LOA is in the queue for stage S when:
-      - It has an LOAReviewStage row for S with status='pending'
-      - If S is not the first stage, the preceding stage is already approved
+    An LOA is in the queue for stage S when all three hold:
+      - the LOA sits at the workflow status where S is actionable
+        (STAGE_STATUS — note that the two global sub-gates share `global_review`)
+      - S still has a sub-gate flag outstanding on that LOA
+      - the LOA is inside the viewer's role scope
+
+    The scope check is the part that used to be missing entirely: the queue
+    returned every LOA at the stage to every reviewer, so Global Brand — Oakley
+    and Global Brand — Ray-Ban would have been handed each other's LOAs the
+    moment the stage filter matched anything. It uses Role.matches_loa, the same
+    predicate compute_permissions() uses, so the list agrees with what the
+    viewer can actually act on once inside.
     """
     if stage not in ALIGNMENT_STAGES:
         raise HTTPException(status_code=400, detail=f"Invalid stage. Must be one of: {', '.join(ALIGNMENT_STAGES)}")
 
-    prev = _previous_stage(stage)
+    role = current_user.role_obj
+    if role is None:
+        return {"stage": stage, "loas": [], "total": 0}
 
-    # LOAs that have a pending row for this stage
-    pending_stage_loa_ids = (
-        db.query(LOAReviewStage.loa_id)
-        .filter_by(stage=stage, status="pending")
-        .subquery()
-    )
+    query = db.query(LOA).filter(LOA.status == STAGE_STATUS[stage])
 
-    if prev:
-        # The previous stage must already be approved
-        approved_prev_loa_ids = (
-            db.query(LOAReviewStage.loa_id)
-            .filter_by(stage=prev, status="approved")
-            .subquery()
-        )
-        loas = (
-            db.query(LOA)
-            .filter(LOA.id.in_(pending_stage_loa_ids))
-            .filter(LOA.id.in_(approved_prev_loa_ids))
-        )
-        loas = newest_first(loas, LOA).all()
-    else:
-        # First stage — no prerequisite
-        loas = (
-            db.query(LOA)
-            .filter(LOA.id.in_(pending_stage_loa_ids))
-        )
-        loas = newest_first(loas, LOA).all()
+    # Emergency cycles stay confidential here too — the queue is one more
+    # consumer of the LOA list, and it must hide what the list hides.
+    hidden = hidden_cycle_ids(db, current_user)
+    if hidden:
+        query = query.filter(sa_or_(LOA.cycle_id.is_(None), LOA.cycle_id.notin_(hidden)))
+
+    candidates = newest_first(query, LOA).all()
+
+    # Both remaining filters need Python: the sub-gate flags are read through
+    # the same helper loa.py uses, and Role.matches_loa normalises brand
+    # prefixes ('HB - Oakley' vs 'Oakley') and walks loa_line for multi-brand
+    # LOAs — neither is expressible as a plain SQL IN.
+    loas = [
+        loa for loa in candidates
+        if _stage_is_open(loa, stage) and role.matches_loa(loa)
+    ]
 
     # Attach stages info to each LOA
     result = []

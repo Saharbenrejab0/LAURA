@@ -18,11 +18,24 @@ import PhotoUploader, { type CropState } from '../PhotoUploader'
 const FONT = "Inter, ui-sans-serif, system-ui, sans-serif"
 const GOLD = '#C9A678'
 
+/**
+ * Column ids double as the photo key: a frame persists as
+ * `photo_type = lens_col_<column id>` under this cycle + category, and BOTH
+ * lens slides read back from the same `data.photos` array. The ids therefore
+ * have to be unique across the two templates, not just within one.
+ *
+ * They were not: this file and LensInvestmentSlide both seeded
+ * `default-1, default-2, ...`, so this slide's column 1 and
+ * the investment slide's column A were literally the same stored photo —
+ * uploading on one slide replaced the other's frame, and removing on one
+ * cleared both. Columns added at runtime already use crypto.randomUUID(), so
+ * these constants were the only collision source.
+ */
 const DEFAULT_COLUMNS: LensColumn[] = [
-  { id: 'default-1', header: 'PROGRAMME 1', subtitle: '', bullets: [] },
-  { id: 'default-2', header: 'PROGRAMME 2', subtitle: '', bullets: [] },
-  { id: 'default-3', header: 'PROGRAMME 3', subtitle: '', bullets: [] },
-  { id: 'default-4', header: 'PROGRAMME 4', subtitle: '', bullets: [] },
+  { id: 'overview-1', header: 'PROGRAMME 1', subtitle: '', bullets: [] },
+  { id: 'overview-2', header: 'PROGRAMME 2', subtitle: '', bullets: [] },
+  { id: 'overview-3', header: 'PROGRAMME 3', subtitle: '', bullets: [] },
+  { id: 'overview-4', header: 'PROGRAMME 4', subtitle: '', bullets: [] },
 ]
 
 interface Props {

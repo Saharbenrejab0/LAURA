@@ -71,6 +71,25 @@
   --st-rejected-bg: #F7DEDE; --st-rejected-fg: #650B0B;
   --st-warn-bg: #F6E2D2;     --st-warn-fg: #6B3410;
 
+  /* ── Workflow stepper gate pills (StageStepper) ───────────────────────────
+     The rail used to hardcode its champagne and sage hex inline, so in dark
+     mode a light pill kept a light text token on top of it and the gate you
+     were actually on became invisible. These are the same light values it
+     shipped with — the dark block re-derives them, and the gold active gate
+     carries ink text in BOTH themes rather than white-on-champagne. */
+  --step-current-bg:          #FAF5EA;
+  --step-current-border:      #E8D9B8;
+  --step-current-fg:          #1A1815;
+  --step-current-dot-bg:      #C9A678;
+  --step-current-dot-border:  #C9A678;
+  --step-current-dot-fg:      #241C0E;
+  --step-done-bg:             #F4F7F4;
+  --step-done-border:         #DCE6DC;
+  --step-done-dot-bg:         #1D6B45;
+  --step-done-dot-border:     #1D6B45;
+  --step-done-dot-fg:         #FFFFFF;
+  --step-line-done:           #DCE6DC;
+  --step-record-fg:           #4E6E5A;
 
   /* ── Aliases for names already used across the app but never defined ──────
      TrackerPage's emergency banners and the corporate-review page reference
@@ -149,6 +168,27 @@
   --st-approved-bg: #1A4D37; --st-approved-fg: #B3E6D0;
   --st-rejected-bg: #4D1A1A; --st-rejected-fg: #E6B3B3;
   --st-warn-bg: #3D2513;     --st-warn-fg: #EBB98D;
+
+  /* ── Workflow stepper gate pills (StageStepper) ───────────────────────────
+     Gold still means "you are here", but the pill is the gold rather than a
+     champagne wash of it, and the text on it is ink. Same reading order as
+     light — active gold, cleared green, pending bare — at dark-mode weight. */
+  --step-current-bg:          #E0B15F;
+  --step-current-border:      #EFC780;
+  --step-current-fg:          #17120A;
+  --step-current-dot-bg:      #17120A;
+  --step-current-dot-border:  #17120A;
+  --step-current-dot-fg:      #E9BE72;
+  --step-done-bg:             #172E24;
+  --step-done-border:         #2A5741;
+  --step-done-dot-bg:         #23724D;
+  /* The cleared disc sits on a green pill in dark, so its edge needs a lighter
+     ring to stay a disc — in light the pale pill does that job on its own. */
+  --step-done-dot-border:     #4EA97C;
+  --step-done-dot-fg:         #F2F4F6;
+  --step-line-done:           #2A5741;
+  --step-record-fg:           #86C2A3;
+
   /* ── Aliases for names already used across the app but never defined ──────
      TrackerPage's emergency banners and the corporate-review page reference
      these. Undefined custom properties make the whole declaration invalid, so

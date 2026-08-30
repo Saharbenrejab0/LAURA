@@ -155,7 +155,21 @@ export default function PhotoUploader({
     minWidth: 0,
     overflow: 'hidden',
     border,
-    ...(aspectRatio ? { aspectRatio } : { flex: 1 }),
+    // `flex: 1` alone only sizes this box when the parent is a flex container.
+    // Under a plain block parent it is ignored, and because every child of the
+    // FILLED state is absolutely positioned (the img, the hover overlay, the
+    // zoom controls) the box then has no in-flow content and collapses to the
+    // 2px of its own border. The photo becomes invisible and — worse — the
+    // frame stops being a hit target, so click-to-upload, drag/drop, Replace
+    // and Remove all die on that frame once it holds a photo. The lens slides
+    // give this component exactly such a block parent.
+    //
+    // `height: '100%'` covers that case. It is inert everywhere else: a flex
+    // item declares `flex-basis: 0%`, which wins over `height` for the flex
+    // base size, so the call sites that already wrap this in a flex column are
+    // byte-identical; and under a parent with an indefinite height it resolves
+    // to `auto`, i.e. today's behaviour.
+    ...(aspectRatio ? { aspectRatio } : { flex: 1, height: '100%' }),
   }
 
   // ── Filled ────────────────────────────────────────────────────────────────

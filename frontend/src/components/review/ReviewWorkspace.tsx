@@ -694,22 +694,23 @@ export default function ReviewWorkspace({
             backLabel={backLabel}
           />
 
-          {state.isTest && (
-            <div style={{
-              flexShrink: 0,
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '9px 22px',
-              background: '#FBE9E7',
-              borderBottom: '1px solid #E9C4BE',
-              fontSize: 12, color: '#8A2E27',
-            }}>
-              <span aria-hidden>⚠</span>
-              <span>
-                <strong style={{ fontWeight: 700, letterSpacing: '.04em' }}>TEST CYCLE</strong>
-                {' — will be deleted before go-live. Nothing here is a real submission.'}
-              </span>
-            </div>
-          )}
+          {/* The "TEST CYCLE — will be deleted before go-live" banner is
+              deliberately NOT rendered here.
+
+              This workspace is the deck: it is presented on a screen and
+              screenshotted, and a red strip across the top of every slide
+              contaminates both. The warning belongs where someone is deciding
+              what to do with the cycle, not where they are reading its content.
+
+              Nothing about the flag itself changed. `state.isTest` is still
+              fetched and carried (the deck fetch above still reads
+              `Boolean(deckRes.cycle.isTest)`), and the warning still shows in
+              full on every surface that governs the cycle rather than presents
+              it — TestCycleBanner on the cycle page (with its delete action),
+              the tracker's current-cycle notice, and the Admin Console's cycle
+              list. Deletion is still refused server-side for anything not
+              flagged is_test. This is a presentation-layer exception only; do
+              not generalise it into hiding the flag elsewhere. */}
 
           {readOnly && (
             <div style={{
