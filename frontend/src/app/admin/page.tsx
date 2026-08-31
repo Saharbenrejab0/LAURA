@@ -697,27 +697,70 @@ function PeoplePicker({
   onToggle: (email: string) => void
 }) {
   const [q, setQ] = useState('')
+  const [area, setArea] = useState('')
   const t = q.trim().toLowerCase()
-  const shown = t
-    ? users.filter(u => [u.full_name, u.email, u.role_display_name]
+
+  // Areas come from the roles themselves — role_scope_value is the cluster list
+  // a cluster-scoped role can see. No second source of truth to keep in sync.
+  const areas = useMemo(() => {
+    const set = new Set<string>()
+    for (const u of users) {
+      if (u.role_scope_type !== 'cluster') continue
+      for (const v of u.role_scope_value ?? []) if (v) set.add(String(v))
+    }
+    return [...set].sort()
+  }, [users])
+
+  const shown = useMemo(() => {
+    let rows = users
+    if (area) {
+      // Admins and other 'all'-scope roles stay visible whatever area is
+      // picked: an emergency cycle is invalid without one (see peopleShortfall),
+      // so filtering them out would make the picker unable to produce a valid
+      // selection.
+      rows = rows.filter(u =>
+        u.role_scope_type !== 'cluster' ||
+        (u.role_scope_value ?? []).some(v => String(v) === area),
+      )
+    }
+    if (t) {
+      rows = rows.filter(u => [u.full_name, u.email, u.role_display_name]
         .filter(Boolean).some(v => String(v).toLowerCase().includes(t)))
-    : users
+    }
+    return rows
+  }, [users, area, t])
 
   return (
     <>
-      <input
-        value={q}
-        onChange={e => setQ(e.target.value)}
-        placeholder="Search people by name, email or role"
-        style={{ ...INPUT, marginBottom: 6 }}
-      />
+      <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+        <input
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          placeholder="Search people by name, email or role"
+          style={{ ...INPUT, flex: 1 }}
+        />
+        {areas.length > 0 && (
+          <select
+            value={area}
+            onChange={e => setArea(e.target.value)}
+            style={{ ...INPUT, width: 'auto', minWidth: 150, flexShrink: 0 }}
+          >
+            <option value="">All areas</option>
+            {areas.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        )}
+      </div>
       <div style={{
         maxHeight: 200, overflowY: 'auto', border: '1.5px solid var(--border-strong)',
         borderRadius: 8, padding: 6, background: 'var(--surface-raised)',
       }}>
         {shown.length === 0 ? (
           <p className="ac-card-note" style={{ padding: 6 }}>
-            {users.length === 0 ? 'No users to pick from.' : 'Nobody matches that search.'}
+            {users.length === 0
+              ? 'No users to pick from.'
+              : area
+                ? `Nobody in ${area} matches that search.`
+                : 'Nobody matches that search.'}
           </p>
         ) : shown.map(u => (
           <label key={u.id} style={{
