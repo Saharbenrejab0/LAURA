@@ -1,312 +1,400 @@
 """
-LAURA — PPT Engine v2.1
-Fixed layout: proper spacing between table and content, photos fit correctly.
-Rules confirmed by Vanessa Stöecklein:
-- Title: [Brand]: [Activity Type] (Coop ADV: [Customer] · [Subject])
-- Table: SAP code · Event type · Brands · Description · # Cust · Avg/Cust · Vendor · Budget · Date
-- Left: Description (WHY) · Tools (HOW) · KPI · Cost drill down · Avg/door
-- Right: 2 photos max (mandatory for CEO deck)
-- Footer: Cluster · Strictly confidential · EssilorLuxottica
-- PPT required if FY Total > €50,000
+LAURA — PPT Engine v3.0 (Gold Standard)
+========================================
+Rebuilt to match the EssilorLuxottica ADV NO LABOR Italy deck (June 2026).
+
+Three distinct layouts based on activity type:
+  1. STANDARD  — Permanent/Seasonal Visibility, Coop ADV, In Store,
+                  Trade Incentive, Catalogues, Training, PR, e-Tools,
+                  Other ADV, Others (non ADV)
+     Table cols: Country · Type/Planning 2.0 · Customer · Brand · Detail ·
+                 # Doors · AVG/door · Vendor · Curr · Q3-26 · Q4-26 · FY-26
+
+  2. EVENTS    — Events, Medical Affairs
+     Table cols: SAP Event Code · Event Type · Lenses Brands · Frames Brands ·
+                 Description · # Cust · Avg invest/Cust · Vendor · Budget · Date
+
+  3. SPONSORSHIP — Sponsorship
+     Same as STANDARD but # Doors and AVG/door are hidden (per Vanessa Mtg 2)
+
+Visual identity matches the gold deck:
+  - Cream background (#FDFBF7)
+  - Top-left:  category tag (dark navy rectangle, white text)
+  - Top-right: ITALY/country tag (dark navy) + budget (light blue) + LOA# (light blue)
+  - Title:     large bold black, left-aligned
+  - Table:     full-width black header row, alternating black/white cells
+  - Left:      bordered text box with Description / Brands / Clients /
+               Timing / Tools / KPI / Costs drill down / Avg/door / # Doors
+  - Right:     bordered photo box labeled "Examples of Previous Executions"
+  - Footer:    ●● cluster | confidentiality line | page # | EssilorLuxottica
 """
 
 import io
 import os
+import re
+from datetime import datetime
 from pptx import Presentation
-from pptx.util import Inches, Pt
+from backend.engines.loa_display import compute_display_title
+from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.shapes import MSO_SHAPE
 
-# ── EL Brand Colors ────────────────────────────────────────────────────────────
-EL_DARK   = RGBColor(0x0D, 0x1B, 0x2A)
-EL_GOLD   = RGBColor(0xC9, 0xA8, 0x4C)
-EL_WHITE  = RGBColor(0xFF, 0xFF, 0xFF)
-EL_GRAY   = RGBColor(0x64, 0x64, 0x64)
-EL_LIGHT  = RGBColor(0xF2, 0xF2, 0xF2)
-EL_BORDER = RGBColor(0xCC, 0xCC, 0xCC)
-EL_GREEN  = RGBColor(0x1A, 0x73, 0x48)
 
+# ════════════════════════════════════════════════════════════════════════
+# Colors — exact tones from the gold deck
+# ════════════════════════════════════════════════════════════════════════
+CREAM        = RGBColor(0xFD, 0xFB, 0xF7)   # slide background
+BLACK        = RGBColor(0x00, 0x00, 0x00)   # title, table header
+NAVY         = RGBColor(0x2C, 0x3E, 0x5D)   # category tag, country tag
+LIGHT_BLUE   = RGBColor(0xA6, 0xC4, 0xE0)   # budget tag, LOA # tag
+WHITE        = RGBColor(0xFF, 0xFF, 0xFF)
+GRAY_DARK    = RGBColor(0x50, 0x50, 0x50)
+GRAY_MID     = RGBColor(0x88, 0x88, 0x88)
+GRAY_LIGHT   = RGBColor(0xCC, 0xCC, 0xCC)
+GRAY_FOOTER  = RGBColor(0xAA, 0xAA, 0xAA)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Slide dimensions (16:9 widescreen, matches the gold deck)
+# ════════════════════════════════════════════════════════════════════════
 SLIDE_W = Inches(13.33)
 SLIDE_H = Inches(7.5)
 
 UPLOAD_DIR = "uploads/loa_photos"
 
+
+# ════════════════════════════════════════════════════════════════════════
+# Brand abbreviations (from the gold deck cost drill-downs)
+# ════════════════════════════════════════════════════════════════════════
 BRAND_ABBREV = {
-    "HB - Ray-Ban": "RB", "HB - Ray-Ban Meta": "RB META",
-    "HB - Oakley": "OAK", "HB - Oakley Meta": "OAK META",
-    "HB - Vogue": "VOG", "HB - Persol": "PER",
-    "HB - Oliver Peoples": "OP", "HB - Alain Mikli": "AM",
-    "All HB": "ALL HB", "All HB + All LB": "ALL HB+LB",
-    "LB - Chanel": "CHANEL", "LB - Prada": "PRADA",
-    "LB - Versace": "VERS", "LB - Dolce & Gabbana": "D&G",
-    "LB - Burberry": "BURB", "All LB": "ALL LB",
-    "Essilor - Varilux": "VARILUX", "Essilor - Stellest": "STELLEST",
-    "Essilor - Eyezen": "EYEZEN", "Essilor - Masterbrand": "ESS",
-    "Essilor - Multibrand": "ESS MULTI", "Transitions": "TRANS",
-    "Nikon": "NIKON",
+    # House Brands
+    "HB - Ray-Ban":         "RB",
+    "HB - Ray-Ban Meta":    "ME",
+    "HB - Oakley":          "OO",
+    "HB - Oakley Meta":     "OO ME",
+    "HB - Vogue":           "VO",
+    "HB - Persol":          "PO",
+    "HB - Oliver Peoples":  "OV",
+    "HB - Alain Mikli":     "AO",
+    "HB - Arnette":         "AR",
+    "HB - BLIZ":            "BL",
+    "HB - Nuance":          "NU",
+    "all HB":               "all HB",
+
+    # License Brands
+    "LB - Versace":             "VE",
+    "LB - Emporio Armani":      "EA",
+    "LB - Armani Exchange":     "EA7",
+    "LB - Giorgio Armani":      "AR",
+    "LB - Michael Kors":        "MK",
+    "LB - Brunello Cucinelli":  "BC",
+    "LB - Prada":               "PR",
+    "LB - Miu Miu":             "MU",
+    "LB - Prada Linea Rossa":   "PS",
+    "LB - Dolce & Gabbana":     "DG",
+    "LB - Burberry":            "BE",
+    "LB - Jimmy Choo":          "JC",
+    "LB - Tiffany":             "TF",
+    "LB - Chanel":              "CH",
+    "LB - Swarovski":           "SK",
+    "LB - Ferrari":             "FZ",
+    "LB - Ferrari Scuderia":    "FZ",
+    "LB - Moncler":             "MO",
+    "LB - Polo Ralph Lauren":   "PH",
+    "LB - Polo":                "PH",
+    "LB - Ralph":               "RA",
+    "LB - Starck Eye":          "SE",
+    "all LB":                   "all LB",
+    "all HB + all LB":          "all HB + all LB",
+
+    # Essilor lenses
+    "Essilor - Varilux":     "VARILUX",
+    "Essilor - Stellest":    "STELLEST",
+    "Essilor - Eyezen":      "EYEZEN",
+    "Essilor - Crizal":      "CRIZAL",
+    "Essilor - Masterbrand": "ESS",
+    "Essilor - Multibrand":  "ESS MB",
+    "Transitions":           "TRANS",
+    "Nikon":                 "NIKON",
+    "Nuance":                "NU",
 }
 
-ACTIVITY_TITLE = {
-    "Tailor Made Seasonal": "Tailor Made Seasonal",
-    "Tailor Made Permanent": "Tailor Made Permanent",
-    "Coop Advertising": "Coop Advertising",
-    "In Store / Consumer Activation": "In Store / Consumer Activation",
-    "Events": "Events", "Trade Incentive": "Trade Incentive",
-    "Sponsorship": "Sponsorship", "Catalogues & Brochures": "Catalogues & Brochures",
-    "Other ADV Expenses": "Other ADV Expenses", "Medical Affairs": "Medical Affairs",
-    "Training": "Training", "PR": "PR", "e-Tools": "e-Tools",
-    "Others (non ADV)": "Others",
+
+# Which activities get which layout — CANONICAL CODES, from reference_data.
+#
+# These three used to be local sets of Title Case LABELS ("Events",
+# "Sponsorship"), tested against `loa["activity_type"]`, which holds the CODE
+# ("EVENTS", "SPONSORSHIP"). None of them ever matched: every event LOA was
+# rendered with the standard layout, Sponsorship never hid its door columns, and
+# the category-tag fallback never fired. The first two now come from
+# reference_data instead of being retyped here.
+from backend.reference_data import (
+    EVENT_ACTIVITY_TYPES as _EVENT_ACTIVITY_TYPES,
+    NO_DOOR_ACTIVITY_TYPES as _NO_DOOR_ACTIVITY_TYPES,
+    activity_label as _activity_label,
+
+)
+
+# Activity types that use the EVENTS layout
+EVENT_LAYOUT_ACTIVITIES = set(_EVENT_ACTIVITY_TYPES)
+
+# Activity types that hide # Doors / AVG per door
+NO_DOOR_ACTIVITIES = set(_NO_DOOR_ACTIVITY_TYPES)
+
+# Activity → category tag (top-left) fallback when no category is set
+ACTIVITY_TO_TAG = {
+    "SPONSORSHIP":     "Sponsorship",
+    "EVENTS":          "All categories",
+    "MEDICAL_AFFAIRS": "All categories",
+    "TRAINING":        "All categories",
 }
 
 
-def _fmt(n):
-    if not n: return "—"
-    if n >= 1_000_000: return f"€{n/1_000_000:.1f}M"
-    if n >= 1_000: return f"€{round(n/1_000)}k"
-    return f"€{n:,.0f}"
+# ════════════════════════════════════════════════════════════════════════
+# Helpers
+# ════════════════════════════════════════════════════════════════════════
+
+def _fmt_date(d) -> str:
+    """Format YYYY-MM-DD → '01 Sep 2026'. Returns '' if empty, raw string if unparseable."""
+    if not d:
+        return ""
+    try:
+        return datetime.strptime(str(d), "%Y-%m-%d").strftime("%d %b %Y")
+    except Exception:
+        return str(d)
 
 
-def _textbox(slide, text, l, t, w, h, size=9, bold=False, italic=False,
-             color=None, align=PP_ALIGN.LEFT, wrap=True):
-    tb = slide.shapes.add_textbox(l, t, w, h)
+def _format_categories(cats) -> str:
+    """List or str → 'Frames + Lenses' style string."""
+    if not cats:
+        return ""
+    if isinstance(cats, str):
+        return cats
+    return " + ".join(str(c) for c in cats if c)
+
+
+def _format_brands(brands) -> str:
+    """List or str → full brand display string."""
+    if not brands:
+        return ""
+    if isinstance(brands, str):
+        return brands
+    return " + ".join(str(b) for b in brands if b)
+
+
+_BRAND_CODE_RE = re.compile(r"^(?P<name>.+?)\s*\((?P<code>[A-Za-z0-9]{1,6})\)$")
+
+
+def _abbrev_brand(brand: str) -> str:
+    """
+    One brand → its short code.
+
+    Handles both formats: the legacy labels in BRAND_ABBREV ('HB - Ray-Ban' → 'RB')
+    and the current reference-data format that already carries the SAP code
+    ('Ray-Ban (RB)' → 'RB').
+    """
+    if not brand:
+        return ""
+    if brand in BRAND_ABBREV:
+        return BRAND_ABBREV[brand]
+    m = _BRAND_CODE_RE.match(brand.strip())
+    if m:
+        return m.group("code")
+    return brand
+
+
+def _abbrev_brands(brands) -> str:
+    """List or str → short abbreviations (e.g. 'RB + OO')."""
+    if not brands:
+        return ""
+    if isinstance(brands, str):
+        return _abbrev_brand(brands)
+    return " + ".join(_abbrev_brand(b) for b in brands if b)
+
+
+def _fmt_eur(n) -> str:
+    """Format euro amount: €120K, €1.5M, €450."""
+    if not n:
+        return "—"
+    n = float(n)
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}M€"
+    if n >= 1_000:
+        return f"{round(n/1_000)}K€"
+    return f"{n:,.0f}€"
+
+
+def _fmt_eur_full(n) -> str:
+    """Format euro amount with thousand separators: €120,000."""
+    if not n:
+        return "—"
+    return f"{n:,.0f}".replace(",", ".") + " €"
+
+
+def _category_tag_label(category, activity_type) -> str:
+    """
+    Top-left tag: 'Frames', 'Lenses', 'All categories', 'Sponsorship', etc.
+    Mirrors the gold deck where:
+      - Single category → that category name (capitalised)
+      - Multi-category   → 'All categories'
+      - Sponsorship      → 'Sponsorship'
+    """
+    if activity_type in ACTIVITY_TO_TAG:
+        return ACTIVITY_TO_TAG[activity_type]
+    cats = category if isinstance(category, list) else [category] if category else []
+    cats = [c for c in cats if c]
+    if not cats:
+        return "All categories"
+    if len(cats) == 1:
+        return cats[0]
+    return "All categories"
+
+
+def _add_text(slide, text, left, top, width, height,
+              size=10, bold=False, italic=False, color=None,
+              align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, wrap=True,
+              font_name="Calibri"):
+    """Add a textbox with the specified styling."""
+    tb = slide.shapes.add_textbox(left, top, width, height)
     tf = tb.text_frame
     tf.word_wrap = wrap
-    tf.margin_left = 0
-    tf.margin_right = 0
-    tf.margin_top = 0
-    tf.margin_bottom = 0
+    tf.margin_left = Emu(0)
+    tf.margin_right = Emu(0)
+    tf.margin_top = Emu(0)
+    tf.margin_bottom = Emu(0)
+    tf.vertical_anchor = anchor
     p = tf.paragraphs[0]
     p.alignment = align
     r = p.add_run()
-    r.text = str(text) if text else ""
+    r.text = str(text) if text is not None else ""
     r.font.size = Pt(size)
     r.font.bold = bold
     r.font.italic = italic
-    r.font.color.rgb = color or EL_DARK
+    r.font.name = font_name
+    r.font.color.rgb = color or BLACK
     return tb
 
 
-def _rect(slide, l, t, w, h, fill=None, line=None):
-    shp = slide.shapes.add_shape(1, l, t, w, h)
-    if fill:
+def _add_rect(slide, left, top, width, height, fill=None, line=None, line_width=None):
+    """Add a filled rectangle."""
+    shp = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
+    if fill is not None:
         shp.fill.solid()
         shp.fill.fore_color.rgb = fill
     else:
         shp.fill.background()
-    if line:
+    if line is not None:
         shp.line.color.rgb = line
+        if line_width is not None:
+            shp.line.width = line_width
     else:
         shp.line.fill.background()
+    # Remove default shadow that pptx adds
+    shp.shadow.inherit = False
     return shp
 
 
+def _add_line(slide, x1, y1, x2, y2, color=GRAY_LIGHT, width=Pt(0.5)):
+    """Add a thin line (used for table borders & footer divider)."""
+    line = slide.shapes.add_connector(1, Emu(int(x1)), Emu(int(y1)),
+                                       Emu(int(x2)), Emu(int(y2)))
+    line.line.color.rgb = color
+    line.line.width = width
+    return line
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Main entry point
+# ════════════════════════════════════════════════════════════════════════
+
+# ── Multi-row pagination thresholds ────────────────────────────────────────
+# Measured against the 13.33" x 7.5" canvas:
+#   table_y 1.65" + header 0.45" = 2.10"; each data row is 0.40"; footer at 7.18".
+#
+#   ROWS_WITH_CONTENT  rows that fit above the description/photo block on the
+#                      final slide. 3 rows end at 3.30", so the content block
+#                      moves to y=3.40" and shrinks 4.20" -> 3.60".
+#   ROWS_TABLE_ONLY    rows on a table-only continuation slide (no description,
+#                      no photos). 9 rows + TOTAL strip ends at 6.10".
+ROWS_WITH_CONTENT = 3
+ROWS_TABLE_ONLY   = 9
+
+# Content block geometry on a final slide that also carries data rows.
+MULTI_CONTENT_Y = Inches(3.40)
+MULTI_CONTENT_H = Inches(3.60)
+
+
+def _paginate_rows(rows: list) -> list[list]:
+    """
+    Split data rows across slides.
+
+    <= ROWS_WITH_CONTENT   one slide, normal layout (table + description + photos)
+    more                   table-only slides for the leading rows, then a final
+                           slide carrying the last ROWS_WITH_CONTENT rows plus
+                           the description and photos.
+
+    With MAX_LOA_LINES = 12 the prefix is always 1-9 rows, so a split LOA
+    produces exactly two slides.
+    """
+    n = len(rows)
+    if n <= ROWS_WITH_CONTENT:
+        return [rows]
+
+    # Reserve the tail for the final slide; chunk everything before it.
+    head, tail = rows[:n - ROWS_WITH_CONTENT], rows[n - ROWS_WITH_CONTENT:]
+    pages = [head[i:i + ROWS_TABLE_ONLY] for i in range(0, len(head), ROWS_TABLE_ONLY)]
+    pages.append(tail)
+    return pages
+
+
+def _loa_rows(loa: dict) -> list:
+    """Per-row dicts for this LOA — its `lines` when multi, else the LOA itself."""
+    if (loa.get("loa_type") or "standard") == "standard":
+        return [loa]
+    lines = loa.get("lines") or []
+    return lines if lines else [loa]
+
+
 def generate_loa_slide(loa: dict) -> bytes:
+    """
+    Generate a LOA slide deck as PPTX bytes.
+
+    A standard LOA produces exactly one slide, byte-for-byte as before.
+    A multi-brand / multi-activity LOA with more rows than fit produces a
+    paginated set: table-only slides first, then a final slide with the
+    remaining rows plus the description and photo blocks.
+    """
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
 
-    # ── Extract fields ─────────────────────────────────────────────────────
-    loa_id       = str(loa.get("id", ""))
-    activity     = loa.get("activity_type", "")
-    brand        = loa.get("brand", "")
-    category     = loa.get("category", "")
-    cluster      = loa.get("cluster", "")
-    country      = loa.get("country", "")
-    customer     = loa.get("customer", "")
-    vendor       = loa.get("vendor", "")
-    description  = loa.get("description", "") or ""
-    detail       = loa.get("detail", "") or ""
-    kpi          = loa.get("kpi", "") or ""
-    cost_drill   = loa.get("cost_drill_down", "") or ""
-    loa_number   = loa.get("loa_number", "") or loa.get("loa_draft_id", "")
-    start_date   = loa.get("start_date", "") or ""
-    end_date     = loa.get("end_date", "") or ""
-    fy_total     = loa.get("fy_2026_total", 0) or 0
-    num_doors    = loa.get("num_doors") or 0
-    num_customers = loa.get("num_customers") or 0
-    avg_per_door = loa.get("avg_investment_per_door")
-    event_type   = loa.get("event_type", "") or ""
-    sap_code     = loa.get("sap_event_code", "") or "TBC"
-    ppt_required = loa.get("ppt_slide_required", False)
+    activity = (loa.get("activity_type") or "").strip()
+    rows  = _loa_rows(loa)
+    # The events layout ignores `rows` (its columns are LOA-level — SAP code,
+    # brand split, # customers), so paginating one would emit N identical
+    # slides. Only the standard layout splits.
+    is_event_layout = activity in EVENT_LAYOUT_ACTIVITIES
+    pages = [rows[:1]] if is_event_layout else _paginate_rows(rows)
+    total_pages = len(pages)
 
-    activity_title = ACTIVITY_TITLE.get(activity, activity)
-    brand_abbrev   = BRAND_ABBREV.get(brand, brand)
+    for page_idx, page_rows in enumerate(pages):
+        slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank layout
+        _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, fill=CREAM)
 
-    if activity == "Coop Advertising" and customer:
-        slide_title = f"{customer} · {activity_title}"
-    else:
-        slide_title = f"{brand}: {activity_title}" if brand else activity_title
+        is_last = page_idx == total_pages - 1
+        page_no = (page_idx + 1, total_pages) if total_pages > 1 else None
 
-    date_str = f"{start_date} – {end_date}" if start_date and end_date else start_date or "—"
-
-    avg_per_cust = (fy_total / num_customers) if num_customers and fy_total else None
-
-    # ══════════════════════════════════════════════════════════════════════
-    # LAYOUT — fixed pixel-perfect positions
-    # ══════════════════════════════════════════════════════════════════════
-    M          = Inches(0.3)       # left margin
-    TOP_BAR_H  = Inches(0.45)      # dark navy top bar
-    TITLE_Y    = Inches(0.5)       # title just below top bar
-    TITLE_H    = Inches(0.32)
-    TABLE_Y    = Inches(0.88)      # table starts here
-    TABLE_H    = Inches(0.72)      # header row + data row
-    CONTENT_Y  = Inches(1.7)       # left content starts well below table
-    FOOTER_Y   = Inches(7.1)       # footer
-    FOOTER_H   = Inches(0.35)
-    LEFT_W     = Inches(7.6)       # left content zone width
-    RIGHT_X    = Inches(8.0)       # right photos start here
-    RIGHT_W    = Inches(5.05)      # photo width
-    PHOTO_H    = Inches(2.6)       # each photo height
-    PHOTO_GAP  = Inches(0.1)
-
-    # ── TOP BAR ────────────────────────────────────────────────────────────
-    _rect(slide, 0, 0, SLIDE_W, TOP_BAR_H, fill=EL_DARK)
-
-    _textbox(slide, category.upper(),
-             M, Inches(0.07), Inches(3), Inches(0.3),
-             size=11, bold=True, color=EL_WHITE)
-
-    _textbox(slide, f"{country.upper()}  ·  {_fmt(fy_total)}",
-             Inches(7.5), Inches(0.07), Inches(4), Inches(0.3),
-             size=10, bold=True, color=EL_WHITE, align=PP_ALIGN.RIGHT)
-
-    # LOA badge (gold, top right)
-    _rect(slide, Inches(11.75), Inches(0.07), Inches(1.35), Inches(0.3), fill=EL_GOLD)
-    _textbox(slide, f"LOA: #{loa_number}",
-             Inches(11.77), Inches(0.08), Inches(1.31), Inches(0.28),
-             size=7.5, bold=True, color=EL_WHITE, align=PP_ALIGN.CENTER)
-
-    # PPT SLIDE badge (green, below LOA badge)
-    if ppt_required:
-        _rect(slide, Inches(11.75), Inches(0.42), Inches(1.35), Inches(0.22), fill=EL_GREEN)
-        _textbox(slide, "✓ PPT SLIDE",
-                 Inches(11.77), Inches(0.43), Inches(1.31), Inches(0.2),
-                 size=7, bold=True, color=EL_WHITE, align=PP_ALIGN.CENTER)
-
-    # ── TITLE ──────────────────────────────────────────────────────────────
-    _textbox(slide, slide_title,
-             M, TITLE_Y, Inches(13.0), TITLE_H,
-             size=14, bold=True, color=EL_DARK)
-
-    # ── TABLE ──────────────────────────────────────────────────────────────
-    # Background
-    _rect(slide, M, TABLE_Y, SLIDE_W - M * 2, TABLE_H, fill=EL_LIGHT, line=EL_BORDER)
-
-    # Separator line between header and data row
-    HDR_H = Inches(0.28)
-    _rect(slide, M, TABLE_Y + HDR_H, SLIDE_W - M * 2, Inches(0.01), fill=EL_BORDER)
-
-    # Columns: (header, x, width)
-    COLS = [
-        ("SAP EVENT CODE", Inches(0.35), Inches(1.15)),
-        ("EVENT TYPE",     Inches(1.55), Inches(1.1)),
-        ("BRANDS",         Inches(2.7),  Inches(1.3)),
-        ("DESCRIPTION",    Inches(4.05), Inches(2.55)),
-        ("# CUST",         Inches(6.65), Inches(0.65)),
-        ("AVG/CUST",       Inches(7.35), Inches(0.85)),
-        ("VENDOR",         Inches(8.25), Inches(1.35)),
-        ("BUDGET",         Inches(9.65), Inches(0.8)),
-        ("DATE",           Inches(10.5), Inches(2.5)),
-    ]
-
-    HDR_Y  = TABLE_Y + Inches(0.04)
-    DATA_Y = TABLE_Y + HDR_H + Inches(0.05)
-
-    desc_short = (description[:70] + "…") if len(description) > 70 else description
-    ROW_DATA = [
-        sap_code or "TBC",
-        event_type or activity_title[:15],
-        brand_abbrev,
-        desc_short,
-        str(num_customers) if num_customers else "—",
-        _fmt(avg_per_cust) if avg_per_cust else "—",
-        (vendor or "—")[:20],
-        _fmt(fy_total),
-        date_str[:22],
-    ]
-
-    for (hdr, x, w), val in zip(COLS, ROW_DATA):
-        _textbox(slide, hdr, x, HDR_Y, w, Inches(0.22),
-                 size=6.5, bold=True, color=EL_GRAY)
-        _textbox(slide, val, x, DATA_Y, w, Inches(0.3),
-                 size=8, color=EL_DARK)
-
-    # ── LEFT CONTENT ────────────────────────────────────────────────────────
-    cy = CONTENT_Y
-    GAP = Inches(0.12)
-
-    def section(label, value, y):
-        if not value:
-            return y
-        # Label
-        _textbox(slide, label + ":", M, y, LEFT_W, Inches(0.2),
-                 size=8, bold=True, color=EL_GRAY)
-        y += Inches(0.2)
-        # Value — estimate height from length
-        chars_per_line = 100
-        n_lines = max(1, (len(value) + chars_per_line - 1) // chars_per_line)
-        val_h = Inches(0.18 * n_lines)
-        _textbox(slide, value, M, y, LEFT_W - Inches(0.1), val_h,
-                 size=9, color=EL_DARK, wrap=True)
-        y += val_h + GAP
-        return y
-
-    cy = section("Description", description, cy)
-    cy = section("Tools", detail, cy)
-    cy = section("KPI", kpi, cy)
-    cy = section("Cost Drill Down", cost_drill, cy)
-
-    # Avg/door (not for Events/Medical/Sponsorship)
-    if avg_per_door and activity not in ("Events", "Medical Affairs", "Sponsorship"):
-        _textbox(slide, f"{_fmt(avg_per_door)}  |  #{num_doors} doors",
-                 M, cy, LEFT_W, Inches(0.22),
-                 size=9, bold=True, color=EL_GREEN)
-
-    # ── RIGHT — PHOTOS ─────────────────────────────────────────────────────
-    # Photo 1: starts at CONTENT_Y, height PHOTO_H
-    # Photo 2: starts at CONTENT_Y + PHOTO_H + GAP
-    for idx in range(1, 3):
-        py = CONTENT_Y + (idx - 1) * (PHOTO_H + PHOTO_GAP)
-
-        # Make sure photos don't go below footer
-        max_h = FOOTER_Y - py - Inches(0.05)
-        ph = min(PHOTO_H, max_h)
-        if ph < Inches(0.5):
-            break
-
-        photo_path = None
-        if loa_id and os.path.exists(UPLOAD_DIR):
-            for f in os.listdir(UPLOAD_DIR):
-                if f.startswith(f"{loa_id}_photo{idx}"):
-                    photo_path = os.path.join(UPLOAD_DIR, f)
-                    break
-
-        if photo_path and os.path.exists(photo_path):
-            try:
-                slide.shapes.add_picture(photo_path, RIGHT_X, py, RIGHT_W, ph)
-            except Exception:
-                _photo_placeholder(slide, RIGHT_X, py, RIGHT_W, ph, idx)
+        if activity in EVENT_LAYOUT_ACTIVITIES:
+            _render_events_layout(slide, loa, rows=page_rows,
+                                  page_no=page_no, with_content=is_last)
         else:
-            _photo_placeholder(slide, RIGHT_X, py, RIGHT_W, ph, idx)
+            _render_standard_layout(slide, loa,
+                                    hide_doors=(activity in NO_DOOR_ACTIVITIES),
+                                    rows=page_rows, page_no=page_no,
+                                    with_content=is_last)
 
-    # ── FOOTER ────────────────────────────────────────────────────────────
-    _rect(slide, 0, FOOTER_Y, SLIDE_W, FOOTER_H, fill=EL_DARK)
-
-    _textbox(slide, "● ●",
-             Inches(0.2), FOOTER_Y + Inches(0.06),
-             Inches(0.5), Inches(0.22), size=8, color=EL_WHITE)
-    _textbox(slide, cluster.upper(),
-             Inches(0.65), FOOTER_Y + Inches(0.06),
-             Inches(2), Inches(0.22), size=9, bold=True, color=EL_WHITE)
-    _textbox(slide, "Strictly confidential — for internal use only. Do not share or forward.",
-             Inches(3.5), FOOTER_Y + Inches(0.06),
-             Inches(6), Inches(0.22), size=8,
-             color=RGBColor(0xAA, 0xAA, 0xAA), align=PP_ALIGN.CENTER)
-    _textbox(slide, "EssilorLuxottica",
-             Inches(10.5), FOOTER_Y + Inches(0.06),
-             Inches(2.6), Inches(0.22),
-             size=9, bold=True, color=EL_WHITE, align=PP_ALIGN.RIGHT)
+        _render_footer(slide, loa)
 
     buf = io.BytesIO()
     prs.save(buf)
@@ -314,15 +402,634 @@ def generate_loa_slide(loa: dict) -> bytes:
     return buf.read()
 
 
-def _photo_placeholder(slide, x, y, w, h, idx):
-    _rect(slide, x, y, w, h,
-          fill=RGBColor(0xEE, 0xEE, 0xEE),
-          line=RGBColor(0xCC, 0xCC, 0xCC))
-    _textbox(slide, f"[ Photo {idx} ]",
-             x, y + h / 2 - Inches(0.15), w, Inches(0.3),
-             size=10, color=RGBColor(0xAA, 0xAA, 0xAA),
-             align=PP_ALIGN.CENTER, italic=True)
-    _textbox(slide, "Upload photo in LAURA form",
-             x, y + h / 2 + Inches(0.05), w, Inches(0.25),
-             size=8, color=RGBColor(0xBB, 0xBB, 0xBB),
-             align=PP_ALIGN.CENTER, italic=True)
+# ════════════════════════════════════════════════════════════════════════
+# Top-right tag stack (country + budget + LOA #)
+# ════════════════════════════════════════════════════════════════════════
+
+def _render_top_right_tags(slide, loa):
+    """Country (navy) → Budget (light blue) → LOA # (light blue, optional)."""
+    country  = (loa.get("country") or "").upper() or "ITALY"
+    fy_total = loa.get("fy_2026_total") or 0
+    loa_num  = loa.get("loa_number") or ""
+
+    tag_x = Inches(11.5)
+    tag_w = Inches(1.65)
+    tag_h = Inches(0.36)
+    tag_y = Inches(0.25)
+
+    # Country (dark navy)
+    _add_rect(slide, tag_x, tag_y, tag_w, tag_h, fill=NAVY)
+    _add_text(slide, country, tag_x, tag_y, tag_w, tag_h,
+              size=13, bold=True, color=WHITE,
+              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    # Budget (light blue)
+    tag_y2 = tag_y + tag_h
+    _add_rect(slide, tag_x, tag_y2, tag_w, tag_h, fill=LIGHT_BLUE)
+    _add_text(slide, _fmt_eur(fy_total), tag_x, tag_y2, tag_w, tag_h,
+              size=13, bold=True, color=BLACK,
+              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    # LOA # (light blue, only if real LOA number exists)
+    if loa_num and not loa_num.startswith("LAURA-"):
+        tag_y3 = tag_y2 + tag_h
+        _add_rect(slide, tag_x, tag_y3, tag_w, tag_h, fill=LIGHT_BLUE)
+        _add_text(slide, f"LOA: #{loa_num}", tag_x, tag_y3, tag_w, tag_h,
+                  size=10, bold=False, color=BLACK,
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Top-left category tag
+# ════════════════════════════════════════════════════════════════════════
+
+def _render_category_tag(slide, loa):
+    """Dark navy rectangle in top-left with category/activity label."""
+    label = _category_tag_label(loa.get("category"), loa.get("activity_type"))
+    tag_x = Inches(0.3)
+    tag_y = Inches(0.25)
+    tag_w = Inches(1.6)
+    tag_h = Inches(0.4)
+    _add_rect(slide, tag_x, tag_y, tag_w, tag_h, fill=NAVY)
+    _add_text(slide, label, tag_x, tag_y, tag_w, tag_h,
+              size=11, bold=True, color=WHITE,
+              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Title (slide subject)
+# ════════════════════════════════════════════════════════════════════════
+
+def _slide_title(loa) -> str:
+    """
+    Slide title. Multi-row LOAs name their axis values when there are few enough
+    to read, and collapse to 'All Brands' / 'All Activities' beyond that — the
+    deck reads better than the tracker's bare count.
+    """
+    loa_type = (loa.get("loa_type") or "standard").strip()
+    if loa_type == "standard":
+        return compute_display_title(loa)
+
+    lines = loa.get("lines") or []
+
+    if loa_type == "multi_brand":
+        # Label, not code — the identity map this replaced was keyed by label
+        # and so passed "TM_SEASONAL" straight into the title.
+        activity_label = _activity_label((loa.get("activity_type") or "").strip())
+        names = [_abbrev_brands(ln.get("brand")) for ln in lines if ln.get("brand")]
+        label = ", ".join(names) if 0 < len(names) <= 3 else "All Brands"
+        return f"{activity_label}: {label}" if activity_label else label
+
+    if loa_type == "multi_activity":
+        brand = _abbrev_brands(loa.get("brand"))
+        names = [_activity_label(ln.get("activity_type")) for ln in lines if ln.get("activity_type")]
+        label = ", ".join(names) if 0 < len(names) <= 3 else "All Activities"
+        return f"{brand.upper()}: {label}" if brand else label
+
+    return compute_display_title(loa)
+
+def _slide_title_LEGACY(loa) -> str:
+    """
+    Title construction per gold deck rules:
+      - Coop Advertising:  '{Customer} · {Activity}' (customer first)
+      - Sponsorship:       '{Brand}: {Subject}' (subject from description if any)
+      - Events / Medical:  '{Activity Type}'  (e.g. 'EL Roadshows Italy – N2 2026')
+      - Default:           '{Activity Type}: {Brand}'  (e.g. 'Seasonal Visibility: HB & LB')
+    """
+    activity = (loa.get("activity_type") or "").strip()
+    brand    = _format_brands(loa.get("brand"))
+    customer = loa.get("customer") or ""
+
+    # Pretty mapping for activity-as-title
+    activity_pretty = {
+        "Seasonal Visibility":  "Seasonal Visibility",
+        "Permanent Visibility": "Permanent Visibility",
+    }.get(activity, activity)
+
+    if activity == "Coop Advertising" and customer:
+        return f"{customer} · {activity_pretty}"
+
+    if brand:
+        return f"{activity_pretty}: {brand}"
+
+    return activity_pretty or "LOA"
+
+
+def _render_title(slide, loa, page_no=None):
+    """Large bold black title below the top tags."""
+    title = _slide_title(loa)
+    if page_no:
+        title = f"{title} ({page_no[0]} / {page_no[1]})"
+    _add_text(slide, title,
+              Inches(0.3), Inches(0.9),
+              Inches(10.5), Inches(0.6),
+              size=26, bold=True, color=BLACK,
+              align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Table — STANDARD layout
+# ════════════════════════════════════════════════════════════════════════
+
+def _standard_row_cells(loa, row, hide_doors=False):
+    """
+    Column spec for one data row of the standard table.
+
+    `row` is the source of the per-row values — for a standard LOA that is the
+    LOA dict itself; for a multi-row LOA it is one `loa_line` dict. Shared
+    values (country, currency) always come from the parent `loa`.
+
+    Returns [(header, width_inches, value), ...]
+    """
+    activity = row.get("activity_type") or loa.get("activity_type") or ""
+    # The deck's own wording for the two Tailor Made lines; everything else
+    # renders its reference_data label. Keyed by code — this map used to be
+    # keyed by label and so never fired, printing "TM_SEASONAL" in the cell.
+    activity_label = {
+        "TM_SEASONAL":  "Tailor Made Seasonal",
+        "TM_PERMANENT": "Tailor Made Permanent",
+    }.get(activity, _activity_label(activity))
+
+    fy_total  = row.get("fy_2026_total") or 0
+    q1        = row.get("q1_2026") or 0
+    q2        = row.get("q2_2026") or 0
+    q3        = row.get("q3_2026") or 0
+    q4        = row.get("q4_2026") or 0
+    num_doors = row.get("num_doors") or 0
+    avg_door  = row.get("avg_investment_per_door")
+    brand     = row.get("brand") or loa.get("brand")
+
+    cols = [
+        ("Country",            0.85, loa.get("country") or "—"),
+        ("Type / Planning 2.0\nACTIVITY", 1.55, activity_label),
+        ("CUSTOMER",           1.55, (row.get("customer") or "—")[:30]),
+        ("BRAND",              1.55, _abbrev_brands(brand)),
+        ("DETAIL",             1.5,  (row.get("detail") or "—")[:35]),
+    ]
+
+    if not hide_doors:
+        cols += [
+            ("# DOORS",            0.7,  str(num_doors) if num_doors else "—"),
+            ("AVG Investment\nper door", 1.05, _fmt_eur(avg_door) if avg_door else "—"),
+        ]
+    else:
+        # Sponsorship: replace door columns with N/A column or skip
+        cols += [
+            ("# DOORS",            0.7,  "N/A"),
+            ("AVG Investment\nper door", 1.05, "N/A"),
+        ]
+
+    cols += [
+        ("VENDOR",             1.2,  (row.get("vendor") or "—")[:20]),
+        ("CURR.",              0.45, loa.get("currency") or "€"),
+        ("Q1-26",              0.65, _fmt_eur_full(q1) if q1 else "—"),
+        ("Q2-26",              0.65, _fmt_eur_full(q2) if q2 else "—"),
+        ("Q3-26",              0.65, _fmt_eur_full(q3) if q3 else "—"),
+        ("Q4-26",              0.65, _fmt_eur_full(q4) if q4 else "—"),
+        ("FY-26",              0.75, _fmt_eur_full(fy_total) if fy_total else "—"),
+    ]
+    return cols
+
+
+def _render_standard_table(slide, loa, hide_doors=False, rows=None, show_total=False):
+    """
+    Black header row + one data row per entry in `rows`.
+
+    `rows` defaults to [loa] — the single-row behaviour every standard LOA has
+    always had. Multi-row LOAs pass their `loa_line` dicts instead.
+    When `show_total` is set, a TOTAL strip is appended under the last row.
+    """
+    if rows is None:
+        rows = [loa]
+
+    table_x = Inches(0.3)
+    table_y = Inches(1.65)
+    table_w = SLIDE_W - Inches(0.6)
+    header_h = Inches(0.45)
+    data_h   = Inches(0.4)
+
+    # Header background
+    _add_rect(slide, table_x, table_y, table_w, header_h, fill=BLACK)
+
+    # One white banded background per data row
+    for i in range(len(rows)):
+        _add_rect(slide, table_x, table_y + header_h + data_h * i, table_w, data_h,
+                  fill=WHITE, line=GRAY_LIGHT, line_width=Pt(0.5))
+
+    # Headers come from the first row's spec — every row shares the same columns.
+    header_cols = _standard_row_cells(loa, rows[0], hide_doors=hide_doors)
+    cur_x = table_x
+    for header, w_in, _ in header_cols:
+        w = Inches(w_in)
+        _add_text(slide, header,
+                  cur_x, table_y, w, header_h,
+                  size=7.5, bold=True, color=WHITE,
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        cur_x += w
+
+    # Data rows
+    for i, row in enumerate(rows):
+        cols = _standard_row_cells(loa, row, hide_doors=hide_doors)
+        row_y = table_y + header_h + data_h * i
+        cur_x = table_x
+        for _, w_in, value in cols:
+            w = Inches(w_in)
+            _add_text(slide, value,
+                      cur_x, row_y, w, data_h,
+                      size=8, color=BLACK,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            cur_x += w
+
+    if show_total and len(rows) > 1:
+        _render_table_total(slide, rows, header_cols,
+                            table_x, table_y + header_h + data_h * len(rows),
+                            table_w, data_h)
+
+
+def _render_table_total(slide, rows, header_cols, x, y, w, h):
+    """TOTAL strip under a multi-row table — sums the quarter and FY columns."""
+    _add_rect(slide, x, y, w, h, fill=BLACK)
+
+    sums = {
+        "Q1-26": sum(r.get("q1_2026") or 0 for r in rows),
+        "Q2-26": sum(r.get("q2_2026") or 0 for r in rows),
+        "Q3-26": sum(r.get("q3_2026") or 0 for r in rows),
+        "Q4-26": sum(r.get("q4_2026") or 0 for r in rows),
+        "FY-26": sum(r.get("fy_2026_total") or 0 for r in rows),
+        "# DOORS": sum(r.get("num_doors") or 0 for r in rows),
+    }
+
+    cur_x = x
+    for idx, (header, w_in, _) in enumerate(header_cols):
+        cw = Inches(w_in)
+        if idx == 0:
+            text = "TOTAL"
+        elif header in sums:
+            v = sums[header]
+            text = (str(v) if header == "# DOORS" else _fmt_eur_full(v)) if v else ""
+        else:
+            text = ""
+        if text:
+            _add_text(slide, text, cur_x, y, cw, h,
+                      size=8, bold=True, color=WHITE,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        cur_x += cw
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Table — EVENTS layout
+# ════════════════════════════════════════════════════════════════════════
+
+def _render_events_table(slide, loa):
+    """
+    EVENTS layout (also Medical Affairs):
+    SAP Event Code · Event Type · Lenses Brands · Frames Brands ·
+    Description · # Cust · Avg invest/Cust · Vendor · Budget · Date
+    """
+    table_x = Inches(0.3)
+    table_y = Inches(1.65)
+    table_w = SLIDE_W - Inches(0.6)
+    header_h = Inches(0.45)
+    data_h   = Inches(0.4)
+
+    _add_rect(slide, table_x, table_y, table_w, header_h, fill=BLACK)
+    _add_rect(slide, table_x, table_y + header_h, table_w, data_h,
+              fill=WHITE, line=GRAY_LIGHT, line_width=Pt(0.5))
+
+    fy_total = loa.get("fy_2026_total") or 0
+    num_cust = loa.get("num_customers") or 0
+    avg_cust = (fy_total / num_cust) if (num_cust and fy_total) else None
+
+    from datetime import datetime
+    def _fmt_date(d):
+        if not d: return ""
+        try:
+            return datetime.strptime(d, "%Y-%m-%d").strftime("%d %b %Y")
+        except Exception:
+            return d  # fallback if format is unexpected
+    
+    start_date = _fmt_date(loa.get("start_date"))
+    end_date   = _fmt_date(loa.get("end_date"))
+    if start_date and end_date:
+        date_str = f"{start_date} – {end_date}"
+    elif start_date:
+        date_str = start_date
+    else:
+        date_str = "—"
+
+    # Build brand split — frames vs lenses
+    brand_all = loa.get("brand") or ""
+    brand_list = brand_all if isinstance(brand_all, list) else [brand_all]
+    brand_list = [b for b in brand_list if b]
+    lens_brands  = [b for b in brand_list if b.startswith("Essilor") or b in ("Transitions", "Nikon", "Kodak")]
+    frame_brands = [b for b in brand_list if b not in lens_brands]
+
+    cols = [
+        ("SAP EVENT CODE",   1.4,  loa.get("sap_event_code") or "TBC"),
+        ("EVENT TYPE",       1.1,  loa.get("event_type") or "—"),
+        ("LENSES BRANDS",    1.3,  _abbrev_brands(lens_brands) or "N/A"),
+        ("FRAMES BRANDS",    1.3,  _abbrev_brands(frame_brands) or "—"),
+        ("DESCRIPTION",      2.4,  (loa.get("description") or "—")[:50]),
+        ("# CUST",           0.65, str(num_cust) if num_cust else "—"),
+        ("Avg invest\n/ Cust", 1.0, _fmt_eur(avg_cust) if avg_cust else "—"),
+        ("VENDOR",           1.25, (loa.get("vendor") or "—")[:20]),
+        ("BUDGET",           0.9,  _fmt_eur(fy_total)),
+        ("DATE OF EVENT",    1.43, date_str[:28]),
+    ]
+
+    cur_x = table_x
+    for header, w_in, value in cols:
+        w = Inches(w_in)
+        _add_text(slide, header,
+                  cur_x, table_y, w, header_h,
+                  size=7.5, bold=True, color=WHITE,
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text(slide, value,
+                  cur_x, table_y + header_h, w, data_h,
+                  size=8, color=BLACK,
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        cur_x += w
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Left content block (text)
+# ════════════════════════════════════════════════════════════════════════
+
+def _render_left_block(slide, loa, y=None, h=None):
+    """
+    Bordered text box containing:
+      Description / Brands / Clients / Timing of installation /
+      Tools / KPI / Costs drill down / Average investments | door / # Doors
+
+    `y`/`h` override the default geometry when extra table rows sit above it.
+    """
+    block_x = Inches(0.3)
+    block_y = y if y is not None else Inches(2.6)
+    block_w = Inches(6.5)
+    block_h = h if h is not None else Inches(4.2)
+
+    # Border
+    _add_rect(slide, block_x, block_y, block_w, block_h,
+              fill=WHITE, line=GRAY_LIGHT, line_width=Pt(0.75))
+
+    inner_x = block_x + Inches(0.2)
+    inner_w = block_w - Inches(0.4)
+    y = block_y + Inches(0.2)
+    line_gap = Inches(0.05)
+
+    activity = loa.get("activity_type") or ""
+
+    def add_field(label, value, value_is_long=False):
+        """Add 'Label: value' line. Returns new y position."""
+        nonlocal y
+        if not value:
+            return
+        value_str = str(value).strip()
+        if not value_str:
+            return
+        # Estimate line height
+        chars_per_line = 75
+        n_lines = max(1, (len(value_str) + chars_per_line - 1) // chars_per_line)
+        h = Inches(0.22 * n_lines) if value_is_long else Inches(0.22)
+
+        # Use rich runs so label is bold, value is normal, on the same line
+        tb = slide.shapes.add_textbox(inner_x, y, inner_w, h)
+        tf = tb.text_frame
+        tf.word_wrap = True
+        tf.margin_left = Emu(0); tf.margin_right = Emu(0)
+        tf.margin_top  = Emu(0); tf.margin_bottom = Emu(0)
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.LEFT
+
+        r1 = p.add_run()
+        r1.text = f"{label}: "
+        r1.font.bold = True
+        r1.font.size = Pt(10)
+        r1.font.color.rgb = BLACK
+        r1.font.name = "Calibri"
+
+        r2 = p.add_run()
+        r2.text = value_str
+        r2.font.bold = False
+        r2.font.size = Pt(10)
+        r2.font.color.rgb = BLACK
+        r2.font.name = "Calibri"
+
+        y = y + h + line_gap
+
+    # Fields in the gold deck order
+    add_field("Description", loa.get("description"), value_is_long=True)
+    add_field("Brands",      _format_brands(loa.get("brand")))
+    add_field("Clients",     loa.get("customer"))
+
+    # Timing of installation: prefer timing field, else dates
+    timing = loa.get("timing")
+    if not timing:
+        sd, ed = _fmt_date(loa.get("start_date")), _fmt_date(loa.get("end_date"))
+        if sd and ed:
+            timing = f"{sd} – {ed}"
+        elif sd:
+            timing = sd
+    add_field("Timing of installation", timing)
+
+    add_field("Tools", loa.get("tools") or loa.get("detail"), value_is_long=True)
+    add_field("KPI",   loa.get("kpi"), value_is_long=True)
+    add_field("Costs drill down", loa.get("cost_drill_down"), value_is_long=True)
+
+    # Avg/door + # Doors — hidden for Events / Medical / Sponsorship
+    if activity not in ("Events", "Medical Affairs", "Sponsorship"):
+        avg_door = loa.get("avg_investment_per_door")
+        n_doors  = loa.get("num_doors") or 0
+        if avg_door:
+            add_field("Average investments | door", _fmt_eur(avg_door))
+        if n_doors:
+            add_field("# Doors", str(n_doors))
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Right photo block
+# ════════════════════════════════════════════════════════════════════════
+
+def _render_right_block(slide, loa, y=None, h=None):
+    """
+    Bordered photo area with label "Examples of Previous Executions".
+    1 photo  → landscape (full block width, centered)
+    2 photos → portrait stacked side-by-side
+    3 photos → 3 portraits side-by-side (rare, but the gold deck has it)
+
+    `y`/`h` override the default geometry when extra table rows sit above it.
+    """
+    block_x = Inches(7.0)
+    block_y = y if y is not None else Inches(2.6)
+    block_w = SLIDE_W - block_x - Inches(0.3)
+    block_h = h if h is not None else Inches(4.2)
+
+    # Border
+    _add_rect(slide, block_x, block_y, block_w, block_h,
+              fill=WHITE, line=GRAY_LIGHT, line_width=Pt(0.75))
+
+    # Label at top
+    _add_text(slide, "Examples of Previous Executions",
+              block_x, block_y + Inches(0.1), block_w, Inches(0.3),
+              size=12, bold=False, italic=False, color=BLACK,
+              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    # Photo area
+    photo_x = block_x + Inches(0.2)
+    photo_y = block_y + Inches(0.5)
+    photo_w = block_w - Inches(0.4)
+    photo_h = block_h - Inches(0.7)
+
+    # Find photos for this LOA
+    loa_id = str(loa.get("id", ""))
+    photos = []
+    if loa_id and os.path.exists(UPLOAD_DIR):
+        for i in range(1, 4):
+            for f in sorted(os.listdir(UPLOAD_DIR)):
+                if f.startswith(f"{loa_id}_photo{i}"):
+                    photos.append(os.path.join(UPLOAD_DIR, f))
+                    break
+
+    if not photos:
+        # Placeholder
+        _add_rect(slide, photo_x, photo_y, photo_w, photo_h,
+                  fill=RGBColor(0xEE, 0xEE, 0xEE),
+                  line=GRAY_LIGHT, line_width=Pt(0.5))
+        _add_text(slide, "[ Photos will appear here ]",
+                  photo_x, photo_y + photo_h/2 - Inches(0.15),
+                  photo_w, Inches(0.3),
+                  size=11, italic=True, color=GRAY_MID,
+                  align=PP_ALIGN.CENTER)
+        _add_text(slide, "Upload up to 2 photos in the LAURA form",
+                  photo_x, photo_y + photo_h/2 + Inches(0.1),
+                  photo_w, Inches(0.25),
+                  size=9, italic=True, color=GRAY_MID,
+                  align=PP_ALIGN.CENTER)
+        return
+
+    n = len(photos)
+    if n == 1:
+        # Single landscape photo
+        try:
+            slide.shapes.add_picture(photos[0], photo_x, photo_y, photo_w, photo_h)
+        except Exception:
+            pass
+    elif n == 2:
+        # Two portraits side by side
+        gap = Inches(0.1)
+        each_w = (photo_w - gap) / 2
+        try:
+            slide.shapes.add_picture(photos[0], photo_x, photo_y, each_w, photo_h)
+            slide.shapes.add_picture(photos[1], photo_x + each_w + gap, photo_y, each_w, photo_h)
+        except Exception:
+            pass
+    else:
+        # Three or more — 3 columns
+        gap = Inches(0.08)
+        each_w = (photo_w - gap * 2) / 3
+        try:
+            for i in range(3):
+                if i < len(photos):
+                    slide.shapes.add_picture(
+                        photos[i],
+                        photo_x + (each_w + gap) * i,
+                        photo_y, each_w, photo_h)
+        except Exception:
+            pass
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Footer (matches gold deck)
+# ════════════════════════════════════════════════════════════════════════
+
+def _render_footer(slide, loa):
+    """●● cluster | confidentiality line | page # | EssilorLuxottica"""
+    footer_y = Inches(7.18)
+    cluster  = (loa.get("cluster") or "").upper()
+
+    # Thin divider above footer
+    divider_y = Inches(7.05)
+    _add_line(slide, Inches(0.3), divider_y,
+              SLIDE_W - Inches(0.3), divider_y,
+              color=BLACK, width=Pt(0.4))
+
+    # ●● dots on the far left
+    _add_text(slide, "● ●",
+              Inches(0.3), footer_y, Inches(0.5), Inches(0.25),
+              size=8, color=BLACK, align=PP_ALIGN.LEFT,
+              anchor=MSO_ANCHOR.MIDDLE)
+
+    # Cluster name next to dots
+    _add_text(slide, cluster,
+              Inches(0.7), footer_y, Inches(2), Inches(0.25),
+              size=8, color=GRAY_DARK, align=PP_ALIGN.LEFT,
+              anchor=MSO_ANCHOR.MIDDLE)
+
+    # Center confidentiality
+    _add_text(slide,
+              "Strictly confidential - for internal use only. Do not share or forward.",
+              Inches(3), footer_y, Inches(7.5), Inches(0.25),
+              size=7.5, italic=False, color=GRAY_FOOTER,
+              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    # EssilorLuxottica (right)
+    _add_text(slide, "EssilorLuxottica",
+              SLIDE_W - Inches(2.0), footer_y, Inches(1.7), Inches(0.25),
+              size=9, bold=True, color=BLACK,
+              align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.MIDDLE)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Layout orchestrators
+# ════════════════════════════════════════════════════════════════════════
+
+def _render_standard_layout(slide, loa, hide_doors=False, rows=None,
+                            page_no=None, with_content=True):
+    _render_category_tag(slide, loa)
+    _render_top_right_tags(slide, loa)
+    _render_title(slide, loa, page_no=page_no)
+    if not with_content:
+        _render_continued_note(slide)
+    n_rows = len(rows) if rows else 1
+    _render_standard_table(slide, loa, hide_doors=hide_doors, rows=rows,
+                           show_total=not with_content or n_rows > 1)
+    if with_content:
+        offset = _content_offset(n_rows)
+        _render_left_block(slide, loa, y=offset[0], h=offset[1])
+        _render_right_block(slide, loa, y=offset[0], h=offset[1])
+
+
+def _render_events_layout(slide, loa, rows=None, page_no=None, with_content=True):
+    # The Events table has its own column set (SAP code, event type, lenses/frames
+    # brand split, # customers) and stays single-row; `rows` is accepted so both
+    # layouts share one call signature.
+    del rows
+    _render_category_tag(slide, loa)
+    _render_top_right_tags(slide, loa)
+    _render_title(slide, loa, page_no=page_no)
+    if not with_content:
+        _render_continued_note(slide)
+    _render_events_table(slide, loa)
+    if with_content:
+        _render_left_block(slide, loa)
+        _render_right_block(slide, loa)
+
+
+def _content_offset(n_rows: int):
+    """
+    (y, h) for the description / photo blocks.
+
+    A single-row slide keeps the frozen geometry exactly (2.60", 4.20"). Extra
+    data rows push the blocks down and shrink them so the footer stays clear.
+    """
+    if n_rows <= 1:
+        return (Inches(2.6), Inches(4.2))
+    return (MULTI_CONTENT_Y, MULTI_CONTENT_H)
+
+
+def _render_continued_note(slide):
+    """'Table continued on next slide' note above the table on a split slide."""
+    _add_text(slide, "Table continued on next slide",
+              Inches(0.3), Inches(1.38), Inches(6.0), Inches(0.24),
+              size=9, bold=True, color=GRAY_DARK,
+              align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
