@@ -10,6 +10,8 @@ import type { LOA } from '@/types/loa'
 import { formatEuro, formatAmount } from '@/types/review'
 import { PIN, ACTIVE_RING } from './anchors'
 import { activityLabel } from '@/types/loa'
+import { ScrollHintView } from '@/components/ui/ScrollHint'
+import { useOverflow } from '@/hooks/useOverflow'
 
 const MONO = "'IBM Plex Mono', ui-monospace, monospace"
 
@@ -76,6 +78,8 @@ export default function ExcelRowPanel({
     { anchor: 'field:q4_2026',                 label: 'Q4 2026',           value: euro(loa.q4_2026), w: 104, mono: true },
   ]
 
+  const scroll = useOverflow()
+
   const hint = readOnly
     ? `As submitted${loa.submitted_at ? ` on ${new Date(loa.submitted_at).toLocaleDateString()}` : ''}`
     : 'Click any field to comment on it'
@@ -100,14 +104,21 @@ export default function ExcelRowPanel({
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
           <span style={{ fontFamily: MONO, fontSize: 10, color: 'var(--text-faint)' }}>{rowLabel}</span>
-          <span style={{ fontSize: 10, color: 'var(--text-dimmer)', whiteSpace: 'nowrap' }}>
-            scroll for more →
-          </span>
+          <ScrollHintView canScrollBack={scroll.canScrollBack} canScrollForward={scroll.canScrollForward} />
         </div>
       </div>
 
       <div style={{ flexShrink: 0 }}>
-        <div className="excel-row-scroll" style={{ overflowX: 'auto', overflowY: 'hidden', padding: '0 22px 6px' }}>
+        {/* tabIndex + label so the row is reachable and announced as a scroll
+            region — the arrow hint itself is aria-hidden decoration. */}
+        <div
+          ref={scroll.ref}
+          role="region"
+          aria-label="Submitted LOA data — scrolls horizontally"
+          tabIndex={0}
+          className="excel-row-scroll"
+          style={{ overflowX: 'auto', overflowY: 'hidden', padding: '0 22px 6px' }}
+        >
             <div style={{
               display: 'flex', gap: 1, background: 'var(--border)',
               border: '1px solid var(--border-strong)', borderRadius: 10, padding: 1,
