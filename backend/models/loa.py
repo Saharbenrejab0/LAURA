@@ -4,8 +4,8 @@ Maps every field confirmed in Field Connections v4.0 + Dropdown Data Reference v
 Sources: discovery meetings with Vanessa Stöecklein & Thibault de Bodman
 """
 
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, Enum
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, Enum, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 import uuid
 import enum
@@ -15,14 +15,24 @@ from backend.models.database import Base
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
 
+# ── APRÈS — workflow client 8 statuts ──────────────────────────────────
+# Single source of truth, aligné sur backend/api/loa.py WORKFLOW_TRANSITIONS
+# et frontend/src/types/loa.ts LOAStatus.
+from sqlalchemy.orm import validates, relationship
+
 class LOAStatus(str, enum.Enum):
-    DRAFT        = "draft"
-    SUBMITTED    = "submitted"
-    BRAND_REVIEW = "brand_review"   # Global brands commenting (5-day window)
-    CMO_REVIEW   = "cmo_review"     # Regional CMO reviewing
-    CFO_REVIEW   = "cfo_review"     # CFO reviewing Excel
-    APPROVED     = "approved"
-    REJECTED     = "rejected"
+    # -- Workflow order (7 active + 2 terminal) ---------------------
+    DRAFT                       = "draft"                       # marketer creates/edits
+    LOCAL_ALIGNMENT             = "local_alignment"             # finance + procurement + compliance comment
+    EMEA_REVIEW                 = "emea_review"                 # EMEA PS first review
+    GLOBAL_REVIEW               = "global_review"               # parallel gate 1 - brand + function teams comment
+    EMEA_POST_GLOBAL_REVIEW     = "emea_post_global_review"     # EMEA reviews brand + function feedback
+    CMO_CFO_REVIEW              = "cmo_cfo_review"              # parallel gate 2 - CMO + CFO validate
+    EMEA_FINAL_REVIEW           = "emea_final_review"           # EMEA last check before corporate
+    CORPORATE_REVIEW            = "corporate_review"            # Paola + Diana final gate
+    APPROVED                    = "approved"                    # terminal
+    REJECTED                    = "rejected"                    # marketer re-edits, re-submits → emea_review
+    RETURNED                    = "returned"                    # EMEA returned to marketer → restarts at local_alignment
 
 
 class ActivityType(str, enum.Enum):
@@ -103,6 +113,44 @@ class ADVSelling(str, enum.Enum):
     OTHERS  = "Others"
 
 
+# ── Provenance ────────────────────────────────────────────────────────────────
+# Where a row came from. Set once at insert, never editable by a user.
+#
+#   laura_created     a real submission made through the app. Always belongs
+#                     to a cycle, and is the only kind the review flow sees.
+#   historical_import bulk-loaded from the client's past campaign records.
+#                     Never belongs to a cycle; lives on the Historical
+#                     Campaigns page, grouped by import batch.
+#   demo_seed         fixtures from seeds/seed_demo_loas.py. Excluded from
+#                     cycles, from review, and from Historical Campaigns —
+#                     visible only to dev/admin tooling.
+SOURCE_LAURA_CREATED     = "laura_created"
+SOURCE_HISTORICAL_IMPORT = "historical_import"
+SOURCE_DEMO_SEED         = "demo_seed"
+
+LOA_SOURCES = (SOURCE_LAURA_CREATED, SOURCE_HISTORICAL_IMPORT, SOURCE_DEMO_SEED)
+
+# Sources that must never be attached to a review cycle.
+NON_CYCLE_SOURCES = (SOURCE_HISTORICAL_IMPORT, SOURCE_DEMO_SEED)
+
+
+# ── Multi-row shape ───────────────────────────────────────────────────────────
+# A standard LOA is one Excel row. Multi-brand and multi-activity LOAs carry
+# `loa_line` children — one per brand, or one per activity type — and the
+# parent's aggregate budget columns are recomputed from those lines.
+LOA_TYPE_STANDARD       = "standard"
+LOA_TYPE_MULTI_BRAND    = "multi_brand"
+LOA_TYPE_MULTI_ACTIVITY = "multi_activity"
+
+LOA_TYPES = (LOA_TYPE_STANDARD, LOA_TYPE_MULTI_BRAND, LOA_TYPE_MULTI_ACTIVITY)
+
+# Types that require at least MIN_LOA_LINES child rows.
+MULTI_LOA_TYPES = (LOA_TYPE_MULTI_BRAND, LOA_TYPE_MULTI_ACTIVITY)
+
+MIN_LOA_LINES = 2
+MAX_LOA_LINES = 12
+
+
 # ── Model ─────────────────────────────────────────────────────────────────────
 
 class LOA(Base):
@@ -125,9 +173,40 @@ class LOA(Base):
 
     # ── Product cascade (Category → Brand) ────────────────────────────────────
     # Category: 6 confirmed options — Frames/Lenses/Wearables/Audio/Instruments/All cat.
-    category = Column(String(50), nullable=False)
+    # Category — MULTI-SELECT (e.g. Frames + Lenses on the same LOA).
+    # Stored as PostgreSQL ARRAY. Validation against reference_data.CATEGORIES.
+    category = Column(ARRAY(String), nullable=False)
+
+    @validates("category")
+    def _normalize_category(self, key, value):
+        """Guardrail: category must always be a list of real category strings.
+
+        Protects against the historical bug where a bare string ("Frames")
+        was assigned to this ARRAY column and got exploded into characters
+        (['F','r','a','m','e','s']). Whatever the source, we coerce to a
+        clean list here so bad data can never enter the DB again.
+        """
+        if value is None:
+            return value
+        # A bare string -> wrap it. e.g. "Frames" -> ["Frames"]
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, (list, tuple)):
+            parts = [str(v) for v in value]
+            # Detect a string that was exploded into single characters and rejoin.
+            if len(parts) > 1 and all(len(p) == 1 for p in parts):
+                return ["".join(parts)]
+            return list(parts)
+        return value
     # Brand: cascades from Category. Ray-Ban ≠ Ray-Ban Meta (separate entries, confirmed Vanessa Mtg 2)
-    brand    = Column(String(200), nullable=False)
+    # NULL only when loa_type == 'multi_brand' — the brands then live on loa_line rows.
+    brand    = Column(String(200), nullable=True)
+
+    # Multi-row shape. 'standard' | 'multi_brand' | 'multi_activity'.
+    # The axis that varies per line is NULL on the parent; the shared axis stays set.
+    # Enforced by the ck_loas_axis_by_type CHECK constraint.
+    loa_type = Column(String(20), nullable=False, default=LOA_TYPE_STANDARD,
+                      server_default=LOA_TYPE_STANDARD, index=True)
 
     # LOA # — Lens team only, hidden when Category = Frames.
     # Vanessa wants to abolish entirely; keeping optional pending Finance decision.
@@ -139,15 +218,16 @@ class LOA(Base):
     # TM Seasonal (419) · Events (177) · Consumer Activation (174) · TM Permanent (130)
     # Coop ADV (129) · Other ADV (53) · Trade Incentive (50) · Training (45) · PR (41)
     # Sponsorship (38) · Catalogues (27) · Medical Affairs (7) · Others non ADV (5) · e-Tools (4)
-    activity_type = Column(String(50), nullable=False)
+    # NULL only when loa_type == 'multi_activity' — the types then live on loa_line rows.
+    activity_type = Column(String(50), nullable=True)
 
     # ── Conditional fields — Events & Medical Affairs only ────────────────────
     # Show when activity_type IN (Events, Medical Affairs) — confirmed Vanessa Mtg 1
     # event_type: 7 options — Roadshow/Showroom/Sales Convention/Trade Fairs/
     #             Medical Symposium/Client Award Travel/Tortona EL Days
-    event_type    = Column(String(50), nullable=True)
+    event_type    = Column(String(100), nullable=True)
     # event_purpose: 4 options — Transactional/Inspirational/Influential/Relational
-    event_purpose = Column(String(50), nullable=True)
+    event_purpose = Column(String(100), nullable=True)
     # SAP Event Code — created in SAP first, then typed here manually
     # Shown only when activity = Events or Medical Affairs
     sap_event_code = Column(String(100), nullable=True)
@@ -223,6 +303,8 @@ class LOA(Base):
     pct_central_budget = Column(Float, nullable=True)   # e.g. 0.30 = 30%
 
     # ── PPT content (filled by user, validated/suggested by Claude) ───────────
+    # ── Sprint 4 #34: mandatory cost justification when FY-26 > 100K€ ────
+    cost_justification = Column(Text, nullable=True)
     tools          = Column(Text, nullable=True)    # The HOW (= DETAIL field in PPT)
     kpi            = Column(Text, nullable=True)    # Required for all types except Others
     cost_drill_down = Column(Text, nullable=True)   # Investment breakdown for PPT
@@ -237,10 +319,15 @@ class LOA(Base):
     end_date   = Column(String(50), nullable=True)
 
     # ── Approval workflow ──────────────────────────────────────────────────────
-    status               = Column(String(20), default="draft")
+    status               = Column(String(50), default="draft")
     brand_review_deadline = Column(DateTime, nullable=True)  # 5-day window
     cmo_comment          = Column(Text, nullable=True)
     rejection_reason     = Column(Text, nullable=True)
+    # Which workflow stage originated the most-recent rejection/return.
+    # Lets EMEA (and the marketer) know whether CMO, CFO, Corporate, or EMEA itself rejected.
+    rejected_by_stage    = Column(String(50), nullable=True)
+    # Audit trail: id of the LOA this was duplicated from (NULL if original).
+    duplicated_from_id   = Column(UUID(as_uuid=True), nullable=True)
 
     # Finance Validator — new field 2026. Thibault to confirm if always same person
     # or varies by cluster/country. Only confirmed example: Simona.Smacchia@ae.luxottica.com
@@ -251,18 +338,99 @@ class LOA(Base):
     ai_suggestion_log_id = Column(String(100), nullable=True)  # Links to logs/
 
     # ── Metadata ───────────────────────────────────────────────────────────────
+    # ── Demo mode flag ──────────────────────────────────────────────
+    # When True, this LOA was created via the LAURA form (visible in
+    # tracker by default). When False, this is a historical/imported
+    # LOA (hidden behind the "Show historical" toggle).
+    # The 1330 historical LOAs from the ETL all have is_demo=False.
+    is_demo = Column(Boolean, nullable=False, server_default='false', default=False, index=True)
+    # Sprint 2.5: edit-lock flag, settable only by super-admin.
+    # When true, all edits are blocked regardless of workflow status.
+    # When unlocked, the LOA resumes its normal workflow at its current status.
+    is_locked = Column(Boolean, nullable=False, server_default='false', default=False)
     created_at   = Column(DateTime, server_default=func.now())
     updated_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
     submitted_at = Column(DateTime, nullable=True)
     approved_at  = Column(DateTime, nullable=True)
+    cmo_approved = Column(Boolean, default=False)
+    cfo_approved = Column(Boolean, default=False)
 
+    # -- Parallel gate 1: brand + function review tracking ----------
+    brand_review_done       = Column(Boolean, default=False)
+    function_review_done    = Column(Boolean, default=False)
+    brand_review_skipped    = Column(Boolean, default=False)
+    function_review_skipped = Column(Boolean, default=False)
+
+    # -- Local Alignment gate: finance + procurement + compliance ---
+    finance_review_done      = Column(Boolean, default=False)
+    procurement_review_done  = Column(Boolean, default=False)
+    compliance_review_done   = Column(Boolean, default=False)
+
+    # -- LOA cycles: normal quarterly kickoff vs emergency fast-track ---
+    # cycle_id is mandatory for laura_created rows and NULL for everything
+    # else — enforced by the ck_loa_live_has_cycle CHECK constraint.
+    cycle_id     = Column(UUID(as_uuid=True), ForeignKey("loa_cycle.id"), nullable=True)
+    is_emergency = Column(Boolean, default=False)
+
+    # -- Provenance: where this row came from. See LOA_SOURCES. -------
+    # Set once, at insert. Never user-editable.
+    source          = Column(String(30), nullable=False, index=True)
+    # Only populated when source == "historical_import".
+    import_batch_id = Column(UUID(as_uuid=True), ForeignKey("import_batch.id"), nullable=True)
+
+    # -- Corporate review: sequential IA code assigned on approval (format 2026-XXXX) --
+    ia_code      = Column(String(20), nullable=True)
     # ── Business rules (enforced server-side, never trusted from frontend) ─────
+
+     # Near q4_2025, q1_2026, etc.
+    q1_2025 = Column(Float, nullable=True)
+    q2_2025 = Column(Float, nullable=True)
+    q3_2025 = Column(Float, nullable=True)
+    q4_2024 = Column(Float, nullable=True)
+    fy_2024_total = Column(Float, nullable=True)
+    h2_2025 = Column(Float, nullable=True)
+
+    # Metadata
+    prioritization = Column(String(50), nullable=True)
+    source_file = Column(String(255), nullable=True)
+
+    # RAG
+    embedding_text = Column(Text, nullable=True)
+    embedded_at = Column(DateTime, nullable=True)
+    # embedding vector(1024) — handled by raw SQL in migration, not in ORM
+
+    # Per-brand / per-activity rows. Empty for standard LOAs.
+    lines = relationship(
+        "LOALine",
+        back_populates="loa",
+        cascade="all, delete-orphan",
+        order_by="LOALine.position",
+        lazy="selectin",
+    )
+
+    @property
+    def is_multi(self) -> bool:
+        return self.loa_type in MULTI_LOA_TYPES
 
     def calculate_totals(self):
         """
         Call whenever quarterly values change.
         Never let frontend calculate — people override formulas in Excel.
+
+        For multi-row LOAs the parent quarters are the SUM of the lines, so every
+        existing consumer that reads loa.fy_2026_total / loa.q1_2026 keeps working
+        without knowing lines exist.
         """
+        if self.is_multi and self.lines:
+            for ln in self.lines:
+                ln.calculate_totals()
+            self.q4_2025 = sum(ln.q4_2025 or 0 for ln in self.lines)
+            self.q1_2026 = sum(ln.q1_2026 or 0 for ln in self.lines)
+            self.q2_2026 = sum(ln.q2_2026 or 0 for ln in self.lines)
+            self.q3_2026 = sum(ln.q3_2026 or 0 for ln in self.lines)
+            self.q4_2026 = sum(ln.q4_2026 or 0 for ln in self.lines)
+            self.num_doors = sum(ln.num_doors or 0 for ln in self.lines) or None
+
         self.fy_2025_total = self.q4_2025 or 0.0
         self.fy_2026_total = sum([
             self.q1_2026 or 0,
@@ -276,6 +444,14 @@ class LOA(Base):
             self.avg_investment_per_door = None
         # PPT SLIDE — YES if FY Total > €50,000
         self.ppt_slide_required = self.fy_2026_total > 50_000
+
+    def line_axis_values(self) -> list[str]:
+        """The per-row axis values, in order — brands or activity types."""
+        if self.loa_type == LOA_TYPE_MULTI_BRAND:
+            return [ln.brand for ln in self.lines if ln.brand]
+        if self.loa_type == LOA_TYPE_MULTI_ACTIVITY:
+            return [ln.activity_type for ln in self.lines if ln.activity_type]
+        return []
 
     def validate(self) -> list[dict]:
         """
@@ -407,3 +583,64 @@ class LOA(Base):
 
     def __repr__(self):
         return f"<LOA {self.loa_draft_id} | {self.country} | {self.activity_type} | {self.status}>"
+
+
+# ── Per-brand / per-activity line ─────────────────────────────────────────────
+
+class LOALine(Base):
+    """
+    One Excel row inside a multi-brand or multi-activity LOA.
+
+    Exactly one axis field is set per row — `brand` for multi_brand LOAs,
+    `activity_type` for multi_activity LOAs. Enforced by the
+    ck_loa_line_one_axis CHECK constraint.
+    """
+    __tablename__ = "loa_line"
+
+    id       = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    loa_id   = Column(UUID(as_uuid=True), ForeignKey("loas.id", ondelete="CASCADE"), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+
+    # Axis — one of these two, never both.
+    brand         = Column(String(200), nullable=True)
+    activity_type = Column(String(50),  nullable=True)
+
+    # Per-row detail
+    customer                = Column(String(200), nullable=True)
+    vendor                  = Column(String(300), nullable=True)
+    detail                  = Column(Text,        nullable=True)
+    num_doors               = Column(Integer,     nullable=True)
+    avg_investment_per_door = Column(Float,       nullable=True)
+    cost_drill_down         = Column(Text,        nullable=True)
+
+    # Per-row budget
+    q4_2025       = Column(Float, nullable=False, default=0.0)
+    q1_2026       = Column(Float, nullable=False, default=0.0)
+    q2_2026       = Column(Float, nullable=False, default=0.0)
+    q3_2026       = Column(Float, nullable=False, default=0.0)
+    q4_2026       = Column(Float, nullable=False, default=0.0)
+    fy_2026_total = Column(Float, nullable=False, default=0.0)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    loa = relationship("LOA", back_populates="lines")
+
+    def calculate_totals(self):
+        self.fy_2026_total = sum([
+            self.q1_2026 or 0,
+            self.q2_2026 or 0,
+            self.q3_2026 or 0,
+            self.q4_2026 or 0,
+        ])
+        if self.num_doors and self.num_doors > 0:
+            self.avg_investment_per_door = round(self.fy_2026_total / self.num_doors, 2)
+        else:
+            self.avg_investment_per_door = None
+
+    @property
+    def axis_value(self) -> str:
+        return self.brand or self.activity_type or ""
+
+    def __repr__(self):
+        return f"<LOALine {self.position} | {self.axis_value} | {self.fy_2026_total}>"

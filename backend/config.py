@@ -1,5 +1,5 @@
 """
-LAURA — configuration
+LAURA â€” configuration
 All settings read from environment variables (.env file in dev)
 """
 
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ALLOWED_ORIGINS: str = "http://localhost:3000,https://laura.vercel.app"
 
-    # Database (optional in dev — uses in-memory store)
+    # Database (optional in dev â€” uses in-memory store)
     DATABASE_URL: str = "sqlite:///./laura_dev.db"
 
     # Redis
@@ -23,9 +23,9 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "dev-secret-change-in-production"
     JWT_EXPIRY_HOURS: int = 8
 
-    # Claude API (get from manager — optional during dev)
+    # Claude API (get from manager â€” optional during dev)
     ANTHROPIC_API_KEY: str = ""
-    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
+    CLAUDE_MODEL: str = "claude-sonnet-4-6"
     CLAUDE_MAX_TOKENS: int = 500
     ANONYMISE_BEFORE_LLM: bool = True  # EL security requirement
 
