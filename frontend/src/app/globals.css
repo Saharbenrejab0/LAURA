@@ -1,103 +1,174 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap');
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   LAURA â€” globals.css
+   Premium soft theme: warm neutrals, editorial typography, generous breathing.
+
+   Structure:
+     1. Font imports (DM Sans for body, Cormorant Garamond for editorial titles)
+     2. Tailwind base layers
+     3. CSS variables â€” light & dark themes
+     4. Base typography & body styles
+     5. Component classes (input, button, badge, card, etc.)
+     6. Animation utilities
+
+   Philosophy:
+     - Never pure black or pure white â€” always warm, never harsh
+     - Generous spacing, soft shadows, refined letterforms
+     - Editorial serif (italic) for hero headings, sans-serif for everything else
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+
+/* â”€â”€ Fonts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* DM Sans â€” body & UI text (already in use across the app) */
+/* DM Mono â€” monospace identifiers (LOA numbers, dates) */
+/* Cormorant Garamond â€” editorial italic for hero headings and group cards */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS Variables — Light & Dark ─────────────────────────────────────────── */
+/* â”€â”€ CSS Variables â€” Light theme (premium soft) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 :root {
-  --bg-base:       #f8f7f4;
-  --bg-surface:    #ffffff;
-  --bg-elevated:   #f2f1ee;
-  --bg-input:      #ffffff;
+  /* Backgrounds â€” soft warm neutrals */
+  --bg-base:       #ffffff;   /* page background â€” pure white */
+  --bg-surface:    #ffffff;   /* cards, modals */
+  --bg-elevated:   #f8f6f3;   /* elevated surfaces, hover states â€” warm off-white */
+  --bg-input:      #fafafa;   /* inputs â€” barely-there warmth */
 
-  --border:        rgba(0,0,0,0.08);
-  --border-strong: rgba(0,0,0,0.14);
+  /* Borders â€” warm gray, never pure black */
+  --border:        rgba(26,22,18,0.07);
+  --border-strong: rgba(26,22,18,0.12);
 
-  --text-primary:  #18181b;
-  --text-secondary:#52525b;
-  --text-muted:    #a1a1aa;
-  --text-inverse:  #ffffff;
+  /* Text â€” soft black, never aggressive */
+  --text-primary:  #1a1a1a;   /* primary text (was #18181b, slightly warmer) */
+  --text-secondary:#4d4944;   /* secondary text â€” warm */
+  --text-muted:    #8a857e;   /* muted gray, warm undertone */
+  --text-inverse:  #fcfaf7;   /* warm off-white on dark surfaces */
 
-  --accent:        #18181b;
-  --accent-hover:  #27272a;
-  --accent-text:   #ffffff;
+  /* Accent â€” same soft black */
+  --accent:        #1a1a1a;
+  --accent-hover:  #2a2a2a;
+  --accent-text:   #fcfaf7;
 
+  /* Status colors â€” slightly desaturated for softness */
   --green:         #16a34a;
   --green-bg:      #f0fdf4;
   --green-border:  #bbf7d0;
   --green-text:    #15803d;
 
-  --amber:         #d97706;
-  --amber-bg:      #fffbeb;
-  --amber-border:  #fde68a;
-  --amber-text:    #92400e;
+  --amber:         #c2860a;   /* softer than #d97706 â€” less neon */
+  --amber-bg:      #fdf8eb;
+  --amber-border:  #f3e3a8;
+  --amber-text:    #8a5a08;
 
-  --red:           #dc2626;
-  --red-bg:        #fef2f2;
-  --red-border:    #fecaca;
-  --red-text:      #991b1b;
+  --red:           #c93333;   /* softer than #dc2626 */
+  --red-bg:        #fdf2f2;
+  --red-border:    #f5c8c8;
+  --red-text:      #8e1f1f;
 
   --blue:          #2563eb;
   --blue-bg:       #eff6ff;
   --blue-border:   #bfdbfe;
   --blue-text:     #1e40af;
 
-  --shadow-sm:     0 1px 2px rgba(0,0,0,0.05);
-  --shadow-md:     0 4px 12px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.05);
-  --shadow-lg:     0 12px 32px rgba(0,0,0,0.1), 0 2px 6px rgba(0,0,0,0.06);
-  --shadow-input:  0 0 0 3px rgba(24,24,27,0.08);
+  --indigo:        #4f46e5;
+  --indigo-bg:     #eef2ff;
+  --indigo-border: #c7d2fe;
+  --indigo-text:   #3730a3;
+
+  /* Purple — CMO/CFO review */
+  --purple-bg:     #F3EBFF;
+  --purple-text:   #6D28D9;
+  --purple-border: #DDD6FE;
+
+  /* Teal — Global functions review */
+  --teal-bg:       #E6FFFA;
+  --teal-text:     #0D9488;
+  --teal-border:   #99F6E4;
+
+  --pink:          #be185d;
+  --pink-bg:       #fdf2f8;
+  --pink-border:   #f9d1e3;
+  --pink-text:     #9d174d;
+
+  /* Shadows â€” warm undertone, softer than pure black */
+  --shadow-sm:     0 1px 2px rgba(26,22,18,0.04);
+  --shadow-md:     0 4px 12px rgba(26,22,18,0.06), 0 1px 3px rgba(26,22,18,0.04);
+  --shadow-lg:     0 12px 32px rgba(26,22,18,0.10), 0 2px 6px rgba(26,22,18,0.05);
+  --shadow-input:  0 0 0 3px rgba(26,26,26,0.06);
 }
 
+/* â”€â”€ Dark theme (premium soft, low contrast, easy on the eyes) â”€â”€â”€â”€â”€â”€â”€â”€ */
 .dark {
-  --bg-base:       #111113;
-  --bg-surface:    #1c1c1f;
-  --bg-elevated:   #232326;
-  --bg-input:      #1c1c1f;
+  --bg-base:       #131210;   /* warm near-black */
+  --bg-surface:    #1e1c1a;
+  --bg-elevated:   #26231f;
+  --bg-input:      #1e1c1a;
 
-  --border:        rgba(255,255,255,0.07);
-  --border-strong: rgba(255,255,255,0.12);
+  --border:        rgba(252,250,247,0.06);
+  --border-strong: rgba(252,250,247,0.11);
 
-  --text-primary:  #fafafa;
-  --text-secondary:#a1a1aa;
-  --text-muted:    #52525b;
-  --text-inverse:  #18181b;
+  --text-primary:  #f8f6f3;
+  --text-secondary:#a09b94;
+  --text-muted:    #6b665f;
+  --text-inverse:  #1a1a1a;
 
-  --accent:        #fafafa;
-  --accent-hover:  #e4e4e7;
-  --accent-text:   #18181b;
+  --accent:        #f8f6f3;
+  --accent-hover:  #e8e4de;
+  --accent-text:   #1a1a1a;
 
   --green:         #22c55e;
   --green-bg:      rgba(34,197,94,0.08);
   --green-border:  rgba(34,197,94,0.2);
   --green-text:    #4ade80;
 
-  --amber:         #f59e0b;
-  --amber-bg:      rgba(245,158,11,0.08);
-  --amber-border:  rgba(245,158,11,0.2);
-  --amber-text:    #fbbf24;
+  --amber:         #d4a040;
+  --amber-bg:      rgba(212,160,64,0.08);
+  --amber-border:  rgba(212,160,64,0.2);
+  --amber-text:    #e8b85e;
 
-  --red:           #ef4444;
-  --red-bg:        rgba(239,68,68,0.08);
-  --red-border:    rgba(239,68,68,0.2);
-  --red-text:      #f87171;
+  --red:           #e85c5c;
+  --red-bg:        rgba(232,92,92,0.08);
+  --red-border:    rgba(232,92,92,0.2);
+  --red-text:      #f08585;
 
   --blue:          #3b82f6;
   --blue-bg:       rgba(59,130,246,0.08);
   --blue-border:   rgba(59,130,246,0.2);
   --blue-text:     #60a5fa;
 
+  --indigo:        #818cf8;
+  --indigo-bg:     rgba(129, 140, 248, 0.08);
+  --indigo-border: rgba(129, 140, 248, 0.20);
+  --indigo-text:   #a5b4fc;
+
+  /* Purple — dark */
+  --purple-bg:     rgba(109, 40, 217, 0.10);
+  --purple-text:   #C4B5FD;
+  --purple-border: rgba(109, 40, 217, 0.25);
+
+  /* Teal — dark */
+  --teal-bg:       rgba(13, 148, 136, 0.10);
+  --teal-text:     #5EEAD4;
+  --teal-border:   rgba(13, 148, 136, 0.25);
+
+  --pink:          #f472b6;
+  --pink-bg:       rgba(244, 114, 182, 0.08);
+  --pink-border:   rgba(244, 114, 182, 0.20);
+  --pink-text:     #f9a8d4;
+
   --shadow-sm:     0 1px 2px rgba(0,0,0,0.3);
   --shadow-md:     0 4px 12px rgba(0,0,0,0.4);
   --shadow-lg:     0 12px 32px rgba(0,0,0,0.5);
-  --shadow-input:  0 0 0 3px rgba(250,250,250,0.08);
+  --shadow-input:  0 0 0 3px rgba(252,250,247,0.08);
 }
 
-/* ── Base ─────────────────────────────────────────────────────────────────── */
+/* â”€â”€ Base â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @layer base {
   * { box-sizing: border-box; }
 
-  html { font-feature-settings: 'cv02','cv03','cv04','cv11'; }
+  html {
+    font-feature-settings: 'cv02','cv03','cv04','cv11','liga','kern';
+  }
 
   body {
     background-color: var(--bg-base);
@@ -106,7 +177,9 @@
     font-size: 14px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.25s ease, color 0.25s ease;
+    letter-spacing: 0.1px;
   }
 
   ::selection {
@@ -118,68 +191,97 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
 
-  h1,h2,h3,h4 { letter-spacing: -0.02em; font-weight: 500; }
+  /* Editorial headings â€” refined letterforms, generous spacing */
+  h1, h2, h3, h4 {
+    letter-spacing: -0.025em;
+    font-weight: 500;
+  }
+
+  /* Hero headings (large titles on each page) use editorial serif italic.
+     Applied via .heading-editorial class â€” opt-in, not automatic. */
 }
 
-/* ── Components ───────────────────────────────────────────────────────────── */
+/* â”€â”€ Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @layer components {
 
-  /* Input */
+  /* â”€â”€ Editorial heading (the premium serif italic) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+     Use on hero titles: tracker page intro, modal titles, etc.
+     Example: <h2 className="heading-editorial">Welcome back.</h2>      */
+  .heading-editorial {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: -0.5px;
+    line-height: 1.15;
+  }
+
+  .heading-editorial-bold {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-style: italic;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+    line-height: 1.15;
+  }
+
+  /* â”€â”€ Input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .input {
     width: 100%;
     background: var(--bg-input);
     border: 1px solid var(--border-strong);
     border-radius: 10px;
-    padding: 9px 12px;
-    font-size: 13.5px;
+    padding: 10px 14px;
+    font-size: 14px;
     font-family: 'DM Sans', sans-serif;
     color: var(--text-primary);
     outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
     box-shadow: var(--shadow-sm);
+    letter-spacing: 0.1px;
   }
-  .input::placeholder { color: var(--text-muted); }
+  .input::placeholder { color: var(--text-muted); font-style: italic; }
   .input:focus {
     border-color: var(--accent);
     box-shadow: var(--shadow-input);
+    background: var(--bg-surface);
   }
   .input:disabled { opacity: 0.45; cursor: not-allowed; }
   select.input { cursor: pointer; }
-  textarea.input { resize: vertical; min-height: 72px; }
+  textarea.input { resize: vertical; min-height: 80px; }
 
-  /* Label */
+  /* â”€â”€ Label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .label {
     display: block;
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 500;
     color: var(--text-muted);
-    letter-spacing: 0.06em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 
-  /* Buttons */
+  /* â”€â”€ Buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .btn-primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 8px;
     background: var(--accent);
     color: var(--accent-text);
     font-family: 'DM Sans', sans-serif;
     font-size: 13.5px;
     font-weight: 500;
-    padding: 8px 16px;
+    padding: 10px 18px;
     border-radius: 10px;
     border: none;
     cursor: pointer;
-    transition: background 0.15s, transform 0.1s, opacity 0.15s;
+    transition: background 0.18s ease, transform 0.12s ease, box-shadow 0.18s ease, opacity 0.18s ease;
     box-shadow: var(--shadow-sm);
     white-space: nowrap;
+    letter-spacing: 0.2px;
   }
   .btn-primary:hover:not(:disabled) {
     background: var(--accent-hover);
-    transform: translateY(-0.5px);
+    transform: translateY(-1px);
     box-shadow: var(--shadow-md);
   }
   .btn-primary:active:not(:disabled) { transform: translateY(0); }
@@ -189,23 +291,25 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 8px;
     background: var(--bg-surface);
     color: var(--text-secondary);
     font-family: 'DM Sans', sans-serif;
     font-size: 13.5px;
     font-weight: 500;
-    padding: 8px 16px;
+    padding: 10px 18px;
     border-radius: 10px;
     border: 1px solid var(--border-strong);
     cursor: pointer;
-    transition: background 0.15s, color 0.15s, transform 0.1s;
+    transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease, border-color 0.18s ease;
     white-space: nowrap;
+    letter-spacing: 0.2px;
   }
   .btn-secondary:hover:not(:disabled) {
     background: var(--bg-elevated);
     color: var(--text-primary);
-    transform: translateY(-0.5px);
+    border-color: var(--text-primary);
+    transform: translateY(-1px);
   }
   .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -218,77 +322,85 @@
     font-family: 'DM Sans', sans-serif;
     font-size: 13.5px;
     font-weight: 500;
-    padding: 6px 10px;
+    padding: 8px 12px;
     border-radius: 8px;
     border: none;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.18s ease, color 0.18s ease;
+    letter-spacing: 0.2px;
   }
   .btn-ghost:hover { background: var(--bg-elevated); color: var(--text-primary); }
 
-  /* Card */
+  /* â”€â”€ Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .card {
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 16px;
     box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
   }
+  .card:hover { box-shadow: var(--shadow-md); }
 
-  /* Badge */
+  /* â”€â”€ Badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px 9px;
+    padding: 3px 11px;
     border-radius: 99px;
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 500;
-    letter-spacing: 0.01em;
+    letter-spacing: 0.3px;
   }
 
-  /* Status badges */
-  .badge-draft        { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border); }
-  .badge-submitted    { background: var(--blue-bg);     color: var(--blue-text);  border: 1px solid var(--blue-border); }
-  .badge-brand-review { background: var(--amber-bg);    color: var(--amber-text); border: 1px solid var(--amber-border); }
-  .badge-cmo-review   { background: var(--amber-bg);    color: var(--amber-text); border: 1px solid var(--amber-border); }
-  .badge-cfo-review   { background: var(--amber-bg);    color: var(--amber-text); border: 1px solid var(--amber-border); }
-  .badge-approved     { background: var(--green-bg);    color: var(--green-text); border: 1px solid var(--green-border); }
-  .badge-rejected     { background: var(--red-bg);      color: var(--red-text);   border: 1px solid var(--red-border); }
+  /* â”€â”€ APRÃˆS â€” workflow v2, 8 statuts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* Status badges â€” aligned with backend LOAStatus enum (workflow v2) */
+  .badge-draft                    { background: var(--bg-elevated); color: var(--text-muted);    border: 1px solid var(--border); }
+  .badge-emea-review              { background: var(--blue-bg);     color: var(--blue-text);     border: 1px solid var(--blue-border); }
+  .badge-global-review            { background: var(--indigo-bg);   color: var(--indigo-text);   border: 1px solid var(--indigo-border); }
+  .badge-cmo-cfo-review           { background: var(--purple-bg);   color: var(--purple-text);   border: 1px solid var(--purple-border); }
+  .badge-global-functions-review  { background: var(--teal-bg);     color: var(--teal-text);     border: 1px solid var(--teal-border); }
+  .badge-corporate-review         { background: var(--amber-bg);    color: var(--amber-text);    border: 1px solid var(--amber-border); }
+  .badge-approved                 { background: var(--green-bg);    color: var(--green-text);    border: 1px solid var(--green-border); }
+  .badge-rejected                 { background: var(--red-bg);      color: var(--red-text);      border: 1px solid var(--red-border); }
 
-  /* Section heading */
+  /* Duplicate indicator â€” soft rose, premium feel */
+  .badge-duplicate      { background: var(--pink-bg);     color: var(--pink-text);      border: 1px solid var(--pink-border);
+                          font-size: 10px; font-weight: 500; letter-spacing: 0.4px; }
+
+  /* â”€â”€ Section heading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .section-heading {
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--text-muted);
-    padding-bottom: 10px;
+    padding-bottom: 12px;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 16px;
+    margin-bottom: 18px;
   }
 
-  /* Divider */
+  /* â”€â”€ Divider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .divider { border: none; border-top: 1px solid var(--border); margin: 0; }
 
-  /* Mono */
+  /* â”€â”€ Mono â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .mono {
     font-family: 'DM Mono', monospace;
     font-size: 12px;
+    letter-spacing: 0.3px;
   }
 }
 
-/* ── Append this to the BOTTOM of your existing globals.css ── */
-
-/* Page transitions */
+/* â”€â”€ Page transitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes pageIn {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 .page-enter {
-  animation: pageIn 0.22s ease forwards;
+  animation: pageIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Error shake animation */
+/* â”€â”€ Error shake animation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes errorShake {
   0%, 100% { transform: translateX(0); }
   20%       { transform: translateX(-6px); }
@@ -301,13 +413,13 @@
   animation: errorShake 0.5s ease;
 }
 
-/* Input error state */
+/* â”€â”€ Input error state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .input-error {
   border-color: var(--red) !important;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1) !important;
+  box-shadow: 0 0 0 3px rgba(201, 51, 51, 0.10) !important;
 }
 
-/* Searchable select wrapper */
+/* â”€â”€ Searchable select â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .select-search-wrapper {
   position: relative;
 }
@@ -323,7 +435,7 @@
   top: 100%;
   left: 0;
   right: 0;
-  max-height: 200px;
+  max-height: 220px;
   overflow-y: auto;
   background: var(--bg-surface);
   border: 1px solid var(--border-strong);
@@ -335,11 +447,11 @@
 }
 
 .select-option {
-  padding: 8px 12px;
-  font-size: 13.5px;
+  padding: 10px 14px;
+  font-size: 14px;
   color: var(--text-primary);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background 0.12s ease;
 }
 
 .select-option:hover {
@@ -351,11 +463,11 @@
   font-weight: 500;
 }
 
-/* Timeline */
+/* â”€â”€ Timeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .timeline-item {
   position: relative;
-  padding-left: 24px;
-  padding-bottom: 16px;
+  padding-left: 26px;
+  padding-bottom: 18px;
 }
 
 .timeline-item::before {
@@ -384,7 +496,7 @@
   background: var(--bg-elevated);
 }
 
-/* Auto-save indicator */
+/* â”€â”€ Auto-save indicator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes savePulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
@@ -394,23 +506,23 @@
   animation: savePulse 1.5s ease infinite;
 }
 
-/* Duplicate LOA button hover */
+/* â”€â”€ Duplicate LOA button hover â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .duplicate-btn:hover {
   background: var(--bg-elevated) !important;
   color: var(--text-primary) !important;
 }
 
-/* Read-only field */
+/* â”€â”€ Read-only field â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .field-readonly {
   opacity: 0.7;
   pointer-events: none;
 }
 
-/* Pagination */
+/* â”€â”€ Pagination â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .pagination-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -419,12 +531,13 @@
   background: var(--bg-surface);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.18s ease;
 }
 
 .pagination-btn:hover:not(:disabled) {
   background: var(--bg-elevated);
   color: var(--text-primary);
+  border-color: var(--border-strong);
 }
 
 .pagination-btn.active {
@@ -438,23 +551,147 @@
   cursor: not-allowed;
 }
 
-/* Modal backdrop */
+/* â”€â”€ Modal animations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes fadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* Voice recording pulse */
+/* â”€â”€ Voice recording pulse â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes recordPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-  50%       { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 51, 51, 0.4); }
+  50%       { box-shadow: 0 0 0 6px rgba(201, 51, 51, 0); }
 }
 
 .recording {
   animation: recordPulse 1.2s ease infinite;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   EDITORIAL FINANCE REMAP  ·  New LOA form → redesign.css palette
+   -------------------------------------------------------------------
+   The New LOA form (app/loa/new/page.tsx) is styled with the legacy
+   globals.css variables (--bg-base, --accent, --card, .input, .btn-*).
+   This block re-points those variables onto the unified Editorial
+   Finance tokens defined in styles/redesign.css (--canvas, --gold,
+   --surface, --ink, --st-*), for BOTH light and dark themes.
+
+   Appended last so it wins the cascade. Zero changes to page.tsx.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Light (default) — redesign.css sets [data-theme="light"] on <html> */
+:root,
+[data-theme="light"] {
+  --bg-base:        var(--canvas);
+  --bg-primary:     var(--canvas);
+  --bg-surface:     var(--surface, #FFFFFF);
+  --bg-elevated:    var(--surface-raised, #FFFFFF);
+  --bg-input:       var(--surface, #FFFFFF);
+
+  --border:         var(--border, #E7E2D8);
+  --border-strong:  var(--border-strong, #D8D2C6);
+
+  --text-primary:   var(--text-primary, #211E1A);
+  --text-secondary: var(--text-secondary, #5C574F);
+  --text-muted:     var(--text-tertiary, #8B857A);
+
+  /* Primary action = ink black w/ cream text (prototype "Review & submit") */
+  --accent:         var(--ink, #211E1A);
+  --accent-hover:   #34302A;
+  --accent-text:    var(--ink-text, #F4EEDF);
+
+  /* Semantic families → map onto Editorial status tokens */
+  --green:        var(--st-approved-fg, #3F7D5B);
+  --green-bg:     var(--st-approved-bg, #E7F0E9);
+  --green-border: var(--st-approved-fg, #3F7D5B);
+  --green-text:   var(--st-approved-fg, #3F7D5B);
+
+  --red:        var(--st-rejected-fg, #A5453B);
+  --red-bg:     var(--st-rejected-bg, #F4E3E0);
+  --red-border: var(--st-rejected-fg, #A5453B);
+  --red-text:   var(--st-rejected-fg, #A5453B);
+
+  --amber:        var(--gold, #B08D2F);
+  --amber-bg:     var(--gold-soft, #F3EAD3);
+  --amber-border: var(--gold, #B08D2F);
+  --amber-text:   var(--gold, #B08D2F);
+
+  --blue:        var(--st-review-fg, #3E5C86);
+  --blue-bg:     var(--st-review-bg, #E4EAF3);
+  --blue-border: var(--st-review-fg, #3E5C86);
+  --blue-text:   var(--st-review-fg, #3E5C86);
+}
+
+/* Dark — redesign.css sets [data-theme="dark"] on <html> */
+[data-theme="dark"] {
+  --bg-base:        var(--canvas);
+  --bg-primary:     var(--canvas);
+  --bg-surface:     var(--surface);
+  --bg-elevated:    var(--surface-raised);
+  --bg-input:       var(--surface);
+
+  --border:         var(--border);
+  --border-strong:  var(--border-strong);
+
+  --text-primary:   var(--text-primary);
+  --text-secondary: var(--text-secondary);
+  --text-muted:     var(--text-tertiary);
+
+  /* In dark, the ink surface is light — use gold as the primary action
+     so buttons stay legible and on-brand. */
+  --accent:         var(--gold);
+  --accent-hover:   var(--gold-strong, #D9B968);
+  --accent-text:    #1A1712;
+}
+
+/* Accent-tinted helpers referenced by the form’s Laura hints */
+:root .bg-tint,
+[data-theme="light"] .bg-tint { background: var(--gold-soft); }
+
+/* Card polish to match .la-card (rounded, soft border, cream surface) */
+.card {
+  background: var(--surface, #FFFFFF) !important;
+  border: 1px solid var(--border, #E7E2D8) !important;
+  border-radius: 16px !important;
+}
+
+/* Section heading uses the Editorial overline treatment */
+.section-heading {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  color: var(--text-tertiary, #8B857A) !important;
+}
+
+/* Primary/secondary buttons pick up the remapped --accent automatically;
+   just refine radius + weight to match the redesign buttons. */
+.btn-primary, .btn-secondary, .btn-ghost {
+  border-radius: 9px !important;
+  font-weight: 600 !important;
+}
+
+/* Inputs: gold focus ring instead of the old accent ring */
+.input:focus {
+  border-color: var(--gold, #B08D2F) !important;
+  box-shadow: 0 0 0 3px var(--gold-soft, #F3EAD3) !important;
+}
+
+/* Spinner used by PhotoUploader uploading state */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Alignment review · Excel row strip.
+   Overlay scrollbars hide the fact that TOOLS and the fields past it are
+   reachable, so the track is forced visible on this one element. */
+.excel-row-scroll { scrollbar-width: thin; scrollbar-color: #C2BDB6 #F0EFEC; }
+.excel-row-scroll::-webkit-scrollbar { height: 9px; }
+.excel-row-scroll::-webkit-scrollbar-track { background: #F0EFEC; border-radius: 99px; }
+.excel-row-scroll::-webkit-scrollbar-thumb { background: #C2BDB6; border-radius: 99px; }
+.excel-row-scroll::-webkit-scrollbar-thumb:hover { background: #A8A29A; }

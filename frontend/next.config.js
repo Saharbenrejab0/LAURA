@@ -1,10 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Backend API URL — set in Vercel env vars for prod
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
-  },
-}
 
-module.exports = nextConfig
+  // Hide the floating "N" dev indicator (Next.js Devtools)
+  // It's only visible in dev anyway, but cleaner during demos.
+  devIndicators: false,
+
+  async rewrites() {
+    return [];
+  },
+};
+
+module.exports = nextConfig;
