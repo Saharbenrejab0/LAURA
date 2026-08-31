@@ -488,33 +488,6 @@ def _slide_title(loa) -> str:
 
     return compute_display_title(loa)
 
-def _slide_title_LEGACY(loa) -> str:
-    """
-    Title construction per gold deck rules:
-      - Coop Advertising:  '{Customer} · {Activity}' (customer first)
-      - Sponsorship:       '{Brand}: {Subject}' (subject from description if any)
-      - Events / Medical:  '{Activity Type}'  (e.g. 'EL Roadshows Italy – N2 2026')
-      - Default:           '{Activity Type}: {Brand}'  (e.g. 'Seasonal Visibility: HB & LB')
-    """
-    activity = (loa.get("activity_type") or "").strip()
-    brand    = _format_brands(loa.get("brand"))
-    customer = loa.get("customer") or ""
-
-    # Pretty mapping for activity-as-title
-    activity_pretty = {
-        "Seasonal Visibility":  "Seasonal Visibility",
-        "Permanent Visibility": "Permanent Visibility",
-    }.get(activity, activity)
-
-    if activity == "Coop Advertising" and customer:
-        return f"{customer} · {activity_pretty}"
-
-    if brand:
-        return f"{activity_pretty}: {brand}"
-
-    return activity_pretty or "LOA"
-
-
 def _render_title(slide, loa, page_no=None):
     """Large bold black title below the top tags."""
     title = _slide_title(loa)
