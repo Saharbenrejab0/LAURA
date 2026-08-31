@@ -7,17 +7,30 @@
 
 ## TL;DR
 
-Laura is a **text-to-SQL chatbot** built on Anthropic's Claude API (`claude-sonnet-4-6`). She does three things:
+Laura is a **router over two retrieval strategies**, built on Anthropic's Claude API
+(`claude-sonnet-4-6`). A cheap classifier call picks the tool, then one of these runs:
 
 1. **Proactive alerts** on individual LOAs — pure Python rules, zero AI calls, instant
 2. **Comment summary** when reviewers ask for a recap — one Claude call
-3. **Historical data Q&A** — two Claude calls per question (one to write SQL, one to phrase the answer)
+3. **`stats` — text-to-SQL** — two Claude calls (one to write SQL, one to phrase the answer).
+   Best for aggregates: counts, sums, averages, "how many", "total spend by country".
+4. **`deep_search` — hybrid RAG** — SQL pre-filter + pgvector cosine similarity + a
+   re-rank pass, then one Claude call to answer over the retrieved LOAs. Best for
+   semantic questions: "find campaigns like this one", "what have we done for Ray-Ban
+   in DACH".
 
-She does **not** use embeddings, RAG, vector search, or fine-tuning. She does **not** remember previous messages in a conversation. Both of those are planned for Sprint 7-8.
+She **does** use embeddings and vector search — 2,712 of 2,757 LOAs are embedded — and she
+**does** receive conversation history, so follow-ups like *"and in Italy?"* work. Neither is
+a planned future item; both are live. She does not use fine-tuning.
+
+> **Correcting an earlier version of this document.** It described Laura as a pure
+> text-to-SQL chatbot and listed semantic similarity and conversation memory as unbuilt
+> Sprint 7 work. Both shipped. Text-to-SQL is still live and still correct as written
+> below — it is now the `stats` branch of a router, not the whole system.
 
 ---
 
-## 1. The three capabilities
+## 1. The four capabilities
 
 ### Capability 1 — Proactive alerts (no AI)
 
@@ -149,6 +162,80 @@ Claude returns the human-readable answer that lands in the chat bubble.
 
 ---
 
+### The router — which tool runs
+
+`_detect_tool()` (`backend/api/chat.py:123-132`) makes one cheap Claude call
+(`max_tokens=10`) against `_ROUTER_SYSTEM_PROMPT` and expects one of `stats`,
+`deep_search`, or `summarize`. Anything else — or any exception — falls back to
+`stats`. The caller can bypass the classifier entirely by passing `tool` in the
+request body.
+
+### Capability 4 — Deep search, hybrid RAG (2 Claude calls)
+
+**Endpoints:** the `deep_search` branch of `POST /chat/ask` (`chat.py:428`) and
+`POST /loa/{id}/chat/ask` (`chat.py:347`), both calling `ask_rag()` in
+`backend/engines/rag.py`.
+
+Three stages, only two of which touch Claude:
+
+#### Stage 1 — `extract_filters()` (1 Claude call)
+
+Claude turns the question into structured filters (brand, country, cluster,
+activity_type, vendor, budget range) plus a free-text `semantic_query`. It is
+**follow-up aware**: prior turns are passed in, so *"and in Italy?"* inherits the
+brand and activity from the previous question instead of being read literally.
+
+#### Stage 2 — `hybrid_search()` (no AI)
+
+This is the "hybrid" in hybrid RAG — a SQL pre-filter **and** a vector search, not
+either alone:
+
+1. **SQL pre-filter.** The extracted filters become `ILIKE` conditions, always
+   anchored on `embedding IS NOT NULL` (`rag.py:216-217`). Activity types are matched
+   against both the `UPPER_SNAKE` code and a de-snaked variant, because the two
+   importers disagree (see the currency/activity notes in the database audit).
+2. **Vector search.** The `semantic_query` is embedded locally with
+   `multilingual-e5-large` (1024-dim, sentence-transformers) using the e5 `"query: "`
+   prefix convention and normalised embeddings. Postgres then ranks survivors by
+   **cosine distance** via pgvector's `<=>` operator (`rag.py:277-280`).
+3. **Re-rank.** `_rerank()` (`rag.py:193-212`) recomputes a composite score —
+   `similarity + 0.5·brand + 0.2·activity + 0.15·vendor` token-match bonuses — to stop a
+   semantically-near-but-wrong entity ("Ray-Ban Meta") outranking the exact match
+   ("Ray-Ban") on raw vector distance alone.
+
+Default `top_k` is **8**. That is the whole point of the design: Claude sees ~8 LOAs,
+never the full 2,757-row table.
+
+#### Stage 3 — `generate_answer()` (1 Claude call)
+
+Claude answers over the retrieved rows and cites them. `ask_rag()` returns
+`answer`, `loa_count`, `filters_used`, `sources` (id / loa_number / brand per cited
+LOA), and `timing`. The frontend renders `sources` as citations under the answer.
+
+#### Embedding coverage — a real operational caveat
+
+Stage 2 hard-filters on `embedding IS NOT NULL`, so **an un-embedded LOA is invisible
+to deep search** — it cannot be retrieved, and its absence is silent. As of
+2026-08-31, **2,712 of 2,757 LOAs are embedded (45 missing)**. Backfill with
+`scripts/vectorize_loas.py`. Note `stats` is unaffected: text-to-SQL queries the table
+directly and sees all rows.
+
+#### Row-level scope is enforced on both paths
+
+A non-admin's cluster scope is applied before retrieval, not after: `deep_search`
+receives a `user_scope` argument, and `stats` gets both a prompt-level `scope_hint` and
+a post-hoc `_inject_scope_into_sql()` rewrite (`chat.py:437-448`). Do not treat the
+prompt hint as the security boundary — the SQL injection-of-scope is what actually
+enforces it.
+
+#### Every question is logged
+
+`_log_rag_query()` writes question, tool, history length, SQL, sources, error and
+total latency to the `rag_log` table for every call on both paths. That table is the
+place to look when someone reports a bad answer.
+
+---
+
 ## 2. What Claude sees about your data
 
 This is the single most important section. Read it twice.
@@ -257,14 +344,16 @@ User on `/loa/4a5263bb-...` types: **"What's the average budget for Events in Fr
 ### Laura struggles with these
 
 - **Semantic similarity**: *"Find LOAs similar to this one"* — there is no embedding index, so she can only match exact column values. She has no concept of "similar" beyond filtering.
-- **Multi-turn context**: *"And in Italy?"* after asking *"How many in France?"* — the backend receives only the latest message. Claude does not see previous turns. She will probably treat the second question literally and may return nonsense.
+- ~~**Multi-turn context**~~ — **fixed.** `history` is sent on every request and threaded
+  into all three paths (`_history_to_dicts`, `chat.py:135-138`); `extract_filters()` is
+  explicitly follow-up aware. *"And in Italy?"* now inherits the prior turn's filters.
 - **Reasoning about NULLs in historical data**: 1332 historical LOAs have NULL `description` and `kpi`. Questions like *"which LOAs mention sustainability?"* will mostly miss because the historical text isn't there.
 - **Activity type ambiguity**: historical data uses enum codes like `TM_SEASONAL`, `COOP_ADV`; new LAURA-created LOAs use display names like `Seasonal Visibility`, `Coop Advertising`. The prompt tells Claude to search both, but she sometimes uses only one form.
 - **Cross-table joins**: she cannot read `comments`, `users`, `audit_logs`, etc. unless those tables are explicitly added to the schema block.
 
 ---
 
-## 6. What's missing for the Thibault vision
+## 6. The Thibault vision — what shipped, what's left
 
 In Meeting 4, Thibault said:
 
@@ -274,29 +363,36 @@ In Meeting 4, Thibault said:
 
 To deliver that, three pieces are missing from the current architecture:
 
-### Missing piece 1 — Semantic similarity (Sprint 7)
+### ~~Missing piece 1 — Semantic similarity~~ ✅ SHIPPED
 
-Add a `pgvector` column on the `loas` table containing embeddings of `description + detail + activity_type + brand`. On each LOA save, compute the embedding via OpenAI or Anthropic embedding API. Then "find similar LOAs" becomes a `ORDER BY embedding <-> :query_embedding` SQL query.
+Built, and built differently from the sketch below it. Embeddings are computed
+**locally** with `multilingual-e5-large` via sentence-transformers — no OpenAI or
+Anthropic embedding API, so no per-embedding cost and no data leaving the host. Ranking
+uses **cosine** distance (`<=>`), not L2 (`<->`), and adds a re-rank pass on top. See
+*Capability 4* above. Coverage: 2,712 / 2,757 LOAs.
 
-Once that exists, Laura can answer *"find similar campaigns to this one"* by returning a ranked list of LOAs with similarity scores.
+### ~~Missing piece 2 — Conversation memory~~ ✅ SHIPPED
 
-### Missing piece 2 — Conversation memory (Sprint 7 small task)
+The frontend ships history with each request and the backend threads it through the
+router, text-to-SQL, and RAG paths. The token-cost concern noted below was real but is
+mitigated by `deep_search` sending only ~8 retrieved LOAs rather than wide result sets.
 
-Currently each user message goes to Claude alone. To enable *"and in Italy?"* follow-ups, the frontend needs to send the full conversation history with each request, and the backend needs to pass it to Claude. The frontend already stores sessions in localStorage — we just don't ship them to the backend yet.
+### ~~Missing piece 3 — Voice input~~ ✅ SHIPPED (Web Speech API)
 
-This is a one-day task. The reason it isn't done is that it doubles the token cost per question. With sessions of 5-10 turns, costs grow fast.
+`VoiceInput.tsx` uses the browser-native `SpeechRecognition` / `webkitSpeechRecognition`
+API (lines 17, 28) and is wired into three fields on the LOA form — Description, Detail,
+and KPI (`loa/new/page.tsx:1034, 1048, 1052`). The Whisper option was not taken, so
+transcription quality is whatever the browser provides and **Firefox has no support** —
+budget for a fallback if that matters.
 
-### Missing piece 3 — Voice input (Sprint 8)
+### Missing piece 4 — Auto-fill bridge 🟡 BACKEND ONLY
 
-Two options:
-- **Web Speech API** (free, browser-native, no backend changes) — good enough for the demo
-- **OpenAI Whisper** (paid, more accurate, works on any audio) — production-grade
-
-The UI is already designed for it — the LauraChat already has a voice button and a fullscreen orb mode wired (currently a stub). Connecting the actual transcription is the work.
-
-### Missing piece 4 — Auto-fill bridge (Sprint 8)
-
-When user is on `/loa/new` and asks Laura *"fill this with Roland-Garros 2027 numbers"*, Laura should return structured field updates that pre-populate the form. The architecture for this exists already (the page detects route context, the provider has `loaContextId`), but the backend doesn't yet return structured fill data — only natural-language answers.
+Half-built, and the half that exists has no consumer. `POST /loa/{loa_id}/suggest-fills`
+is implemented (`backend/api/suggest_fills.py:41`) and proposes values per empty field
+from a pool of comparable LOAs. **No frontend code calls it** — a grep across
+`frontend/src` for `suggest-fills` returns nothing. The remaining work is entirely UI:
+call the endpoint from the LOA form and render the proposals as accept/reject
+suggestions.
 
 ---
 
