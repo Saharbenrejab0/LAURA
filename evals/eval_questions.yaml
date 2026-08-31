@@ -1,0 +1,530 @@
+# ═════════════════════════════════════════════════════════════════════════
+# LAURA RAG Evals — 50 questions across 5 categories
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Each eval has:
+#   id                       Unique identifier
+#   category                 structured | semantic | hybrid | memory | adversarial
+#   question                 The user-facing question
+#   tool                     Expected engine: deep_search | stats | summarize
+#   expected_filters         (Optional) Filters the extractor should produce
+#   expected_sources_where   (Optional) At least one source must match these fields
+#   expected_answer_mentions (Optional) Answer should mention these keywords
+#   expected_answer_avoids   (Optional) Answer should NOT mention these words
+#   history                  (Optional) Previous conversation for memory tests
+#   notes                    (Optional) Human notes on what this tests
+#
+# Scoring: each eval is scored on 4 criteria, weighted:
+#   filter_accuracy    (30%)  — filters extracted match expected
+#   source_relevance   (30%)  — retrieved sources match expected
+#   answer_quality     (30%)  — answer mentions/avoids keywords correctly
+#   no_hallucination   (10%)  — no "Leave of Absence", no invented data
+
+# ─────────────────────────────────────────────────────────────────────────
+# 1. STRUCTURED — SQL-answerable aggregations
+# ─────────────────────────────────────────────────────────────────────────
+
+- id: struct_001
+  category: structured
+  question: "How many LOAs per cluster?"
+  tool: stats
+  expected_answer_mentions: ["EAST", "META", "ITALY", "cluster"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: struct_002
+  category: structured
+  question: "What is the total budget across all approved LOAs?"
+  tool: stats
+  expected_answer_mentions: ["EUR", "approved"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: struct_003
+  category: structured
+  question: "Top 5 brands by total spend"
+  tool: stats
+  expected_answer_mentions: ["Ray-Ban", "budget", "EUR"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: struct_004
+  category: structured
+  question: "Average budget for Events across EMEA"
+  tool: stats
+  expected_answer_mentions: ["Events", "EUR", "average"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: struct_005
+  category: structured
+  question: "How many LOAs are in draft status right now?"
+  tool: stats
+  expected_answer_mentions: ["draft"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: struct_006
+  category: structured
+  question: "What is the total FY 2026 budget for Italy?"
+  tool: stats
+  expected_answer_mentions: ["Italy", "EUR"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: struct_007
+  category: structured
+  question: "Count of LOAs per activity type"
+  tool: stats
+  expected_answer_mentions: ["TM_SEASONAL", "EVENTS"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: struct_008
+  category: structured
+  question: "Average cost per door for TM_SEASONAL"
+  tool: stats
+  expected_answer_mentions: ["door", "EUR", "TM_SEASONAL"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: struct_009
+  category: structured
+  question: "How many LOAs are OpEx vs CapEx?"
+  tool: stats
+  expected_answer_mentions: ["OpEx", "CapEx"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: struct_010
+  category: structured
+  question: "Total budget approved in DACH cluster"
+  tool: stats
+  expected_answer_mentions: ["DACH", "EUR"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 2. SEMANTIC — Pure vector search (no structured filter)
+# ─────────────────────────────────────────────────────────────────────────
+
+- id: sem_001
+  category: semantic
+  question: "Find campaigns similar to summer retail visibility"
+  tool: deep_search
+  expected_sources_where:
+    activity_type_contains: "SEASONAL"
+  expected_answer_mentions: ["visibility", "seasonal"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: sem_002
+  category: semantic
+  question: "What are typical KPIs for events?"
+  tool: deep_search
+  expected_filters:
+    activity_type: "Events"
+  expected_answer_mentions: ["events"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: sem_003
+  category: semantic
+  question: "Find activations focused on window displays"
+  tool: deep_search
+  expected_answer_mentions: ["window", "visibility"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: sem_004
+  category: semantic
+  question: "Campaigns targeting independent opticians"
+  tool: deep_search
+  expected_answer_mentions: ["Independents"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: sem_005
+  category: semantic
+  question: "Trade fair and industry conference LOAs"
+  tool: deep_search
+  expected_answer_mentions: ["trade fair", "event"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: sem_006
+  category: semantic
+  question: "Campaigns using cost-per-door benchmarks"
+  tool: deep_search
+  expected_answer_mentions: ["door"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: sem_007
+  category: semantic
+  question: "In-store activation campaigns with POS materials"
+  tool: deep_search
+  expected_sources_where:
+    activity_type_contains: "IN_STORE"
+  expected_answer_mentions: ["POS", "in-store"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: sem_008
+  category: semantic
+  question: "Coop advertising with local buying groups"
+  tool: deep_search
+  expected_sources_where:
+    activity_type_contains: "COOP"
+  expected_answer_mentions: ["coop", "buying"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: sem_009
+  category: semantic
+  question: "Medical affairs and ophthalmology events"
+  tool: deep_search
+  expected_answer_mentions: ["medical"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: sem_010
+  category: semantic
+  question: "Roadshow campaigns for premium brands"
+  tool: deep_search
+  expected_answer_mentions: ["roadshow"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 3. HYBRID — Filters + semantic search combined
+# ─────────────────────────────────────────────────────────────────────────
+
+- id: hybrid_001
+  category: hybrid
+  question: "Ray-Ban events in Italy around 100k"
+  tool: deep_search
+  expected_filters:
+    brand: "Ray-Ban"
+    country: "Italy"
+    activity_type: "Events"
+  expected_sources_where:
+    brand_contains: "Ray-Ban"
+    country: "Italy"
+  expected_answer_mentions: ["Ray-Ban", "Italy"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: hybrid_002
+  category: hybrid
+  question: "Oakley seasonal campaigns in DACH under 50k"
+  tool: deep_search
+  expected_filters:
+    brand: "Oakley"
+    cluster: "DACH"
+    budget_max: 50000
+  expected_answer_mentions: ["Oakley"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: hybrid_003
+  category: hybrid
+  question: "Chanel visibility campaigns in France"
+  tool: deep_search
+  expected_filters:
+    brand: "Chanel"
+    country: "France"
+  expected_answer_mentions: ["Chanel"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: hybrid_004
+  category: hybrid
+  question: "High budget events over 300k in UK"
+  tool: deep_search
+  expected_filters:
+    country: "UK"
+    budget_min: 300000
+    activity_type: "Events"
+  expected_answer_mentions: ["UK", "EUR"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: hybrid_005
+  category: hybrid
+  question: "Transitions lens campaigns in Netherlands"
+  tool: deep_search
+  expected_filters:
+    brand: "Transitions"
+    country: "Netherlands"
+  expected_answer_mentions: ["Transitions"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: hybrid_006
+  category: hybrid
+  question: "Ray-Ban roadshow campaigns"
+  tool: deep_search
+  expected_filters:
+    brand: "Ray-Ban"
+  expected_answer_mentions: ["Ray-Ban"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: hybrid_007
+  category: hybrid
+  question: "Trade incentive programs in Iberia between 20k and 80k"
+  tool: deep_search
+  expected_filters:
+    cluster: "IBERIA"
+    budget_min: 20000
+    budget_max: 80000
+  expected_answer_mentions: ["Iberia"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: hybrid_008
+  category: hybrid
+  question: "Prada luxury events with over 100 doors"
+  tool: deep_search
+  expected_filters:
+    brand: "Prada"
+    activity_type: "Events"
+  expected_answer_mentions: ["Prada"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: hybrid_009
+  category: hybrid
+  question: "Essilor lens campaigns in France FY 2025"
+  tool: deep_search
+  expected_filters:
+    brand: "Essilor"
+    country: "France"
+  expected_answer_mentions: ["Essilor"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: hybrid_010
+  category: hybrid
+  question: "Sponsorship campaigns in EAST cluster"
+  tool: deep_search
+  expected_filters:
+    cluster: "EAST"
+    activity_type: "Sponsorship"
+  expected_answer_mentions: ["sponsorship", "EAST"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 4. MEMORY — Multi-turn with context carry-over
+# ─────────────────────────────────────────────────────────────────────────
+
+- id: mem_001
+  category: memory
+  question: "and for Italy?"
+  tool: deep_search
+  history:
+    - role: user
+      content: "What are typical budgets for events?"
+    - role: assistant
+      content: "Event budgets range from EUR 10,000 for small selling events to EUR 500,000 for large conventions like the ENVISION Summit."
+  expected_filters:
+    activity_type: "Events"
+    country: "Italy"
+  expected_answer_mentions: ["Italy"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: mem_002
+  category: memory
+  question: "What about seasonal ones?"
+  tool: deep_search
+  history:
+    - role: user
+      content: "What are typical KPIs for events?"
+    - role: assistant
+      content: "Events KPIs typically include attendance, sell-out uplift, and door activation rates."
+  expected_filters:
+    activity_type: "TM_SEASONAL"
+  expected_answer_mentions: ["seasonal"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: mem_003
+  category: memory
+  question: "And for Ray-Ban specifically?"
+  tool: deep_search
+  history:
+    - role: user
+      content: "Find campaigns in Italy"
+    - role: assistant
+      content: "I found 8 campaigns in Italy across multiple brands and activity types."
+  expected_filters:
+    country: "Italy"
+    brand: "Ray-Ban"
+  expected_answer_mentions: ["Ray-Ban", "Italy"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: mem_004
+  category: memory
+  question: "top 3?"
+  tool: deep_search
+  history:
+    - role: user
+      content: "Show me Oakley campaigns in DACH"
+    - role: assistant
+      content: "Oakley has multiple campaigns in DACH ranging from EUR 10,000 to EUR 195,000."
+  expected_filters:
+    brand: "Oakley"
+    cluster: "DACH"
+  expected_answer_mentions: ["Oakley"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: mem_005
+  category: memory
+  question: "which ones are over 100k?"
+  tool: deep_search
+  history:
+    - role: user
+      content: "Find Chanel campaigns in UK"
+    - role: assistant
+      content: "Chanel has several campaigns in UK with budgets ranging from EUR 11,500 to EUR 350,000."
+  expected_filters:
+    brand: "Chanel"
+    country: "UK"
+    budget_min: 100000
+  expected_answer_mentions: ["Chanel"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: mem_006
+  category: memory
+  question: "in France?"
+  tool: deep_search
+  history:
+    - role: user
+      content: "Show summer visibility campaigns"
+    - role: assistant
+      content: "Summer visibility campaigns typically run from June to August with in-store activation and POS materials."
+  expected_filters:
+    country: "France"
+  expected_answer_mentions: ["France"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: mem_007
+  category: memory
+  question: "and their KPIs?"
+  tool: deep_search
+  history:
+    - role: user
+      content: "Find Ray-Ban events in Italy"
+    - role: assistant
+      content: "Ray-Ban Italy events include the Frames N2 National Roadshow at EUR 330,000."
+  expected_filters:
+    brand: "Ray-Ban"
+    country: "Italy"
+    activity_type: "Events"
+  expected_answer_mentions: ["KPI", "Ray-Ban"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: mem_008
+  category: memory
+  question: "compare to Italy"
+  tool: deep_search
+  history:
+    - role: user
+      content: "What are seasonal campaigns in France?"
+    - role: assistant
+      content: "France has multiple seasonal campaigns including Ray-Ban visibility with 220 doors and Essilor Eyezen at 300 doors."
+  expected_filters:
+    activity_type: "TM_SEASONAL"
+    country: "Italy"
+  expected_answer_mentions: ["Italy", "France"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: mem_009
+  category: memory
+  question: "any over 200k?"
+  tool: deep_search
+  history:
+    - role: user
+      content: "Find Multibrand LOAs in UK"
+    - role: assistant
+      content: "UK has several Multibrand LOAs including the ENVISION Summit at EUR 500,000."
+  expected_filters:
+    brand: "Multibrand"
+    country: "UK"
+    budget_min: 200000
+  expected_answer_mentions: ["UK"]
+  expected_answer_avoids: ["Leave of Absence"]
+
+- id: mem_010
+  category: memory
+  question: "and what about Nordics instead?"
+  tool: deep_search
+  history:
+    - role: user
+      content: "Ray-Ban campaigns in Italy"
+    - role: assistant
+      content: "Ray-Ban Italy campaigns focus on seasonal visibility and roadshows."
+  expected_filters:
+    brand: "Ray-Ban"
+    cluster: "NORTH"
+  expected_answer_mentions: ["Ray-Ban"]
+  expected_answer_avoids: ["Leave of Absence", "Italy"]
+  notes: "'instead' should REPLACE country, not add to it"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 5. ADVERSARIAL — Traps, typos, ambiguous phrasing
+# ─────────────────────────────────────────────────────────────────────────
+
+- id: adv_001
+  category: adversarial
+  question: "What is the LOA balance for John?"
+  tool: deep_search
+  expected_answer_avoids: ["Leave of Absence", "employee leave", "vacation"]
+  notes: "TRAP: 'LOA balance for John' sounds like HR Leave of Absence. Laura must recognize LOA as Letter of Authorization and answer accordingly (or clarify)."
+
+- id: adv_002
+  category: adversarial
+  question: "raybann events itali"
+  tool: deep_search
+  expected_filters:
+    brand: "Ray-Ban"
+    country: "Italy"
+    activity_type: "Events"
+  expected_answer_mentions: ["Ray-Ban", "Italy"]
+  expected_answer_avoids: ["Leave of Absence"]
+  notes: "TYPO: Should still extract Ray-Ban, Italy, Events despite typos"
+
+- id: adv_003
+  category: adversarial
+  question: "compare oakley vs raybon in dach"
+  tool: deep_search
+  expected_answer_mentions: ["Oakley", "Ray-Ban"]
+  expected_answer_avoids: ["Leave of Absence"]
+  notes: "TYPO: 'raybon' should be understood as Ray-Ban"
+
+- id: adv_004
+  category: adversarial
+  question: "show me the stuff"
+  tool: deep_search
+  expected_answer_avoids: ["Leave of Absence"]
+  notes: "AMBIGUOUS: Vague question. Laura should either ask for clarification or return sensible default results."
+
+- id: adv_005
+  category: adversarial
+  question: "How much did we spend on employee leaves last year?"
+  tool: stats
+  expected_answer_avoids: ["employee leave", "vacation", "sick leave"]
+  notes: "TRAP: User is testing if Laura confuses LOA with Leave of Absence. Should either clarify or answer only about LOA marketing budgets."
+
+- id: adv_006
+  category: adversarial
+  question: "What did LOA 999999999 cost?"
+  tool: deep_search
+  expected_answer_avoids: ["Leave of Absence"]
+  notes: "EDGE: Non-existent LOA number. Laura should say 'no LOA found' or similar, not invent."
+
+- id: adv_007
+  category: adversarial
+  question: "give me all data"
+  tool: stats
+  expected_answer_avoids: ["Leave of Absence"]
+  notes: "AMBIGUOUS: Should not dump the whole DB. Should ask for clarification or give a summary."
+
+- id: adv_008
+  category: adversarial
+  question: "Ray-Ban Ray-Ban Ray-Ban budget"
+  tool: deep_search
+  expected_filters:
+    brand: "Ray-Ban"
+  expected_answer_mentions: ["Ray-Ban", "EUR"]
+  expected_answer_avoids: ["Leave of Absence"]
+  notes: "REPETITION: Redundant terms should not confuse the filter extractor."
+
+- id: adv_009
+  category: adversarial
+  question: "budget budget budget"
+  tool: stats
+  expected_answer_avoids: ["Leave of Absence"]
+  notes: "GARBAGE: No real question. Should ask what specifically."
+
+- id: adv_010
+  category: adversarial
+  question: "Compare LOA approval times to industry standard sick leave duration"
+  tool: deep_search
+  expected_answer_avoids: ["sick leave", "employee leave", "vacation"]
+  notes: "TRAP: Explicitly mentions 'sick leave' to try to trigger Leave of Absence context. Laura must stay focused on marketing LOAs."

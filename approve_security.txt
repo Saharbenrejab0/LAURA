@@ -1,0 +1,63 @@
+23: from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+62: from backend.api.permission_middleware import require_permission
+143: def validate_category(cls, v: list[str]):
+154: def validate_cluster(cls, v: str):
+161: def validate_activity_type(cls, v: str):
+168: def validate_event_type(cls, v: Optional[str]):
+175: def validate_event_purpose(cls, v: Optional[str]):
+182: def validate_cot(cls, v: str):
+189: def validate_capex_opex(cls, v: str):
+196: def validate_adv_selling(cls, v: str):
+336: db: Session = Depends(get_db),
+337: user: User = Depends(get_current_user),
+382: db: Session = Depends(get_db),
+383: user: User = Depends(get_current_user),
+419: async def export_approved_excel(
+420: db: Session = Depends(get_db),
+447: async def create_loa(body: LOACreate, db: Session = Depends(get_db)):
+468: db: Session = Depends(get_db),
+469: user: User = Depends(get_current_user),
+477: raise HTTPException(status_code=403, detail="No role assigned")
+481: raise HTTPException(status_code=403, detail="Draft is private to its author")
+483: raise HTTPException(status_code=403, detail="LOA outside your scope")
+492: db: Session = Depends(get_db),
+493: user: User = Depends(get_current_user),
+494: _: dict = Depends(require_permission('edit')),
+522: db: Session = Depends(get_db),
+523: user: User = Depends(get_current_user),
+548: db: Session = Depends(get_db),
+549: user: User = Depends(get_current_user),
+602: Verify user has the required permission to act on this LOA.
+608: required_permission = 'validate'
+610: required_permission = 'advance_phase'
+619: raise HTTPException(status_code=403, detail="No role assigned")
+634: raise HTTPException(status_code=403, detail="No access at this workflow stage.")
+639: if required_permission in perm_codes:
+640: return required_permission
+644: detail=f"You need '{required_permission}' permission. "
+651: async def validate_workflow_step(
+653: db: Session = Depends(get_db),
+654: user: User = Depends(get_current_user),
+761: async def approve_loa(
+763: db: Session = Depends(get_db),
+764: user: User = Depends(get_current_user),
+771: async def reject_loa(
+774: db: Session = Depends(get_db),
+775: user: User = Depends(get_current_user),
+785: raise HTTPException(status_code=422, detail="A non-empty reason is required.")
+832: db: Session = Depends(get_db),
+833: user: User = Depends(get_current_user),
+844: raise HTTPException(status_code=403, detail="No role assigned")
+859: raise HTTPException(status_code=403, detail="No access at this stage.")
+864: raise HTTPException(status_code=403, detail="You need at least comment permission.")
+915: db: Session = Depends(get_db),
+916: user: User = Depends(get_current_user),
+948: db: Session = Depends(get_db),
+949: user: User = Depends(get_current_user),
+981: async def validate_loa(loa_id: str, db: Session = Depends(get_db)):
+994: db: Session = Depends(get_db),
+995: user: User = Depends(get_current_user),
+1003: raise HTTPException(status_code=403, detail="No role assigned")
+1039: async def download_loa_pptx(loa_id: str, db: Session = Depends(get_db)):
+1058: async def validate_description(body: DescriptionValidateRequest):
+1087: db: Session = Depends(get_db),
