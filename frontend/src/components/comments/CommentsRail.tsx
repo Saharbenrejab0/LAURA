@@ -11,7 +11,8 @@
  * When focused on a specific field, shows only that field's comments.
  * When opened globally, shows all.
  *
- * Includes CommentComposer at the bottom.
+ * CommentComposer sits at the TOP, above the thread list — you should not
+ * have to scroll past every existing comment to reach the box.
  */
 
 import { useEffect, useState } from 'react';
@@ -130,6 +131,19 @@ export default function CommentsRail({
           }}>×</button>
         </div>
 
+        {/* Composer — pinned at the top, above the thread list.
+            A reader who opens the rail to say something should not have to
+            scroll past every existing comment to find the box. The list below
+            is the scrolling region; this stays put. */}
+        <div style={{ padding: space[4], borderBottom: `1px solid ${color.border.soft}` }}>
+          <CommentComposer
+            loaId={loaId}
+            anchorType={fieldKey ? 'field' : 'loa'}
+            fieldKey={fieldKey}
+            onCreated={fetchComments}
+          />
+        </div>
+
         {/* Comments body - scrollable */}
         <div style={{
           flex: 1, overflowY: 'auto', padding: space[4],
@@ -171,15 +185,6 @@ export default function CommentsRail({
           )}
         </div>
 
-        {/* Composer - fixed at bottom */}
-        <div style={{ padding: space[4] }}>
-          <CommentComposer
-            loaId={loaId}
-            anchorType={fieldKey ? 'field' : 'loa'}
-            fieldKey={fieldKey}
-            onCreated={fetchComments}
-          />
-        </div>
       </aside>
 
       <style>{`
